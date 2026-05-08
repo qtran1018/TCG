@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+mobile/node_modules/
+
+# Expo
+mobile/.expo/
+mobile/dist/
+
+# Android build artifacts
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+
+# Python
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.venv/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.env.local
+
+# Docker volumes
+pgdata/
+redisdata/
+pgadmindata/
+
+# OS
+.DS_Store
+Thumbs.db
