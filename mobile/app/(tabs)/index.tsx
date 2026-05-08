@@ -11,24 +11,26 @@ import { LanguageToggle } from "@/components/UI/LanguageToggle";
 import { ScanTypeToggle } from "@/components/UI/ScanTypeToggle";
 import { useOCR } from "@/hooks/useOCR";
 import { useCardSearch } from "@/hooks/useCardSearch";
+import { useMultiCardScan } from "@/hooks/useMultiCardScan";
 import { useScanStore } from "@/store/scanStore";
 import { assessCardConfidence } from "@/utils/cardConfidence";
 import { COLORS } from "@/constants";
 
-type Mode = "camera" | "settings";
+type Mode = "camera" | "multi-camera" | "settings";
 
 export default function ScanScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("settings");
   const [certInput, setCertInput] = useState("");
 
-  const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText } =
+  const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText, setMultiScanResult } =
     useScanStore();
 
   const { recognize, isProcessing: isOcrProcessing, error: ocrError } = useOCR();
   const { searchByOCR, searchByCert, isSearching } = useCardSearch();
+  const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress } = useMultiCardScan();
 
-  const isLoading = isOcrProcessing || isSearching;
+  const isLoading = isOcrProcessing || isSearching || isMultiProcessing;
 
   const handleCapture = useCallback(
     async (uri: string) => {
@@ -61,6 +63,21 @@ export default function ScanScreen() {
     [recognize, searchByOCR, game, scanType, language, setLastOcrText, setLastSearchResult, router],
   );
 
+  const handleMultiCapture = useCallback(
+    async (uri: string) => {
+      const result = await multiScan(uri, game, language);
+      if (!result) return;
+      if (result.cards.length === 0) {
+        Alert.alert("No Cards Found", "Couldn't identify any cards in this photo.");
+        return;
+      }
+      setMultiScanResult(result);
+      setMode("settings");
+      router.push("/multi-results");
+    },
+    [multiScan, game, language, setMultiScanResult, router],
+  );
+
   const handlePSALookup = useCallback(async () => {
     if (!certInput.trim()) {
       Alert.alert("Enter Cert Number", "Please enter a PSA cert number.");
@@ -86,6 +103,18 @@ export default function ScanScreen() {
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
             <Text style={styles.backBtnText}>✕  Close Camera</Text>
           </TouchableOpacity>
+        </View>
+      ) : mode === "multi-camera" ? (
+        <View style={styles.cameraContainer}>
+          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} />
+          <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
+            <Text style={styles.backBtnText}>✕  Close Camera</Text>
+          </TouchableOpacity>
+          {isMultiProcessing && (
+            <View style={styles.multiProgressBanner}>
+              <Text style={styles.multiProgressText}>{multiProgress || "Processing..."}</Text>
+            </View>
+          )}
         </View>
       ) : (
         <KeyboardAvoidingView
@@ -134,19 +163,29 @@ export default function ScanScreen() {
                 </View>
               </Section>
             ) : (
-              <TouchableOpacity
-                style={[styles.scanBtn, isLoading && styles.btnDisabled]}
-                onPress={() => setMode("camera")}
-                disabled={isLoading}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.scanBtnText}>📷  Open Camera to Scan</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={[styles.scanBtn, isLoading && styles.btnDisabled]}
+                  onPress={() => setMode("camera")}
+                  disabled={isLoading}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.scanBtnText}>📷  Scan Single Card</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.multiScanBtn, isLoading && styles.btnDisabled]}
+                  onPress={() => setMode("multi-camera")}
+                  disabled={isLoading}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.multiScanBtnText}>🗂  Scan Multiple Cards</Text>
+                </TouchableOpacity>
+              </>
             )}
 
             {isLoading && (
               <Text style={styles.loadingText}>
-                {isOcrProcessing ? "Reading card text..." : "Searching database..."}
+                {isMultiProcessing ? multiProgress || "Processing..." : isOcrProcessing ? "Reading card text..." : "Searching database..."}
               </Text>
             )}
           </ScrollView>
@@ -216,6 +255,28 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   scanBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  multiScanBtn: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: "center",
+    marginTop: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.accent,
+  },
+  multiScanBtnText: { color: COLORS.accent, fontSize: 16, fontWeight: "700" },
   btnDisabled: { opacity: 0.5 },
   loadingText: { color: COLORS.textMuted, textAlign: "center", marginTop: 16, fontSize: 14 },
+  multiProgressBanner: {
+    position: "absolute",
+    bottom: 120,
+    left: 24,
+    right: 24,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: "center",
+  },
+  multiProgressText: { color: "#fff", fontSize: 14, fontWeight: "600" },
 });

@@ -89,6 +89,26 @@ class PSACertResult(BaseModel):
     price: PriceOut | None = None
 
 
+class BatchQueryItem(BaseModel):
+    ocr_text: str
+    game: str = "pokemon"
+    language: str = "en"
+
+
+class BatchSearchRequest(BaseModel):
+    queries: list[BatchQueryItem]
+    scan_type: str = "raw"
+
+
+class BatchSearchItem(BaseModel):
+    candidates: list[CardOut]
+    query_used: str
+
+
+class BatchSearchResult(BaseModel):
+    results: list[BatchSearchItem]
+
+
 class HistoryEntry(BaseModel):
     id: int
     game: str

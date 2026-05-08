@@ -58,6 +58,15 @@ export interface SearchResult {
   query_used: string;
 }
 
+export interface BatchSearchItem {
+  candidates: CardOut[];
+  query_used: string;
+}
+
+export interface BatchSearchResult {
+  results: BatchSearchItem[];
+}
+
 export interface CardWithPrice {
   card: CardOut;
   price?: PriceOut;
@@ -129,6 +138,17 @@ export const api = {
   }): Promise<{ id: number }> {
     const { data } = await client.post<{ id: number }>("/cards/history", null, {
       params: entry,
+    });
+    return data;
+  },
+
+  async batchSearch(
+    queries: Array<{ ocr_text: string; game: string; language: string }>,
+    scan_type: string,
+  ): Promise<BatchSearchResult> {
+    const { data } = await client.post<BatchSearchResult>("/search/batch", {
+      queries,
+      scan_type,
     });
     return data;
   },

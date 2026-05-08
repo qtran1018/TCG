@@ -1,6 +1,6 @@
 // Card region detection utilities.
 // filterBlocksToCardZone: single-card mode — keeps only blocks inside the scan overlay zone.
-// detectCardRegions: multi-card mode (future) — clusters all blocks into card-shaped groups.
+// detectCardRegions: multi-card mode — clusters blocks into card-shaped groups.
 
 export interface OCRBlock {
   text: string;
@@ -21,13 +21,6 @@ const FRAME_Y_OFFSET_PX = 40;
 /**
  * Single-card mode: filters OCR blocks to only those whose center falls
  * within the scan overlay zone, correctly mapped to image coordinates.
- *
- * The camera captures at a different aspect ratio than the screen (typically
- * 4:3 vs ~9:20). The preview uses cover scaling — the image is scaled so its
- * shorter axis fills the screen, and the overflow is cropped. We reverse that
- * transform to find where the overlay frame sits inside the captured image.
- *
- * Falls back to all blocks if fewer than 2 survive filtering.
  */
 export function filterBlocksToCardZone(
   blocks: OCRBlock[],
@@ -36,21 +29,15 @@ export function filterBlocksToCardZone(
   screenW: number,
   screenH: number,
 ): OCRBlock[] {
-  // Cover scale: the image is scaled up until it fills the screen on both axes.
   const scale = Math.max(screenW / imgW, screenH / imgH);
-
-  // How many image pixels are hidden (cropped) on each side.
   const cropX = Math.max(0, (imgW * scale - screenW) / 2 / scale);
   const cropY = Math.max(0, (imgH * scale - screenH) / 2 / scale);
 
-  // Overlay frame in screen coordinates (mirrors ScanOverlay.tsx).
   const fsW = screenW * FRAME_W_FRACTION;
   const fsH = fsW * CARD_ASPECT;
   const fsX = (screenW - fsW) / 2;
   const fsY = (screenH - fsH) / 2 - FRAME_Y_OFFSET_PX;
 
-  // Map overlay frame from screen coords → image coords.
-  // screen point s maps to image point: cropX + s / scale
   const fiX = cropX + fsX / scale;
   const fiY = cropY + fsY / scale;
   const fiW = fsW / scale;
@@ -65,10 +52,11 @@ export function filterBlocksToCardZone(
   return filtered.length >= 2 ? filtered : blocks;
 }
 
-// ─── Multi-card helpers (used by detectCardRegions) ───────────────────────────
+// ─── Multi-card helpers ───────────────────────────────────────────────────────
 
-const TCG_ASPECT_MIN = 0.45;
-const TCG_ASPECT_MAX = 1.0;
+// TCG cards are portrait (W/H ≈ 0.71). Allow some tolerance for angle/perspective.
+const TCG_ASPECT_MIN = 0.40;
+const TCG_ASPECT_MAX = 1.10;
 const MIN_BLOCKS = 2;
 
 function blockCenter(b: OCRBlock) {
@@ -113,9 +101,106 @@ function clusterBlocks(blocks: OCRBlock[], threshold: number): OCRBlock[][] {
   return clusters;
 }
 
+function toRegion(cluster: OCRBlock[]): CardRegion {
+  const bb = boundingBoxOf(cluster);
+  const text = cluster
+    .slice()
+    .sort((a, b) => a.frame.top - b.frame.top)
+    .map((b) => b.text)
+    .join("\n");
+  return { blocks: cluster, boundingBox: bb, text };
+}
+
+function sortByCenter(regions: CardRegion[], cx: number, cy: number): CardRegion[] {
+  return regions.slice().sort((a, b) => {
+    const ad =
+      (a.boundingBox.left + a.boundingBox.width / 2 - cx) ** 2 +
+      (a.boundingBox.top + a.boundingBox.height / 2 - cy) ** 2;
+    const bd =
+      (b.boundingBox.left + b.boundingBox.width / 2 - cx) ** 2 +
+      (b.boundingBox.top + b.boundingBox.height / 2 - cy) ** 2;
+    return ad - bd;
+  });
+}
+
 /**
- * Multi-card mode: clusters all blocks by proximity and returns each
- * card-shaped cluster as a CardRegion, sorted closest-to-center first.
+ * Recursively splits a cluster of OCR blocks into card-shaped regions.
+ *
+ * If the cluster's bounding box is too wide (multiple side-by-side cards merged),
+ * it splits at the horizontal midpoint. If too tall (stacked cards), it splits at
+ * the vertical midpoint. Each half is then checked recursively.
+ *
+ * This avoids the gap-detection fragility: we don't need to find empty space
+ * between cards — we just keep splitting merged clusters until each piece has a
+ * card-shaped aspect ratio.
+ */
+function recursiveSplitCluster(
+  cluster: OCRBlock[],
+  imageWidth: number,
+  imageHeight: number,
+  depth: number,
+): CardRegion[] {
+  if (cluster.length < MIN_BLOCKS) return [];
+
+  const bb = boundingBoxOf(cluster);
+  const aspect = bb.width / bb.height;
+  const areaCoverage = (bb.width * bb.height) / (imageWidth * imageHeight);
+
+  if (areaCoverage < 0.008) return []; // too small to be a card
+
+  // Already card-shaped — accept.
+  if (aspect >= TCG_ASPECT_MIN && aspect <= TCG_ASPECT_MAX) {
+    return [toRegion(cluster)];
+  }
+
+  // Can't split further.
+  if (depth >= 4 || cluster.length < MIN_BLOCKS * 2) return [];
+
+  // Too wide: cards are side-by-side — split at horizontal midpoint.
+  if (aspect > TCG_ASPECT_MAX) {
+    const midX = bb.left + bb.width / 2;
+    const left = cluster.filter((b) => b.frame.left + b.frame.width / 2 <= midX);
+    const right = cluster.filter((b) => b.frame.left + b.frame.width / 2 > midX);
+    if (left.length >= MIN_BLOCKS && right.length >= MIN_BLOCKS) {
+      const results = [
+        ...recursiveSplitCluster(left, imageWidth, imageHeight, depth + 1),
+        ...recursiveSplitCluster(right, imageWidth, imageHeight, depth + 1),
+      ];
+      if (results.length > 0) return results;
+    }
+  }
+
+  // Too tall: cards are stacked — split at vertical midpoint.
+  if (aspect < TCG_ASPECT_MIN) {
+    const midY = bb.top + bb.height / 2;
+    const top = cluster.filter((b) => b.frame.top + b.frame.height / 2 <= midY);
+    const bottom = cluster.filter((b) => b.frame.top + b.frame.height / 2 > midY);
+    if (top.length >= MIN_BLOCKS && bottom.length >= MIN_BLOCKS) {
+      const results = [
+        ...recursiveSplitCluster(top, imageWidth, imageHeight, depth + 1),
+        ...recursiveSplitCluster(bottom, imageWidth, imageHeight, depth + 1),
+      ];
+      if (results.length > 0) return results;
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Multi-card mode: detects card-shaped regions in an image containing one or
+ * more TCG cards in any arrangement.
+ *
+ * Strategy:
+ * 1. Try progressive thresholds so that within-card blocks connect (threshold
+ *    must be >= the spacing between the card's own text blocks).
+ * 2. At each threshold, any cluster that is too wide or too tall for a single
+ *    card is recursively split at the spatial midpoint until each piece is
+ *    card-shaped.
+ * 3. The threshold pass that yields the most card-shaped regions wins.
+ *
+ * The recursive split replaces gap-detection (which breaks when background
+ * text fills the space between cards or when cards aren't axis-aligned).
  */
 export function detectCardRegions(
   blocks: OCRBlock[],
@@ -124,35 +209,50 @@ export function detectCardRegions(
 ): CardRegion[] {
   if (blocks.length === 0) return [];
 
-  const threshold = imageHeight * 0.25;
-  const clusters = clusterBlocks(blocks, threshold);
-  const imageCenterX = imageWidth / 2;
-  const imageCenterY = imageHeight / 2;
-  const regions: CardRegion[] = [];
+  const cx = imageWidth / 2;
+  const cy = imageHeight / 2;
+  const minDim = Math.min(imageWidth, imageHeight);
 
-  for (const cluster of clusters) {
-    if (cluster.length < MIN_BLOCKS) continue;
-    const bb = boundingBoxOf(cluster);
-    const aspect = bb.width / bb.height;
-    if (aspect < TCG_ASPECT_MIN || aspect > TCG_ASPECT_MAX) continue;
-    if ((bb.width * bb.height) / (imageWidth * imageHeight) < 0.02) continue;
+  const thresholds = [
+    minDim * 0.08,
+    minDim * 0.15,
+    minDim * 0.25,
+    minDim * 0.40,
+    minDim * 0.60,
+  ];
 
-    const text = cluster
-      .slice()
-      .sort((a, b) => a.frame.top - b.frame.top)
-      .map((b) => b.text)
-      .join("\n");
+  let bestRegions: CardRegion[] = [];
 
-    regions.push({ blocks: cluster, boundingBox: bb, text });
+  for (const threshold of thresholds) {
+    const clusters = clusterBlocks(blocks, threshold);
+    const regions: CardRegion[] = [];
+
+    for (const cluster of clusters) {
+      if (cluster.length < MIN_BLOCKS) continue;
+      const subRegions = recursiveSplitCluster(cluster, imageWidth, imageHeight, 0);
+      regions.push(...subRegions);
+    }
+
+    if (regions.length > bestRegions.length) {
+      bestRegions = regions;
+    }
   }
 
-  regions.sort((a, b) => {
-    const aDist = (a.boundingBox.left + a.boundingBox.width / 2 - imageCenterX) ** 2 +
-                  (a.boundingBox.top + a.boundingBox.height / 2 - imageCenterY) ** 2;
-    const bDist = (b.boundingBox.left + b.boundingBox.width / 2 - imageCenterX) ** 2 +
-                  (b.boundingBox.top + b.boundingBox.height / 2 - imageCenterY) ** 2;
-    return aDist - bDist;
-  });
+  if (bestRegions.length > 0) {
+    return sortByCenter(bestRegions, cx, cy);
+  }
 
-  return regions;
+  // Fallback: return the largest cluster regardless of aspect ratio —
+  // handles a single card filling the frame whose blocks are too sparse to
+  // form a clean card-shaped cluster.
+  const allClusters = clusterBlocks(blocks, minDim * 0.60);
+  const largest = allClusters
+    .filter((c) => c.length >= MIN_BLOCKS)
+    .sort((a, b) => {
+      const bba = boundingBoxOf(a);
+      const bbb = boundingBoxOf(b);
+      return bbb.width * bbb.height - bba.width * bba.height;
+    })[0];
+
+  return largest ? [toRegion(largest)] : [];
 }
