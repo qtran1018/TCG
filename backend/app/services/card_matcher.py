@@ -15,9 +15,19 @@ settings = get_settings()
 POKEMON_SET_NUM_RE = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})")
 ONEPIECE_CARD_NUM_RE = re.compile(r"(OP\d{2}-\d{3}|ST\d{2}-\d{3}|P-\d{3})", re.I)
 HP_RE = re.compile(r"\bHP\s*(\d+)\b", re.I)
+# Attack body text first words — if the line after a candidate name starts with
+# one of these, the candidate is an attack name, not the card name.
+_ATTACK_BODY_RE = re.compile(
+    r"^(put|this\s+attack|your\s+opponent|you\s+may|flip|discard|search|draw|"
+    r"choose|look\s+at|if\s+your|once\s+during|during\s+your|when\s+you|"
+    r"attach|move|switch|return|heal|remove|each\s+of|both\s+player|"
+    r"the\s+defending|does\s+\d+\s+damage)",
+    re.I,
+)
+
 # Terms that are never the card name
 _POKEMON_NON_NAME_RE = re.compile(
-    r"^(basi\w*|basic|stage\s*[12]|mega|vmax|vstar|vunion|"
+    r"^(basi\w*|basic|basig|basiq|[gb]asi[cgsq]|stage\s*[12]|mega|"
     r"weakness|resistance|retreat|damage|ability|trainer|item|"
     r"stadium|supporter|energy|water|fire|grass|lightning|psychic|"
     r"fighting|darkness|metal|fairy|colorless|dragon|"
@@ -28,28 +38,49 @@ _POKEMON_NON_NAME_RE = re.compile(
 
 
 def _find_pokemon_name(lines: list[str]) -> str | None:
-    """Return the first line that looks like a Pokémon name."""
-    for line in lines:
-        words = line.split()
-        # Name is 1–3 words
+    """Return the Pokémon name, anchored to the HP line.
+
+    The card name sits on the same row as HP (or 1-2 lines before it).
+    Attack names appear well after the HP line, so we stop searching there.
+    """
+    # Find the HP line — name must appear at or before it.
+    hp_idx = next((i for i, l in enumerate(lines) if HP_RE.search(l)), None)
+    # When HP is found, cap search at that line (name is always above/on it).
+    # When HP is absent (misread or OCR ordering differs), search all lines —
+    # attack-name guards below still reject flavour text and move names.
+    end = min(hp_idx + 1, 6) if hp_idx is not None else len(lines)
+
+    for i, line in enumerate(lines[:end]):
+        # Strip an inline HP value ("Lotad HP 40" → "Lotad")
+        clean = HP_RE.sub("", line).strip()
+        if not clean:
+            continue
+        # Strip leading non-name tokens ("BASIC Lotad" → "Lotad")
+        words = clean.split()
+        while words and _POKEMON_NON_NAME_RE.match(words[0]):
+            words = words[1:]
+        clean = " ".join(words)
+        if len(clean) < 3:
+            continue
+        words = clean.split()
         if not 1 <= len(words) <= 3:
             continue
-        # No digits
-        if any(c.isdigit() for c in line):
+        if any(c.isdigit() for c in clean):
             continue
-        # No punctuation except hyphens (Tapu-Koko, Mr. Mime needs a dot though)
-        if re.search(r"[,!?;:()/\\]", line):
+        if re.search(r"[.,!?;:()/\\']", clean):
             continue
-        # Must start with an uppercase letter
-        if not line[0].isupper():
+        if not clean[0].isupper():
             continue
-        # Reject all-caps short tokens (OCR stage labels like BASIG, PRE)
-        if line.replace(" ", "").isupper() and len(line) > 3:
+        if clean.replace(" ", "").isupper() and len(clean) > 3:
             continue
-        # Reject known non-name terms
         if any(_POKEMON_NON_NAME_RE.match(w) for w in words):
             continue
-        return line
+        # If the very next line is attack body text, this candidate is an attack
+        # name leaking from an adjacent card's crop — skip it.
+        if hp_idx is None and i + 1 < len(lines):
+            if _ATTACK_BODY_RE.match(lines[i + 1].strip()):
+                continue
+        return clean
     return None
 
 
@@ -58,14 +89,19 @@ def extract_card_hints(ocr_text: str, game: str, language: str) -> dict:
     lines = [l.strip() for l in ocr_text.split("\n") if l.strip()]
 
     if game == "pokemon":
-        m = POKEMON_SET_NUM_RE.search(ocr_text)
+        # Normalize common OCR digit substitutions before extracting card number.
+        # 'o'/'O' before digits → '0' (e.g. "o24/131" → "024/131")
+        # 'l'/'I' before digits → '1' (e.g. "l31" → "131")
+        normalized = re.sub(r'(?<!\w)[oO](?=\d)', '0', ocr_text)
+        normalized = re.sub(r'(?<!\w)[lI](?=\d)', '1', normalized)
+        m = POKEMON_SET_NUM_RE.search(normalized)
         if m:
             hints["card_number"] = m.group(1).lstrip("0") or "0"
             hints["set_total"] = m.group(2).lstrip("0") or "0"
         hp = HP_RE.search(ocr_text)
         if hp:
             hints["hp"] = hp.group(1)
-        name = _find_pokemon_name(lines)
+        name = _find_pokemon_name(lines[:4])
         if name:
             hints["probable_name"] = name
 
@@ -83,12 +119,10 @@ def build_search_query(hints: dict, game: str, language: str) -> str:
     """Returns a human-readable label for the query (used in API response only)."""
     if "probable_name" in hints:
         name = hints["probable_name"]
-        if game == "pokemon" and "card_number" in hints and "set_total" in hints:
-            return f"{name} {hints['card_number']}/{hints['set_total']}"
-        if game == "onepiece" and "card_number" in hints:
-            return f"{name} {hints['card_number']}"
+        if "card_number" in hints:
+            return f"{name} #{hints['card_number']}"
         return name
-    return hints.get("raw_text", "")[:60]
+    return "(unknown)"
 
 
 class CardMatcherService:
@@ -108,7 +142,7 @@ class CardMatcherService:
     ) -> tuple[list[Card], str]:
         hints = extract_card_hints(ocr_text, game, language)
         query = build_search_query(hints, game, language)
-        name_for_api = hints.get("probable_name") or query
+        name_for_api = hints.get("probable_name")
         logger.info("OCR hints: %s | query: %s", hints, query)
 
         cache_key = f"{game}:{language}:{query}"
@@ -122,7 +156,7 @@ class CardMatcherService:
 
         db_cards = await self._search_db(hints, game, language, db)
 
-        if len(db_cards) < 3:
+        if name_for_api and len(db_cards) < 3:
             api_cards = await self._search_external(name_for_api, game, language, db, hints)
             existing_ids = {c.id for c in db_cards}
             for ac in api_cards:
@@ -175,15 +209,17 @@ class CardMatcherService:
             if results:
                 return results
 
+        if name and card_number:
+            result = await db.execute(
+                stmt.where(Card.card_number.ilike(f"%{card_number}%")).limit(10)
+            )
+            results = list(result.scalars().all())
+            if results:
+                return results
+
         if name:
             result = await db.execute(
                 stmt.where(Card.name.ilike(f"%{name}%")).limit(10)
-            )
-            return list(result.scalars().all())
-
-        if card_number:
-            result = await db.execute(
-                stmt.where(Card.card_number.ilike(f"%{card_number}%")).limit(10)
             )
             return list(result.scalars().all())
 

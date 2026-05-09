@@ -1,0 +1,221 @@
+
+<style>
+  .search-bar { width: 100%; box-sizing: border-box; margin-bottom: 1rem; padding: 8px 12px; font-size: 14px; }
+  .poke-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+  .poke-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+  .poke-num { font-size: 11px; color: var(--color-text-tertiary); font-family: var(--font-mono); }
+  .poke-jp { font-size: 17px; font-weight: 500; color: var(--color-text-primary); }
+  .poke-en { font-size: 13px; color: var(--color-text-secondary); }
+  .type-badge { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: var(--border-radius-md); margin-top: 4px; font-weight: 500; }
+  .no-results { color: var(--color-text-secondary); font-size: 14px; padding: 1rem 0; }
+  .count-label { font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 10px; }
+</style>
+
+<h2 class="sr-only">Japanese to English Pokémon name reference table with search</h2>
+
+<input class="search-bar" type="text" id="search" placeholder="Search by Japanese or English name..." oninput="filterPokemon()" />
+<div class="count-label" id="count"></div>
+<div class="poke-grid" id="grid"></div>
+
+<script>
+const pokemon = [
+  {num:"001",jp:"フシギダネ",en:"Bulbasaur",type:"grass"},
+  {num:"002",jp:"フシギソウ",en:"Ivysaur",type:"grass"},
+  {num:"003",jp:"フシギバナ",en:"Venusaur",type:"grass"},
+  {num:"004",jp:"ヒトカゲ",en:"Charmander",type:"fire"},
+  {num:"005",jp:"リザード",en:"Charmeleon",type:"fire"},
+  {num:"006",jp:"リザードン",en:"Charizard",type:"fire"},
+  {num:"007",jp:"ゼニガメ",en:"Squirtle",type:"water"},
+  {num:"008",jp:"カメール",en:"Wartortle",type:"water"},
+  {num:"009",jp:"カメックス",en:"Blastoise",type:"water"},
+  {num:"010",jp:"キャタピー",en:"Caterpie",type:"bug"},
+  {num:"011",jp:"トランセル",en:"Metapod",type:"bug"},
+  {num:"012",jp:"バタフリー",en:"Butterfree",type:"bug"},
+  {num:"013",jp:"ビードル",en:"Weedle",type:"bug"},
+  {num:"014",jp:"コクーン",en:"Kakuna",type:"bug"},
+  {num:"015",jp:"スピアー",en:"Beedrill",type:"bug"},
+  {num:"016",jp:"ポッポ",en:"Pidgey",type:"normal"},
+  {num:"017",jp:"ピジョン",en:"Pidgeotto",type:"normal"},
+  {num:"018",jp:"ピジョット",en:"Pidgeot",type:"normal"},
+  {num:"019",jp:"コラッタ",en:"Rattata",type:"normal"},
+  {num:"020",jp:"ラッタ",en:"Raticate",type:"normal"},
+  {num:"021",jp:"オニスズメ",en:"Spearow",type:"normal"},
+  {num:"022",jp:"オニドリル",en:"Fearow",type:"normal"},
+  {num:"023",jp:"アーボ",en:"Ekans",type:"poison"},
+  {num:"024",jp:"アーボック",en:"Arbok",type:"poison"},
+  {num:"025",jp:"ピカチュウ",en:"Pikachu",type:"electric"},
+  {num:"026",jp:"ライチュウ",en:"Raichu",type:"electric"},
+  {num:"027",jp:"サンド",en:"Sandshrew",type:"ground"},
+  {num:"028",jp:"サンドパン",en:"Sandslash",type:"ground"},
+  {num:"029",jp:"ニドラン♀",en:"Nidoran♀",type:"poison"},
+  {num:"030",jp:"ニドリーナ",en:"Nidorina",type:"poison"},
+  {num:"031",jp:"ニドクイン",en:"Nidoqueen",type:"poison"},
+  {num:"032",jp:"ニドラン♂",en:"Nidoran♂",type:"poison"},
+  {num:"033",jp:"ニドリーノ",en:"Nidorino",type:"poison"},
+  {num:"034",jp:"ニドキング",en:"Nidoking",type:"poison"},
+  {num:"035",jp:"ピッピ",en:"Clefairy",type:"fairy"},
+  {num:"036",jp:"ピクシー",en:"Clefable",type:"fairy"},
+  {num:"037",jp:"ロコン",en:"Vulpix",type:"fire"},
+  {num:"038",jp:"キュウコン",en:"Ninetales",type:"fire"},
+  {num:"039",jp:"プリン",en:"Jigglypuff",type:"normal"},
+  {num:"040",jp:"プクリン",en:"Wigglytuff",type:"normal"},
+  {num:"041",jp:"ズバット",en:"Zubat",type:"poison"},
+  {num:"042",jp:"ゴルバット",en:"Golbat",type:"poison"},
+  {num:"043",jp:"ナゾノクサ",en:"Oddish",type:"grass"},
+  {num:"044",jp:"クサイハナ",en:"Gloom",type:"grass"},
+  {num:"045",jp:"ラフレシア",en:"Vileplume",type:"grass"},
+  {num:"046",jp:"パラス",en:"Paras",type:"bug"},
+  {num:"047",jp:"パラセクト",en:"Parasect",type:"bug"},
+  {num:"048",jp:"コンパン",en:"Venonat",type:"bug"},
+  {num:"049",jp:"モルフォン",en:"Venomoth",type:"bug"},
+  {num:"050",jp:"ディグダ",en:"Diglett",type:"ground"},
+  {num:"051",jp:"ダグトリオ",en:"Dugtrio",type:"ground"},
+  {num:"052",jp:"ニャース",en:"Meowth",type:"normal"},
+  {num:"053",jp:"ペルシアン",en:"Persian",type:"normal"},
+  {num:"054",jp:"コダック",en:"Psyduck",type:"water"},
+  {num:"055",jp:"ゴルダック",en:"Golduck",type:"water"},
+  {num:"056",jp:"マンキー",en:"Mankey",type:"fighting"},
+  {num:"057",jp:"オコリザル",en:"Primeape",type:"fighting"},
+  {num:"058",jp:"ガーディ",en:"Growlithe",type:"fire"},
+  {num:"059",jp:"ウインディ",en:"Arcanine",type:"fire"},
+  {num:"060",jp:"ニョロモ",en:"Poliwag",type:"water"},
+  {num:"061",jp:"ニョロゾ",en:"Poliwhirl",type:"water"},
+  {num:"062",jp:"ニョロボン",en:"Poliwrath",type:"water"},
+  {num:"063",jp:"ケーシィ",en:"Abra",type:"psychic"},
+  {num:"064",jp:"ユンゲラー",en:"Kadabra",type:"psychic"},
+  {num:"065",jp:"フーディン",en:"Alakazam",type:"psychic"},
+  {num:"066",jp:"ワンリキー",en:"Machop",type:"fighting"},
+  {num:"067",jp:"ゴーリキー",en:"Machoke",type:"fighting"},
+  {num:"068",jp:"カイリキー",en:"Machamp",type:"fighting"},
+  {num:"069",jp:"マダツボミ",en:"Bellsprout",type:"grass"},
+  {num:"070",jp:"ウツドン",en:"Weepinbell",type:"grass"},
+  {num:"071",jp:"ウツボット",en:"Victreebel",type:"grass"},
+  {num:"072",jp:"メノクラゲ",en:"Tentacool",type:"water"},
+  {num:"073",jp:"ドククラゲ",en:"Tentacruel",type:"water"},
+  {num:"074",jp:"イシツブテ",en:"Geodude",type:"rock"},
+  {num:"075",jp:"ゴローン",en:"Graveler",type:"rock"},
+  {num:"076",jp:"ゴローニャ",en:"Golem",type:"rock"},
+  {num:"077",jp:"ポニータ",en:"Ponyta",type:"fire"},
+  {num:"078",jp:"ギャロップ",en:"Rapidash",type:"fire"},
+  {num:"079",jp:"ヤドン",en:"Slowpoke",type:"water"},
+  {num:"080",jp:"ヤドラン",en:"Slowbro",type:"water"},
+  {num:"081",jp:"コイル",en:"Magnemite",type:"electric"},
+  {num:"082",jp:"レアコイル",en:"Magneton",type:"electric"},
+  {num:"083",jp:"カモネギ",en:"Farfetch'd",type:"normal"},
+  {num:"084",jp:"ドードー",en:"Doduo",type:"normal"},
+  {num:"085",jp:"ドードリオ",en:"Dodrio",type:"normal"},
+  {num:"086",jp:"パウワウ",en:"Seel",type:"water"},
+  {num:"087",jp:"ジュゴン",en:"Dewgong",type:"water"},
+  {num:"088",jp:"ベトベター",en:"Grimer",type:"poison"},
+  {num:"089",jp:"ベトベトン",en:"Muk",type:"poison"},
+  {num:"090",jp:"シェルダー",en:"Shellder",type:"water"},
+  {num:"091",jp:"パルシェン",en:"Cloyster",type:"water"},
+  {num:"092",jp:"ゴース",en:"Gastly",type:"ghost"},
+  {num:"093",jp:"ゴースト",en:"Haunter",type:"ghost"},
+  {num:"094",jp:"ゲンガー",en:"Gengar",type:"ghost"},
+  {num:"095",jp:"イワーク",en:"Onix",type:"rock"},
+  {num:"096",jp:"スリープ",en:"Drowzee",type:"psychic"},
+  {num:"097",jp:"スリーパー",en:"Hypno",type:"psychic"},
+  {num:"098",jp:"クラブ",en:"Krabby",type:"water"},
+  {num:"099",jp:"キングラー",en:"Kingler",type:"water"},
+  {num:"100",jp:"ビリリダマ",en:"Voltorb",type:"electric"},
+  {num:"101",jp:"マルマイン",en:"Electrode",type:"electric"},
+  {num:"102",jp:"タマタマ",en:"Exeggcute",type:"grass"},
+  {num:"103",jp:"ナッシー",en:"Exeggutor",type:"grass"},
+  {num:"104",jp:"カラカラ",en:"Cubone",type:"ground"},
+  {num:"105",jp:"ガラガラ",en:"Marowak",type:"ground"},
+  {num:"106",jp:"サワムラー",en:"Hitmonlee",type:"fighting"},
+  {num:"107",jp:"エビワラー",en:"Hitmonchan",type:"fighting"},
+  {num:"108",jp:"ベロリンガ",en:"Lickitung",type:"normal"},
+  {num:"109",jp:"ドガース",en:"Koffing",type:"poison"},
+  {num:"110",jp:"マタドガス",en:"Weezing",type:"poison"},
+  {num:"111",jp:"サイホーン",en:"Rhyhorn",type:"ground"},
+  {num:"112",jp:"サイドン",en:"Rhydon",type:"ground"},
+  {num:"113",jp:"ラッキー",en:"Chansey",type:"normal"},
+  {num:"114",jp:"モンジャラ",en:"Tangela",type:"grass"},
+  {num:"115",jp:"ガルーラ",en:"Kangaskhan",type:"normal"},
+  {num:"116",jp:"タッツー",en:"Horsea",type:"water"},
+  {num:"117",jp:"シードラ",en:"Seadra",type:"water"},
+  {num:"118",jp:"タマザラシ",en:"Goldeen",type:"water"},
+  {num:"119",jp:"アズマオウ",en:"Seaking",type:"water"},
+  {num:"120",jp:"ヒトデマン",en:"Staryu",type:"water"},
+  {num:"121",jp:"スターミー",en:"Starmie",type:"water"},
+  {num:"122",jp:"バリヤード",en:"Mr. Mime",type:"psychic"},
+  {num:"123",jp:"ストライク",en:"Scyther",type:"bug"},
+  {num:"124",jp:"ルージュラ",en:"Jynx",type:"ice"},
+  {num:"125",jp:"エレブー",en:"Electabuzz",type:"electric"},
+  {num:"126",jp:"ブーバー",en:"Magmar",type:"fire"},
+  {num:"127",jp:"カイロス",en:"Pinsir",type:"bug"},
+  {num:"128",jp:"ケンタロス",en:"Tauros",type:"normal"},
+  {num:"129",jp:"コイキング",en:"Magikarp",type:"water"},
+  {num:"130",jp:"ギャラドス",en:"Gyarados",type:"water"},
+  {num:"131",jp:"ラプラス",en:"Lapras",type:"water"},
+  {num:"132",jp:"メタモン",en:"Ditto",type:"normal"},
+  {num:"133",jp:"イーブイ",en:"Eevee",type:"normal"},
+  {num:"134",jp:"シャワーズ",en:"Vaporeon",type:"water"},
+  {num:"135",jp:"サンダース",en:"Jolteon",type:"electric"},
+  {num:"136",jp:"ブースター",en:"Flareon",type:"fire"},
+  {num:"137",jp:"ポリゴン",en:"Porygon",type:"normal"},
+  {num:"138",jp:"オムナイト",en:"Omanyte",type:"rock"},
+  {num:"139",jp:"オムスター",en:"Omastar",type:"rock"},
+  {num:"140",jp:"カブト",en:"Kabuto",type:"rock"},
+  {num:"141",jp:"カブトプス",en:"Kabutops",type:"rock"},
+  {num:"142",jp:"プテラ",en:"Aerodactyl",type:"rock"},
+  {num:"143",jp:"カビゴン",en:"Snorlax",type:"normal"},
+  {num:"144",jp:"フリーザー",en:"Articuno",type:"ice"},
+  {num:"145",jp:"サンダー",en:"Zapdos",type:"electric"},
+  {num:"146",jp:"ファイヤー",en:"Moltres",type:"fire"},
+  {num:"147",jp:"ミニリュウ",en:"Dratini",type:"dragon"},
+  {num:"148",jp:"ハクリュー",en:"Dragonair",type:"dragon"},
+  {num:"149",jp:"カイリュー",en:"Dragonite",type:"dragon"},
+  {num:"150",jp:"ミュウツー",en:"Mewtwo",type:"psychic"},
+  {num:"151",jp:"ミュウ",en:"Mew",type:"psychic"},
+];
+
+const typeColors = {
+  grass:    {bg:"#C0DD97",text:"#27500A"},
+  fire:     {bg:"#F5C4B3",text:"#712B13"},
+  water:    {bg:"#B5D4F4",text:"#0C447C"},
+  bug:      {bg:"#C0DD97",text:"#3B6D11"},
+  electric: {bg:"#FAC775",text:"#633806"},
+  poison:   {bg:"#CECBF6",text:"#3C3489"},
+  normal:   {bg:"#D3D1C7",text:"#2C2C2A"},
+  psychic:  {bg:"#F4C0D1",text:"#4B1528"},
+  ground:   {bg:"#FAC775",text:"#412402"},
+  rock:     {bg:"#D3D1C7",text:"#444441"},
+  ghost:    {bg:"#AFA9EC",text:"#26215C"},
+  ice:      {bg:"#B5D4F4",text:"#042C53"},
+  dragon:   {bg:"#AFA9EC",text:"#26215C"},
+  fighting: {bg:"#F5C4B3",text:"#4A1B0C"},
+  fairy:    {bg:"#F4C0D1",text:"#72243E"},
+};
+
+function renderCards(list) {
+  const grid = document.getElementById('grid');
+  const count = document.getElementById('count');
+  count.textContent = list.length + ' Pokémon';
+  if (!list.length) {
+    grid.innerHTML = '<p class="no-results">No results found.</p>';
+    return;
+  }
+  grid.innerHTML = list.map(p => {
+    const c = typeColors[p.type] || {bg:"#D3D1C7",text:"#444441"};
+    return `<div class="poke-card">
+      <span class="poke-num">#${p.num}</span>
+      <span class="poke-jp">${p.jp}</span>
+      <span class="poke-en">${p.en}</span>
+      <span class="type-badge" style="background:${c.bg};color:${c.text}">${p.type}</span>
+    </div>`;
+  }).join('');
+}
+
+function filterPokemon() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const filtered = q ? pokemon.filter(p =>
+    p.jp.includes(q) || p.en.toLowerCase().includes(q) || p.num.includes(q) || p.type.includes(q)
+  ) : pokemon;
+  renderCards(filtered);
+}
+
+renderCards(pokemon);
+</script>

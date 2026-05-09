@@ -1,0 +1,5142 @@
+[
+  {
+    "ndex": 1,
+    "english": "Bulbasaur",
+    "kana": "フシギダネ"
+  },
+  {
+    "ndex": 2,
+    "english": "Ivysaur",
+    "kana": "フシギソウ"
+  },
+  {
+    "ndex": 3,
+    "english": "Venusaur",
+    "kana": "フシギバナ"
+  },
+  {
+    "ndex": 4,
+    "english": "Charmander",
+    "kana": "ヒトカゲ"
+  },
+  {
+    "ndex": 5,
+    "english": "Charmeleon",
+    "kana": "リザード"
+  },
+  {
+    "ndex": 6,
+    "english": "Charizard",
+    "kana": "リザードン"
+  },
+  {
+    "ndex": 7,
+    "english": "Squirtle",
+    "kana": "ゼニガメ"
+  },
+  {
+    "ndex": 8,
+    "english": "Wartortle",
+    "kana": "カメール"
+  },
+  {
+    "ndex": 9,
+    "english": "Blastoise",
+    "kana": "カメックス"
+  },
+  {
+    "ndex": 10,
+    "english": "Caterpie",
+    "kana": "キャタピー"
+  },
+  {
+    "ndex": 11,
+    "english": "Metapod",
+    "kana": "トランセル"
+  },
+  {
+    "ndex": 12,
+    "english": "Butterfree",
+    "kana": "バタフリー"
+  },
+  {
+    "ndex": 13,
+    "english": "Weedle",
+    "kana": "ビードル"
+  },
+  {
+    "ndex": 14,
+    "english": "Kakuna",
+    "kana": "コクーン"
+  },
+  {
+    "ndex": 15,
+    "english": "Beedrill",
+    "kana": "スピアー"
+  },
+  {
+    "ndex": 16,
+    "english": "Pidgey",
+    "kana": "ポッポ"
+  },
+  {
+    "ndex": 17,
+    "english": "Pidgeotto",
+    "kana": "ピジョン"
+  },
+  {
+    "ndex": 18,
+    "english": "Pidgeot",
+    "kana": "ピジョット"
+  },
+  {
+    "ndex": 19,
+    "english": "Rattata",
+    "kana": "コラッタ"
+  },
+  {
+    "ndex": 20,
+    "english": "Raticate",
+    "kana": "ラッタ"
+  },
+  {
+    "ndex": 21,
+    "english": "Spearow",
+    "kana": "オニスズメ"
+  },
+  {
+    "ndex": 22,
+    "english": "Fearow",
+    "kana": "オニドリル"
+  },
+  {
+    "ndex": 23,
+    "english": "Ekans",
+    "kana": "アーボ"
+  },
+  {
+    "ndex": 24,
+    "english": "Arbok",
+    "kana": "アーボック"
+  },
+  {
+    "ndex": 25,
+    "english": "Pikachu",
+    "kana": "ピカチュウ"
+  },
+  {
+    "ndex": 26,
+    "english": "Raichu",
+    "kana": "ライチュウ"
+  },
+  {
+    "ndex": 27,
+    "english": "Sandshrew",
+    "kana": "サンド"
+  },
+  {
+    "ndex": 28,
+    "english": "Sandslash",
+    "kana": "サンドパン"
+  },
+  {
+    "ndex": 29,
+    "english": "Nidoran♀",
+    "kana": "ニドラン♀"
+  },
+  {
+    "ndex": 30,
+    "english": "Nidorina",
+    "kana": "ニドリーナ"
+  },
+  {
+    "ndex": 31,
+    "english": "Nidoqueen",
+    "kana": "ニドクイン"
+  },
+  {
+    "ndex": 32,
+    "english": "Nidoran♂",
+    "kana": "ニドラン♂"
+  },
+  {
+    "ndex": 33,
+    "english": "Nidorino",
+    "kana": "ニドリーノ"
+  },
+  {
+    "ndex": 34,
+    "english": "Nidoking",
+    "kana": "ニドキング"
+  },
+  {
+    "ndex": 35,
+    "english": "Clefairy",
+    "kana": "ピッピ"
+  },
+  {
+    "ndex": 36,
+    "english": "Clefable",
+    "kana": "ピクシー"
+  },
+  {
+    "ndex": 37,
+    "english": "Vulpix",
+    "kana": "ロコン"
+  },
+  {
+    "ndex": 38,
+    "english": "Ninetales",
+    "kana": "キュウコン"
+  },
+  {
+    "ndex": 39,
+    "english": "Jigglypuff",
+    "kana": "プリン"
+  },
+  {
+    "ndex": 40,
+    "english": "Wigglytuff",
+    "kana": "プクリン"
+  },
+  {
+    "ndex": 41,
+    "english": "Zubat",
+    "kana": "ズバット"
+  },
+  {
+    "ndex": 42,
+    "english": "Golbat",
+    "kana": "ゴルバット"
+  },
+  {
+    "ndex": 43,
+    "english": "Oddish",
+    "kana": "ナゾノクサ"
+  },
+  {
+    "ndex": 44,
+    "english": "Gloom",
+    "kana": "クサイハナ"
+  },
+  {
+    "ndex": 45,
+    "english": "Vileplume",
+    "kana": "ラフレシア"
+  },
+  {
+    "ndex": 46,
+    "english": "Paras",
+    "kana": "パラス"
+  },
+  {
+    "ndex": 47,
+    "english": "Parasect",
+    "kana": "パラセクト"
+  },
+  {
+    "ndex": 48,
+    "english": "Venonat",
+    "kana": "コンパン"
+  },
+  {
+    "ndex": 49,
+    "english": "Venomoth",
+    "kana": "モルフォン"
+  },
+  {
+    "ndex": 50,
+    "english": "Diglett",
+    "kana": "ディグダ"
+  },
+  {
+    "ndex": 51,
+    "english": "Dugtrio",
+    "kana": "ダグトリオ"
+  },
+  {
+    "ndex": 52,
+    "english": "Meowth",
+    "kana": "ニャース"
+  },
+  {
+    "ndex": 53,
+    "english": "Persian",
+    "kana": "ペルシアン"
+  },
+  {
+    "ndex": 54,
+    "english": "Psyduck",
+    "kana": "コダック"
+  },
+  {
+    "ndex": 55,
+    "english": "Golduck",
+    "kana": "ゴルダック"
+  },
+  {
+    "ndex": 56,
+    "english": "Mankey",
+    "kana": "マンキー"
+  },
+  {
+    "ndex": 57,
+    "english": "Primeape",
+    "kana": "オコリザル"
+  },
+  {
+    "ndex": 58,
+    "english": "Growlithe",
+    "kana": "ガーディ"
+  },
+  {
+    "ndex": 59,
+    "english": "Arcanine",
+    "kana": "ウインディ"
+  },
+  {
+    "ndex": 60,
+    "english": "Poliwag",
+    "kana": "ニョロモ"
+  },
+  {
+    "ndex": 61,
+    "english": "Poliwhirl",
+    "kana": "ニョロゾ"
+  },
+  {
+    "ndex": 62,
+    "english": "Poliwrath",
+    "kana": "ニョロボン"
+  },
+  {
+    "ndex": 63,
+    "english": "Abra",
+    "kana": "ケーシィ"
+  },
+  {
+    "ndex": 64,
+    "english": "Kadabra",
+    "kana": "ユンゲラー"
+  },
+  {
+    "ndex": 65,
+    "english": "Alakazam",
+    "kana": "フーディン"
+  },
+  {
+    "ndex": 66,
+    "english": "Machop",
+    "kana": "ワンリキー"
+  },
+  {
+    "ndex": 67,
+    "english": "Machoke",
+    "kana": "ゴーリキー"
+  },
+  {
+    "ndex": 68,
+    "english": "Machamp",
+    "kana": "カイリキー"
+  },
+  {
+    "ndex": 69,
+    "english": "Bellsprout",
+    "kana": "マダツボミ"
+  },
+  {
+    "ndex": 70,
+    "english": "Weepinbell",
+    "kana": "ウツドン"
+  },
+  {
+    "ndex": 71,
+    "english": "Victreebel",
+    "kana": "ウツボット"
+  },
+  {
+    "ndex": 72,
+    "english": "Tentacool",
+    "kana": "メノクラゲ"
+  },
+  {
+    "ndex": 73,
+    "english": "Tentacruel",
+    "kana": "ドククラゲ"
+  },
+  {
+    "ndex": 74,
+    "english": "Geodude",
+    "kana": "イシツブテ"
+  },
+  {
+    "ndex": 75,
+    "english": "Graveler",
+    "kana": "ゴローン"
+  },
+  {
+    "ndex": 76,
+    "english": "Golem",
+    "kana": "ゴローニャ"
+  },
+  {
+    "ndex": 77,
+    "english": "Ponyta",
+    "kana": "ポニータ"
+  },
+  {
+    "ndex": 78,
+    "english": "Rapidash",
+    "kana": "ギャロップ"
+  },
+  {
+    "ndex": 79,
+    "english": "Slowpoke",
+    "kana": "ヤドン"
+  },
+  {
+    "ndex": 80,
+    "english": "Slowbro",
+    "kana": "ヤドラン"
+  },
+  {
+    "ndex": 81,
+    "english": "Magnemite",
+    "kana": "コイル"
+  },
+  {
+    "ndex": 82,
+    "english": "Magneton",
+    "kana": "レアコイル"
+  },
+  {
+    "ndex": 83,
+    "english": "Farfetch'd",
+    "kana": "カモネギ"
+  },
+  {
+    "ndex": 84,
+    "english": "Doduo",
+    "kana": "ドードー"
+  },
+  {
+    "ndex": 85,
+    "english": "Dodrio",
+    "kana": "ドードリオ"
+  },
+  {
+    "ndex": 86,
+    "english": "Seel",
+    "kana": "パウワウ"
+  },
+  {
+    "ndex": 87,
+    "english": "Dewgong",
+    "kana": "ジュゴン"
+  },
+  {
+    "ndex": 88,
+    "english": "Grimer",
+    "kana": "ベトベター"
+  },
+  {
+    "ndex": 89,
+    "english": "Muk",
+    "kana": "ベトベトン"
+  },
+  {
+    "ndex": 90,
+    "english": "Shellder",
+    "kana": "シェルダー"
+  },
+  {
+    "ndex": 91,
+    "english": "Cloyster",
+    "kana": "パルシェン"
+  },
+  {
+    "ndex": 92,
+    "english": "Gastly",
+    "kana": "ゴース"
+  },
+  {
+    "ndex": 93,
+    "english": "Haunter",
+    "kana": "ゴースト"
+  },
+  {
+    "ndex": 94,
+    "english": "Gengar",
+    "kana": "ゲンガー"
+  },
+  {
+    "ndex": 95,
+    "english": "Onix",
+    "kana": "イワーク"
+  },
+  {
+    "ndex": 96,
+    "english": "Drowzee",
+    "kana": "スリープ"
+  },
+  {
+    "ndex": 97,
+    "english": "Hypno",
+    "kana": "スリーパー"
+  },
+  {
+    "ndex": 98,
+    "english": "Krabby",
+    "kana": "クラブ"
+  },
+  {
+    "ndex": 99,
+    "english": "Kingler",
+    "kana": "キングラー"
+  },
+  {
+    "ndex": 100,
+    "english": "Voltorb",
+    "kana": "ビリリダマ"
+  },
+  {
+    "ndex": 101,
+    "english": "Electrode",
+    "kana": "マルマイン"
+  },
+  {
+    "ndex": 102,
+    "english": "Exeggcute",
+    "kana": "タマタマ"
+  },
+  {
+    "ndex": 103,
+    "english": "Exeggutor",
+    "kana": "ナッシー"
+  },
+  {
+    "ndex": 104,
+    "english": "Cubone",
+    "kana": "カラカラ"
+  },
+  {
+    "ndex": 105,
+    "english": "Marowak",
+    "kana": "ガラガラ"
+  },
+  {
+    "ndex": 106,
+    "english": "Hitmonlee",
+    "kana": "サワムラー"
+  },
+  {
+    "ndex": 107,
+    "english": "Hitmonchan",
+    "kana": "エビワラー"
+  },
+  {
+    "ndex": 108,
+    "english": "Lickitung",
+    "kana": "ベロリンガ"
+  },
+  {
+    "ndex": 109,
+    "english": "Koffing",
+    "kana": "ドガース"
+  },
+  {
+    "ndex": 110,
+    "english": "Weezing",
+    "kana": "マタドガス"
+  },
+  {
+    "ndex": 111,
+    "english": "Rhyhorn",
+    "kana": "サイホーン"
+  },
+  {
+    "ndex": 112,
+    "english": "Rhydon",
+    "kana": "サイドン"
+  },
+  {
+    "ndex": 113,
+    "english": "Chansey",
+    "kana": "ラッキー"
+  },
+  {
+    "ndex": 114,
+    "english": "Tangela",
+    "kana": "モンジャラ"
+  },
+  {
+    "ndex": 115,
+    "english": "Kangaskhan",
+    "kana": "ガルーラ"
+  },
+  {
+    "ndex": 116,
+    "english": "Horsea",
+    "kana": "タッツー"
+  },
+  {
+    "ndex": 117,
+    "english": "Seadra",
+    "kana": "シードラ"
+  },
+  {
+    "ndex": 118,
+    "english": "Goldeen",
+    "kana": "トサキント"
+  },
+  {
+    "ndex": 119,
+    "english": "Seaking",
+    "kana": "アズマオウ"
+  },
+  {
+    "ndex": 120,
+    "english": "Staryu",
+    "kana": "ヒトデマン"
+  },
+  {
+    "ndex": 121,
+    "english": "Starmie",
+    "kana": "スターミー"
+  },
+  {
+    "ndex": 122,
+    "english": "Mr. Mime",
+    "kana": "バリヤード"
+  },
+  {
+    "ndex": 123,
+    "english": "Scyther",
+    "kana": "ストライク"
+  },
+  {
+    "ndex": 124,
+    "english": "Jynx",
+    "kana": "ルージュラ"
+  },
+  {
+    "ndex": 125,
+    "english": "Electabuzz",
+    "kana": "エレブー"
+  },
+  {
+    "ndex": 126,
+    "english": "Magmar",
+    "kana": "ブーバー"
+  },
+  {
+    "ndex": 127,
+    "english": "Pinsir",
+    "kana": "カイロス"
+  },
+  {
+    "ndex": 128,
+    "english": "Tauros",
+    "kana": "ケンタロス"
+  },
+  {
+    "ndex": 129,
+    "english": "Magikarp",
+    "kana": "コイキング"
+  },
+  {
+    "ndex": 130,
+    "english": "Gyarados",
+    "kana": "ギャラドス"
+  },
+  {
+    "ndex": 131,
+    "english": "Lapras",
+    "kana": "ラプラス"
+  },
+  {
+    "ndex": 132,
+    "english": "Ditto",
+    "kana": "メタモン"
+  },
+  {
+    "ndex": 133,
+    "english": "Eevee",
+    "kana": "イーブイ"
+  },
+  {
+    "ndex": 134,
+    "english": "Vaporeon",
+    "kana": "シャワーズ"
+  },
+  {
+    "ndex": 135,
+    "english": "Jolteon",
+    "kana": "サンダース"
+  },
+  {
+    "ndex": 136,
+    "english": "Flareon",
+    "kana": "ブースター"
+  },
+  {
+    "ndex": 137,
+    "english": "Porygon",
+    "kana": "ポリゴン"
+  },
+  {
+    "ndex": 138,
+    "english": "Omanyte",
+    "kana": "オムナイト"
+  },
+  {
+    "ndex": 139,
+    "english": "Omastar",
+    "kana": "オムスター"
+  },
+  {
+    "ndex": 140,
+    "english": "Kabuto",
+    "kana": "カブト"
+  },
+  {
+    "ndex": 141,
+    "english": "Kabutops",
+    "kana": "カブトプス"
+  },
+  {
+    "ndex": 142,
+    "english": "Aerodactyl",
+    "kana": "プテラ"
+  },
+  {
+    "ndex": 143,
+    "english": "Snorlax",
+    "kana": "カビゴン"
+  },
+  {
+    "ndex": 144,
+    "english": "Articuno",
+    "kana": "フリーザー"
+  },
+  {
+    "ndex": 145,
+    "english": "Zapdos",
+    "kana": "サンダー"
+  },
+  {
+    "ndex": 146,
+    "english": "Moltres",
+    "kana": "ファイヤー"
+  },
+  {
+    "ndex": 147,
+    "english": "Dratini",
+    "kana": "ミニリュウ"
+  },
+  {
+    "ndex": 148,
+    "english": "Dragonair",
+    "kana": "ハクリュー"
+  },
+  {
+    "ndex": 149,
+    "english": "Dragonite",
+    "kana": "カイリュー"
+  },
+  {
+    "ndex": 150,
+    "english": "Mewtwo",
+    "kana": "ミュウツー"
+  },
+  {
+    "ndex": 151,
+    "english": "Mew",
+    "kana": "ミュウ"
+  },
+  {
+    "ndex": 152,
+    "english": "Chikorita",
+    "kana": "チコリータ"
+  },
+  {
+    "ndex": 153,
+    "english": "Bayleef",
+    "kana": "ベイリーフ"
+  },
+  {
+    "ndex": 154,
+    "english": "Meganium",
+    "kana": "メガニウム"
+  },
+  {
+    "ndex": 155,
+    "english": "Cyndaquil",
+    "kana": "ヒノアラシ"
+  },
+  {
+    "ndex": 156,
+    "english": "Quilava",
+    "kana": "マグマラシ"
+  },
+  {
+    "ndex": 157,
+    "english": "Typhlosion",
+    "kana": "バクフーン"
+  },
+  {
+    "ndex": 158,
+    "english": "Totodile",
+    "kana": "ワニノコ"
+  },
+  {
+    "ndex": 159,
+    "english": "Croconaw",
+    "kana": "アリゲイツ"
+  },
+  {
+    "ndex": 160,
+    "english": "Feraligatr",
+    "kana": "オーダイル"
+  },
+  {
+    "ndex": 161,
+    "english": "Sentret",
+    "kana": "オタチ"
+  },
+  {
+    "ndex": 162,
+    "english": "Furret",
+    "kana": "オオタチ"
+  },
+  {
+    "ndex": 163,
+    "english": "Hoothoot",
+    "kana": "ホーホー"
+  },
+  {
+    "ndex": 164,
+    "english": "Noctowl",
+    "kana": "ヨルノズク"
+  },
+  {
+    "ndex": 165,
+    "english": "Ledyba",
+    "kana": "レディバ"
+  },
+  {
+    "ndex": 166,
+    "english": "Ledian",
+    "kana": "レディアン"
+  },
+  {
+    "ndex": 167,
+    "english": "Spinarak",
+    "kana": "イトマル"
+  },
+  {
+    "ndex": 168,
+    "english": "Ariados",
+    "kana": "アリアドス"
+  },
+  {
+    "ndex": 169,
+    "english": "Crobat",
+    "kana": "クロバット"
+  },
+  {
+    "ndex": 170,
+    "english": "Chinchou",
+    "kana": "チョンチー"
+  },
+  {
+    "ndex": 171,
+    "english": "Lanturn",
+    "kana": "ランターン"
+  },
+  {
+    "ndex": 172,
+    "english": "Pichu",
+    "kana": "ピチュー"
+  },
+  {
+    "ndex": 173,
+    "english": "Cleffa",
+    "kana": "ピィ"
+  },
+  {
+    "ndex": 174,
+    "english": "Igglybuff",
+    "kana": "ププリン"
+  },
+  {
+    "ndex": 175,
+    "english": "Togepi",
+    "kana": "トゲピー"
+  },
+  {
+    "ndex": 176,
+    "english": "Togetic",
+    "kana": "トゲチック"
+  },
+  {
+    "ndex": 177,
+    "english": "Natu",
+    "kana": "ネイティ"
+  },
+  {
+    "ndex": 178,
+    "english": "Xatu",
+    "kana": "ネイティオ"
+  },
+  {
+    "ndex": 179,
+    "english": "Mareep",
+    "kana": "メリープ"
+  },
+  {
+    "ndex": 180,
+    "english": "Flaaffy",
+    "kana": "モココ"
+  },
+  {
+    "ndex": 181,
+    "english": "Ampharos",
+    "kana": "デンリュウ"
+  },
+  {
+    "ndex": 182,
+    "english": "Bellossom",
+    "kana": "キレイハナ"
+  },
+  {
+    "ndex": 183,
+    "english": "Marill",
+    "kana": "マリル"
+  },
+  {
+    "ndex": 184,
+    "english": "Azumarill",
+    "kana": "マリルリ"
+  },
+  {
+    "ndex": 185,
+    "english": "Sudowoodo",
+    "kana": "ウソッキー"
+  },
+  {
+    "ndex": 186,
+    "english": "Politoed",
+    "kana": "ニョロトノ"
+  },
+  {
+    "ndex": 187,
+    "english": "Hoppip",
+    "kana": "ハネッコ"
+  },
+  {
+    "ndex": 188,
+    "english": "Skiploom",
+    "kana": "ポポッコ"
+  },
+  {
+    "ndex": 189,
+    "english": "Jumpluff",
+    "kana": "ワタッコ"
+  },
+  {
+    "ndex": 190,
+    "english": "Aipom",
+    "kana": "エイパム"
+  },
+  {
+    "ndex": 191,
+    "english": "Sunkern",
+    "kana": "ヒマナッツ"
+  },
+  {
+    "ndex": 192,
+    "english": "Sunflora",
+    "kana": "キマワリ"
+  },
+  {
+    "ndex": 193,
+    "english": "Yanma",
+    "kana": "ヤンヤンマ"
+  },
+  {
+    "ndex": 194,
+    "english": "Wooper",
+    "kana": "ウパー"
+  },
+  {
+    "ndex": 195,
+    "english": "Quagsire",
+    "kana": "ヌオー"
+  },
+  {
+    "ndex": 196,
+    "english": "Espeon",
+    "kana": "エーフィ"
+  },
+  {
+    "ndex": 197,
+    "english": "Umbreon",
+    "kana": "ブラッキー"
+  },
+  {
+    "ndex": 198,
+    "english": "Murkrow",
+    "kana": "ヤミカラス"
+  },
+  {
+    "ndex": 199,
+    "english": "Slowking",
+    "kana": "ヤドキング"
+  },
+  {
+    "ndex": 200,
+    "english": "Misdreavus",
+    "kana": "ムウマ"
+  },
+  {
+    "ndex": 201,
+    "english": "Unown",
+    "kana": "アンノーン"
+  },
+  {
+    "ndex": 202,
+    "english": "Wobbuffet",
+    "kana": "ソーナンス"
+  },
+  {
+    "ndex": 203,
+    "english": "Girafarig",
+    "kana": "キリンリキ"
+  },
+  {
+    "ndex": 204,
+    "english": "Pineco",
+    "kana": "クヌギダマ"
+  },
+  {
+    "ndex": 205,
+    "english": "Forretress",
+    "kana": "フォレトス"
+  },
+  {
+    "ndex": 206,
+    "english": "Dunsparce",
+    "kana": "ノコッチ"
+  },
+  {
+    "ndex": 207,
+    "english": "Gligar",
+    "kana": "グライガー"
+  },
+  {
+    "ndex": 208,
+    "english": "Steelix",
+    "kana": "ハガネール"
+  },
+  {
+    "ndex": 209,
+    "english": "Snubbull",
+    "kana": "ブルー"
+  },
+  {
+    "ndex": 210,
+    "english": "Granbull",
+    "kana": "グランブル"
+  },
+  {
+    "ndex": 211,
+    "english": "Qwilfish",
+    "kana": "ハリーセン"
+  },
+  {
+    "ndex": 212,
+    "english": "Scizor",
+    "kana": "ハッサム"
+  },
+  {
+    "ndex": 213,
+    "english": "Shuckle",
+    "kana": "ツボツボ"
+  },
+  {
+    "ndex": 214,
+    "english": "Heracross",
+    "kana": "ヘラクロス"
+  },
+  {
+    "ndex": 215,
+    "english": "Sneasel",
+    "kana": "ニューラ"
+  },
+  {
+    "ndex": 216,
+    "english": "Teddiursa",
+    "kana": "ヒメグマ"
+  },
+  {
+    "ndex": 217,
+    "english": "Ursaring",
+    "kana": "リングマ"
+  },
+  {
+    "ndex": 218,
+    "english": "Slugma",
+    "kana": "マグマッグ"
+  },
+  {
+    "ndex": 219,
+    "english": "Magcargo",
+    "kana": "マグカルゴ"
+  },
+  {
+    "ndex": 220,
+    "english": "Swinub",
+    "kana": "ウリムー"
+  },
+  {
+    "ndex": 221,
+    "english": "Piloswine",
+    "kana": "イノムー"
+  },
+  {
+    "ndex": 222,
+    "english": "Corsola",
+    "kana": "サニーゴ"
+  },
+  {
+    "ndex": 223,
+    "english": "Remoraid",
+    "kana": "テッポウオ"
+  },
+  {
+    "ndex": 224,
+    "english": "Octillery",
+    "kana": "オクタン"
+  },
+  {
+    "ndex": 225,
+    "english": "Delibird",
+    "kana": "デリバード"
+  },
+  {
+    "ndex": 226,
+    "english": "Mantine",
+    "kana": "マンタイン"
+  },
+  {
+    "ndex": 227,
+    "english": "Skarmory",
+    "kana": "エアームド"
+  },
+  {
+    "ndex": 228,
+    "english": "Houndour",
+    "kana": "デルビル"
+  },
+  {
+    "ndex": 229,
+    "english": "Houndoom",
+    "kana": "ヘルガー"
+  },
+  {
+    "ndex": 230,
+    "english": "Kingdra",
+    "kana": "キングドラ"
+  },
+  {
+    "ndex": 231,
+    "english": "Phanpy",
+    "kana": "ゴマゾウ"
+  },
+  {
+    "ndex": 232,
+    "english": "Donphan",
+    "kana": "ドンファン"
+  },
+  {
+    "ndex": 233,
+    "english": "Porygon2",
+    "kana": "ポリゴン２"
+  },
+  {
+    "ndex": 234,
+    "english": "Stantler",
+    "kana": "オドシシ"
+  },
+  {
+    "ndex": 235,
+    "english": "Smeargle",
+    "kana": "ドーブル"
+  },
+  {
+    "ndex": 236,
+    "english": "Tyrogue",
+    "kana": "バルキー"
+  },
+  {
+    "ndex": 237,
+    "english": "Hitmontop",
+    "kana": "カポエラー"
+  },
+  {
+    "ndex": 238,
+    "english": "Smoochum",
+    "kana": "ムチュール"
+  },
+  {
+    "ndex": 239,
+    "english": "Elekid",
+    "kana": "エレキッド"
+  },
+  {
+    "ndex": 240,
+    "english": "Magby",
+    "kana": "ブビィ"
+  },
+  {
+    "ndex": 241,
+    "english": "Miltank",
+    "kana": "ミルタンク"
+  },
+  {
+    "ndex": 242,
+    "english": "Blissey",
+    "kana": "ハピナス"
+  },
+  {
+    "ndex": 243,
+    "english": "Raikou",
+    "kana": "ライコウ"
+  },
+  {
+    "ndex": 244,
+    "english": "Entei",
+    "kana": "エンテイ"
+  },
+  {
+    "ndex": 245,
+    "english": "Suicune",
+    "kana": "スイクン"
+  },
+  {
+    "ndex": 246,
+    "english": "Larvitar",
+    "kana": "ヨーギラス"
+  },
+  {
+    "ndex": 247,
+    "english": "Pupitar",
+    "kana": "サナギラス"
+  },
+  {
+    "ndex": 248,
+    "english": "Tyranitar",
+    "kana": "バンギラス"
+  },
+  {
+    "ndex": 249,
+    "english": "Lugia",
+    "kana": "ルギア"
+  },
+  {
+    "ndex": 250,
+    "english": "Ho-Oh",
+    "kana": "ホウオウ"
+  },
+  {
+    "ndex": 251,
+    "english": "Celebi",
+    "kana": "セレビィ"
+  },
+  {
+    "ndex": 252,
+    "english": "Treecko",
+    "kana": "キモリ"
+  },
+  {
+    "ndex": 253,
+    "english": "Grovyle",
+    "kana": "ジュプトル"
+  },
+  {
+    "ndex": 254,
+    "english": "Sceptile",
+    "kana": "ジュカイン"
+  },
+  {
+    "ndex": 255,
+    "english": "Torchic",
+    "kana": "アチャモ"
+  },
+  {
+    "ndex": 256,
+    "english": "Combusken",
+    "kana": "ワカシャモ"
+  },
+  {
+    "ndex": 257,
+    "english": "Blaziken",
+    "kana": "バシャーモ"
+  },
+  {
+    "ndex": 258,
+    "english": "Mudkip",
+    "kana": "ミズゴロウ"
+  },
+  {
+    "ndex": 259,
+    "english": "Marshtomp",
+    "kana": "ヌマクロー"
+  },
+  {
+    "ndex": 260,
+    "english": "Swampert",
+    "kana": "ラグラージ"
+  },
+  {
+    "ndex": 261,
+    "english": "Poochyena",
+    "kana": "ポチエナ"
+  },
+  {
+    "ndex": 262,
+    "english": "Mightyena",
+    "kana": "グラエナ"
+  },
+  {
+    "ndex": 263,
+    "english": "Zigzagoon",
+    "kana": "ジグザグマ"
+  },
+  {
+    "ndex": 264,
+    "english": "Linoone",
+    "kana": "マッスグマ"
+  },
+  {
+    "ndex": 265,
+    "english": "Wurmple",
+    "kana": "ケムッソ"
+  },
+  {
+    "ndex": 266,
+    "english": "Silcoon",
+    "kana": "カラサリス"
+  },
+  {
+    "ndex": 267,
+    "english": "Beautifly",
+    "kana": "アゲハント"
+  },
+  {
+    "ndex": 268,
+    "english": "Cascoon",
+    "kana": "マユルド"
+  },
+  {
+    "ndex": 269,
+    "english": "Dustox",
+    "kana": "ドクケイル"
+  },
+  {
+    "ndex": 270,
+    "english": "Lotad",
+    "kana": "ハスボー"
+  },
+  {
+    "ndex": 271,
+    "english": "Lombre",
+    "kana": "ハスブレロ"
+  },
+  {
+    "ndex": 272,
+    "english": "Ludicolo",
+    "kana": "ルンパッパ"
+  },
+  {
+    "ndex": 273,
+    "english": "Seedot",
+    "kana": "タネボー"
+  },
+  {
+    "ndex": 274,
+    "english": "Nuzleaf",
+    "kana": "コノハナ"
+  },
+  {
+    "ndex": 275,
+    "english": "Shiftry",
+    "kana": "ダーテング"
+  },
+  {
+    "ndex": 276,
+    "english": "Taillow",
+    "kana": "スバメ"
+  },
+  {
+    "ndex": 277,
+    "english": "Swellow",
+    "kana": "オオスバメ"
+  },
+  {
+    "ndex": 278,
+    "english": "Wingull",
+    "kana": "キャモメ"
+  },
+  {
+    "ndex": 279,
+    "english": "Pelipper",
+    "kana": "ペリッパー"
+  },
+  {
+    "ndex": 280,
+    "english": "Ralts",
+    "kana": "ラルトス"
+  },
+  {
+    "ndex": 281,
+    "english": "Kirlia",
+    "kana": "キルリア"
+  },
+  {
+    "ndex": 282,
+    "english": "Gardevoir",
+    "kana": "サーナイト"
+  },
+  {
+    "ndex": 283,
+    "english": "Surskit",
+    "kana": "アメタマ"
+  },
+  {
+    "ndex": 284,
+    "english": "Masquerain",
+    "kana": "アメモース"
+  },
+  {
+    "ndex": 285,
+    "english": "Shroomish",
+    "kana": "キノココ"
+  },
+  {
+    "ndex": 286,
+    "english": "Breloom",
+    "kana": "キノガッサ"
+  },
+  {
+    "ndex": 287,
+    "english": "Slakoth",
+    "kana": "ナマケロ"
+  },
+  {
+    "ndex": 288,
+    "english": "Vigoroth",
+    "kana": "ヤルキモノ"
+  },
+  {
+    "ndex": 289,
+    "english": "Slaking",
+    "kana": "ケッキング"
+  },
+  {
+    "ndex": 290,
+    "english": "Nincada",
+    "kana": "ツチニン"
+  },
+  {
+    "ndex": 291,
+    "english": "Ninjask",
+    "kana": "テッカニン"
+  },
+  {
+    "ndex": 292,
+    "english": "Shedinja",
+    "kana": "ヌケニン"
+  },
+  {
+    "ndex": 293,
+    "english": "Whismur",
+    "kana": "ゴニョニョ"
+  },
+  {
+    "ndex": 294,
+    "english": "Loudred",
+    "kana": "ドゴーム"
+  },
+  {
+    "ndex": 295,
+    "english": "Exploud",
+    "kana": "バクオング"
+  },
+  {
+    "ndex": 296,
+    "english": "Makuhita",
+    "kana": "マクノシタ"
+  },
+  {
+    "ndex": 297,
+    "english": "Hariyama",
+    "kana": "ハリテヤマ"
+  },
+  {
+    "ndex": 298,
+    "english": "Azurill",
+    "kana": "ルリリ"
+  },
+  {
+    "ndex": 299,
+    "english": "Nosepass",
+    "kana": "ノズパス"
+  },
+  {
+    "ndex": 300,
+    "english": "Skitty",
+    "kana": "エネコ"
+  },
+  {
+    "ndex": 301,
+    "english": "Delcatty",
+    "kana": "エネコロロ"
+  },
+  {
+    "ndex": 302,
+    "english": "Sableye",
+    "kana": "ヤミラミ"
+  },
+  {
+    "ndex": 303,
+    "english": "Mawile",
+    "kana": "クチート"
+  },
+  {
+    "ndex": 304,
+    "english": "Aron",
+    "kana": "ココドラ"
+  },
+  {
+    "ndex": 305,
+    "english": "Lairon",
+    "kana": "コドラ"
+  },
+  {
+    "ndex": 306,
+    "english": "Aggron",
+    "kana": "ボスゴドラ"
+  },
+  {
+    "ndex": 307,
+    "english": "Meditite",
+    "kana": "アサナン"
+  },
+  {
+    "ndex": 308,
+    "english": "Medicham",
+    "kana": "チャーレム"
+  },
+  {
+    "ndex": 309,
+    "english": "Electrike",
+    "kana": "ラクライ"
+  },
+  {
+    "ndex": 310,
+    "english": "Manectric",
+    "kana": "ライボルト"
+  },
+  {
+    "ndex": 311,
+    "english": "Plusle",
+    "kana": "プラスル"
+  },
+  {
+    "ndex": 312,
+    "english": "Minun",
+    "kana": "マイナン"
+  },
+  {
+    "ndex": 313,
+    "english": "Volbeat",
+    "kana": "バルビート"
+  },
+  {
+    "ndex": 314,
+    "english": "Illumise",
+    "kana": "イルミーゼ"
+  },
+  {
+    "ndex": 315,
+    "english": "Roselia",
+    "kana": "ロゼリア"
+  },
+  {
+    "ndex": 316,
+    "english": "Gulpin",
+    "kana": "ゴクリン"
+  },
+  {
+    "ndex": 317,
+    "english": "Swalot",
+    "kana": "マルノーム"
+  },
+  {
+    "ndex": 318,
+    "english": "Carvanha",
+    "kana": "キバニア"
+  },
+  {
+    "ndex": 319,
+    "english": "Sharpedo",
+    "kana": "サメハダー"
+  },
+  {
+    "ndex": 320,
+    "english": "Wailmer",
+    "kana": "ホエルコ"
+  },
+  {
+    "ndex": 321,
+    "english": "Wailord",
+    "kana": "ホエルオー"
+  },
+  {
+    "ndex": 322,
+    "english": "Numel",
+    "kana": "ドンメル"
+  },
+  {
+    "ndex": 323,
+    "english": "Camerupt",
+    "kana": "バクーダ"
+  },
+  {
+    "ndex": 324,
+    "english": "Torkoal",
+    "kana": "コータス"
+  },
+  {
+    "ndex": 325,
+    "english": "Spoink",
+    "kana": "バネブー"
+  },
+  {
+    "ndex": 326,
+    "english": "Grumpig",
+    "kana": "ブーピッグ"
+  },
+  {
+    "ndex": 327,
+    "english": "Spinda",
+    "kana": "パッチール"
+  },
+  {
+    "ndex": 328,
+    "english": "Trapinch",
+    "kana": "ナックラー"
+  },
+  {
+    "ndex": 329,
+    "english": "Vibrava",
+    "kana": "ビブラーバ"
+  },
+  {
+    "ndex": 330,
+    "english": "Flygon",
+    "kana": "フライゴン"
+  },
+  {
+    "ndex": 331,
+    "english": "Cacnea",
+    "kana": "サボネア"
+  },
+  {
+    "ndex": 332,
+    "english": "Cacturne",
+    "kana": "ノクタス"
+  },
+  {
+    "ndex": 333,
+    "english": "Swablu",
+    "kana": "チルット"
+  },
+  {
+    "ndex": 334,
+    "english": "Altaria",
+    "kana": "チルタリス"
+  },
+  {
+    "ndex": 335,
+    "english": "Zangoose",
+    "kana": "ザングース"
+  },
+  {
+    "ndex": 336,
+    "english": "Seviper",
+    "kana": "ハブネーク"
+  },
+  {
+    "ndex": 337,
+    "english": "Lunatone",
+    "kana": "ルナトーン"
+  },
+  {
+    "ndex": 338,
+    "english": "Solrock",
+    "kana": "ソルロック"
+  },
+  {
+    "ndex": 339,
+    "english": "Barboach",
+    "kana": "ドジョッチ"
+  },
+  {
+    "ndex": 340,
+    "english": "Whiscash",
+    "kana": "ナマズン"
+  },
+  {
+    "ndex": 341,
+    "english": "Corphish",
+    "kana": "ヘイガニ"
+  },
+  {
+    "ndex": 342,
+    "english": "Crawdaunt",
+    "kana": "シザリガー"
+  },
+  {
+    "ndex": 343,
+    "english": "Baltoy",
+    "kana": "ヤジロン"
+  },
+  {
+    "ndex": 344,
+    "english": "Claydol",
+    "kana": "ネンドール"
+  },
+  {
+    "ndex": 345,
+    "english": "Lileep",
+    "kana": "リリーラ"
+  },
+  {
+    "ndex": 346,
+    "english": "Cradily",
+    "kana": "ユレイドル"
+  },
+  {
+    "ndex": 347,
+    "english": "Anorith",
+    "kana": "アノプス"
+  },
+  {
+    "ndex": 348,
+    "english": "Armaldo",
+    "kana": "アーマルド"
+  },
+  {
+    "ndex": 349,
+    "english": "Feebas",
+    "kana": "ヒンバス"
+  },
+  {
+    "ndex": 350,
+    "english": "Milotic",
+    "kana": "ミロカロス"
+  },
+  {
+    "ndex": 351,
+    "english": "Castform",
+    "kana": "ポワルン"
+  },
+  {
+    "ndex": 352,
+    "english": "Kecleon",
+    "kana": "カクレオン"
+  },
+  {
+    "ndex": 353,
+    "english": "Shuppet",
+    "kana": "カゲボウズ"
+  },
+  {
+    "ndex": 354,
+    "english": "Banette",
+    "kana": "ジュペッタ"
+  },
+  {
+    "ndex": 355,
+    "english": "Duskull",
+    "kana": "ヨマワル"
+  },
+  {
+    "ndex": 356,
+    "english": "Dusclops",
+    "kana": "サマヨール"
+  },
+  {
+    "ndex": 357,
+    "english": "Tropius",
+    "kana": "トロピウス"
+  },
+  {
+    "ndex": 358,
+    "english": "Chimecho",
+    "kana": "チリーン"
+  },
+  {
+    "ndex": 359,
+    "english": "Absol",
+    "kana": "アブソル"
+  },
+  {
+    "ndex": 360,
+    "english": "Wynaut",
+    "kana": "ソーナノ"
+  },
+  {
+    "ndex": 361,
+    "english": "Snorunt",
+    "kana": "ユキワラシ"
+  },
+  {
+    "ndex": 362,
+    "english": "Glalie",
+    "kana": "オニゴーリ"
+  },
+  {
+    "ndex": 363,
+    "english": "Spheal",
+    "kana": "タマザラシ"
+  },
+  {
+    "ndex": 364,
+    "english": "Sealeo",
+    "kana": "トドグラー"
+  },
+  {
+    "ndex": 365,
+    "english": "Walrein",
+    "kana": "トドゼルガ"
+  },
+  {
+    "ndex": 366,
+    "english": "Clamperl",
+    "kana": "パールル"
+  },
+  {
+    "ndex": 367,
+    "english": "Huntail",
+    "kana": "ハンテール"
+  },
+  {
+    "ndex": 368,
+    "english": "Gorebyss",
+    "kana": "サクラビス"
+  },
+  {
+    "ndex": 369,
+    "english": "Relicanth",
+    "kana": "ジーランス"
+  },
+  {
+    "ndex": 370,
+    "english": "Luvdisc",
+    "kana": "ラブカス"
+  },
+  {
+    "ndex": 371,
+    "english": "Bagon",
+    "kana": "タツベイ"
+  },
+  {
+    "ndex": 372,
+    "english": "Shelgon",
+    "kana": "コモルー"
+  },
+  {
+    "ndex": 373,
+    "english": "Salamence",
+    "kana": "ボーマンダ"
+  },
+  {
+    "ndex": 374,
+    "english": "Beldum",
+    "kana": "ダンバル"
+  },
+  {
+    "ndex": 375,
+    "english": "Metang",
+    "kana": "メタング"
+  },
+  {
+    "ndex": 376,
+    "english": "Metagross",
+    "kana": "メタグロス"
+  },
+  {
+    "ndex": 377,
+    "english": "Regirock",
+    "kana": "レジロック"
+  },
+  {
+    "ndex": 378,
+    "english": "Regice",
+    "kana": "レジアイス"
+  },
+  {
+    "ndex": 379,
+    "english": "Registeel",
+    "kana": "レジスチル"
+  },
+  {
+    "ndex": 380,
+    "english": "Latias",
+    "kana": "ラティアス"
+  },
+  {
+    "ndex": 381,
+    "english": "Latios",
+    "kana": "ラティオス"
+  },
+  {
+    "ndex": 382,
+    "english": "Kyogre",
+    "kana": "カイオーガ"
+  },
+  {
+    "ndex": 383,
+    "english": "Groudon",
+    "kana": "グラードン"
+  },
+  {
+    "ndex": 384,
+    "english": "Rayquaza",
+    "kana": "レックウザ"
+  },
+  {
+    "ndex": 385,
+    "english": "Jirachi",
+    "kana": "ジラーチ"
+  },
+  {
+    "ndex": 386,
+    "english": "Deoxys",
+    "kana": "デオキシス"
+  },
+  {
+    "ndex": 387,
+    "english": "Turtwig",
+    "kana": "ナエトル"
+  },
+  {
+    "ndex": 388,
+    "english": "Grotle",
+    "kana": "ハヤシガメ"
+  },
+  {
+    "ndex": 389,
+    "english": "Torterra",
+    "kana": "ドダイトス"
+  },
+  {
+    "ndex": 390,
+    "english": "Chimchar",
+    "kana": "ヒコザル"
+  },
+  {
+    "ndex": 391,
+    "english": "Monferno",
+    "kana": "モウカザル"
+  },
+  {
+    "ndex": 392,
+    "english": "Infernape",
+    "kana": "ゴウカザル"
+  },
+  {
+    "ndex": 393,
+    "english": "Piplup",
+    "kana": "ポッチャマ"
+  },
+  {
+    "ndex": 394,
+    "english": "Prinplup",
+    "kana": "ポッタイシ"
+  },
+  {
+    "ndex": 395,
+    "english": "Empoleon",
+    "kana": "エンペルト"
+  },
+  {
+    "ndex": 396,
+    "english": "Starly",
+    "kana": "ムックル"
+  },
+  {
+    "ndex": 397,
+    "english": "Staravia",
+    "kana": "ムクバード"
+  },
+  {
+    "ndex": 398,
+    "english": "Staraptor",
+    "kana": "ムクホーク"
+  },
+  {
+    "ndex": 399,
+    "english": "Bidoof",
+    "kana": "ビッパ"
+  },
+  {
+    "ndex": 400,
+    "english": "Bibarel",
+    "kana": "ビーダル"
+  },
+  {
+    "ndex": 401,
+    "english": "Kricketot",
+    "kana": "コロボーシ"
+  },
+  {
+    "ndex": 402,
+    "english": "Kricketune",
+    "kana": "コロトック"
+  },
+  {
+    "ndex": 403,
+    "english": "Shinx",
+    "kana": "コリンク"
+  },
+  {
+    "ndex": 404,
+    "english": "Luxio",
+    "kana": "ルクシオ"
+  },
+  {
+    "ndex": 405,
+    "english": "Luxray",
+    "kana": "レントラー"
+  },
+  {
+    "ndex": 406,
+    "english": "Budew",
+    "kana": "スボミー"
+  },
+  {
+    "ndex": 407,
+    "english": "Roserade",
+    "kana": "ロズレイド"
+  },
+  {
+    "ndex": 408,
+    "english": "Cranidos",
+    "kana": "ズガイドス"
+  },
+  {
+    "ndex": 409,
+    "english": "Rampardos",
+    "kana": "ラムパルド"
+  },
+  {
+    "ndex": 410,
+    "english": "Shieldon",
+    "kana": "タテトプス"
+  },
+  {
+    "ndex": 411,
+    "english": "Bastiodon",
+    "kana": "トリデプス"
+  },
+  {
+    "ndex": 412,
+    "english": "Burmy",
+    "kana": "ミノムッチ"
+  },
+  {
+    "ndex": 413,
+    "english": "Wormadam",
+    "kana": "ミノマダム"
+  },
+  {
+    "ndex": 414,
+    "english": "Mothim",
+    "kana": "ガーメイル"
+  },
+  {
+    "ndex": 415,
+    "english": "Combee",
+    "kana": "ミツハニー"
+  },
+  {
+    "ndex": 416,
+    "english": "Vespiquen",
+    "kana": "ビークイン"
+  },
+  {
+    "ndex": 417,
+    "english": "Pachirisu",
+    "kana": "パチリス"
+  },
+  {
+    "ndex": 418,
+    "english": "Buizel",
+    "kana": "ブイゼル"
+  },
+  {
+    "ndex": 419,
+    "english": "Floatzel",
+    "kana": "フローゼル"
+  },
+  {
+    "ndex": 420,
+    "english": "Cherubi",
+    "kana": "チェリンボ"
+  },
+  {
+    "ndex": 421,
+    "english": "Cherrim",
+    "kana": "チェリム"
+  },
+  {
+    "ndex": 422,
+    "english": "Shellos",
+    "kana": "カラナクシ"
+  },
+  {
+    "ndex": 423,
+    "english": "Gastrodon",
+    "kana": "トリトドン"
+  },
+  {
+    "ndex": 424,
+    "english": "Ambipom",
+    "kana": "エテボース"
+  },
+  {
+    "ndex": 425,
+    "english": "Drifloon",
+    "kana": "フワンテ"
+  },
+  {
+    "ndex": 426,
+    "english": "Drifblim",
+    "kana": "フワライド"
+  },
+  {
+    "ndex": 427,
+    "english": "Buneary",
+    "kana": "ミミロル"
+  },
+  {
+    "ndex": 428,
+    "english": "Lopunny",
+    "kana": "ミミロップ"
+  },
+  {
+    "ndex": 429,
+    "english": "Mismagius",
+    "kana": "ムウマージ"
+  },
+  {
+    "ndex": 430,
+    "english": "Honchkrow",
+    "kana": "ドンカラス"
+  },
+  {
+    "ndex": 431,
+    "english": "Glameow",
+    "kana": "ニャルマー"
+  },
+  {
+    "ndex": 432,
+    "english": "Purugly",
+    "kana": "ブニャット"
+  },
+  {
+    "ndex": 433,
+    "english": "Chingling",
+    "kana": "リーシャン"
+  },
+  {
+    "ndex": 434,
+    "english": "Stunky",
+    "kana": "スカンプー"
+  },
+  {
+    "ndex": 435,
+    "english": "Skuntank",
+    "kana": "スカタンク"
+  },
+  {
+    "ndex": 436,
+    "english": "Bronzor",
+    "kana": "ドーミラー"
+  },
+  {
+    "ndex": 437,
+    "english": "Bronzong",
+    "kana": "ドータクン"
+  },
+  {
+    "ndex": 438,
+    "english": "Bonsly",
+    "kana": "ウソハチ"
+  },
+  {
+    "ndex": 439,
+    "english": "Mime Jr.",
+    "kana": "マネネ"
+  },
+  {
+    "ndex": 440,
+    "english": "Happiny",
+    "kana": "ピンプク"
+  },
+  {
+    "ndex": 441,
+    "english": "Chatot",
+    "kana": "ペラップ"
+  },
+  {
+    "ndex": 442,
+    "english": "Spiritomb",
+    "kana": "ミカルゲ"
+  },
+  {
+    "ndex": 443,
+    "english": "Gible",
+    "kana": "フカマル"
+  },
+  {
+    "ndex": 444,
+    "english": "Gabite",
+    "kana": "ガバイト"
+  },
+  {
+    "ndex": 445,
+    "english": "Garchomp",
+    "kana": "ガブリアス"
+  },
+  {
+    "ndex": 446,
+    "english": "Munchlax",
+    "kana": "ゴンベ"
+  },
+  {
+    "ndex": 447,
+    "english": "Riolu",
+    "kana": "リオル"
+  },
+  {
+    "ndex": 448,
+    "english": "Lucario",
+    "kana": "ルカリオ"
+  },
+  {
+    "ndex": 449,
+    "english": "Hippopotas",
+    "kana": "ヒポポタス"
+  },
+  {
+    "ndex": 450,
+    "english": "Hippowdon",
+    "kana": "カバルドン"
+  },
+  {
+    "ndex": 451,
+    "english": "Skorupi",
+    "kana": "スコルピ"
+  },
+  {
+    "ndex": 452,
+    "english": "Drapion",
+    "kana": "ドラピオン"
+  },
+  {
+    "ndex": 453,
+    "english": "Croagunk",
+    "kana": "グレッグル"
+  },
+  {
+    "ndex": 454,
+    "english": "Toxicroak",
+    "kana": "ドクロッグ"
+  },
+  {
+    "ndex": 455,
+    "english": "Carnivine",
+    "kana": "マスキッパ"
+  },
+  {
+    "ndex": 456,
+    "english": "Finneon",
+    "kana": "ケイコウオ"
+  },
+  {
+    "ndex": 457,
+    "english": "Lumineon",
+    "kana": "ネオラント"
+  },
+  {
+    "ndex": 458,
+    "english": "Mantyke",
+    "kana": "タマンタ"
+  },
+  {
+    "ndex": 459,
+    "english": "Snover",
+    "kana": "ユキカブリ"
+  },
+  {
+    "ndex": 460,
+    "english": "Abomasnow",
+    "kana": "ユキノオー"
+  },
+  {
+    "ndex": 461,
+    "english": "Weavile",
+    "kana": "マニューラ"
+  },
+  {
+    "ndex": 462,
+    "english": "Magnezone",
+    "kana": "ジバコイル"
+  },
+  {
+    "ndex": 463,
+    "english": "Lickilicky",
+    "kana": "ベロベルト"
+  },
+  {
+    "ndex": 464,
+    "english": "Rhyperior",
+    "kana": "ドサイドン"
+  },
+  {
+    "ndex": 465,
+    "english": "Tangrowth",
+    "kana": "モジャンボ"
+  },
+  {
+    "ndex": 466,
+    "english": "Electivire",
+    "kana": "エレキブル"
+  },
+  {
+    "ndex": 467,
+    "english": "Magmortar",
+    "kana": "ブーバーン"
+  },
+  {
+    "ndex": 468,
+    "english": "Togekiss",
+    "kana": "トゲキッス"
+  },
+  {
+    "ndex": 469,
+    "english": "Yanmega",
+    "kana": "メガヤンマ"
+  },
+  {
+    "ndex": 470,
+    "english": "Leafeon",
+    "kana": "リーフィア"
+  },
+  {
+    "ndex": 471,
+    "english": "Glaceon",
+    "kana": "グレイシア"
+  },
+  {
+    "ndex": 472,
+    "english": "Gliscor",
+    "kana": "グライオン"
+  },
+  {
+    "ndex": 473,
+    "english": "Mamoswine",
+    "kana": "マンムー"
+  },
+  {
+    "ndex": 474,
+    "english": "Porygon-Z",
+    "kana": "ポリゴンＺ"
+  },
+  {
+    "ndex": 475,
+    "english": "Gallade",
+    "kana": "エルレイド"
+  },
+  {
+    "ndex": 476,
+    "english": "Probopass",
+    "kana": "ダイノーズ"
+  },
+  {
+    "ndex": 477,
+    "english": "Dusknoir",
+    "kana": "ヨノワール"
+  },
+  {
+    "ndex": 478,
+    "english": "Froslass",
+    "kana": "ユキメノコ"
+  },
+  {
+    "ndex": 479,
+    "english": "Rotom",
+    "kana": "ロトム"
+  },
+  {
+    "ndex": 480,
+    "english": "Uxie",
+    "kana": "ユクシー"
+  },
+  {
+    "ndex": 481,
+    "english": "Mesprit",
+    "kana": "エムリット"
+  },
+  {
+    "ndex": 482,
+    "english": "Azelf",
+    "kana": "アグノム"
+  },
+  {
+    "ndex": 483,
+    "english": "Dialga",
+    "kana": "ディアルガ"
+  },
+  {
+    "ndex": 484,
+    "english": "Palkia",
+    "kana": "パルキア"
+  },
+  {
+    "ndex": 485,
+    "english": "Heatran",
+    "kana": "ヒードラン"
+  },
+  {
+    "ndex": 486,
+    "english": "Regigigas",
+    "kana": "レジギガス"
+  },
+  {
+    "ndex": 487,
+    "english": "Giratina",
+    "kana": "ギラティナ"
+  },
+  {
+    "ndex": 488,
+    "english": "Cresselia",
+    "kana": "クレセリア"
+  },
+  {
+    "ndex": 489,
+    "english": "Phione",
+    "kana": "フィオネ"
+  },
+  {
+    "ndex": 490,
+    "english": "Manaphy",
+    "kana": "マナフィ"
+  },
+  {
+    "ndex": 491,
+    "english": "Darkrai",
+    "kana": "ダークライ"
+  },
+  {
+    "ndex": 492,
+    "english": "Shaymin",
+    "kana": "シェイミ"
+  },
+  {
+    "ndex": 493,
+    "english": "Arceus",
+    "kana": "アルセウス"
+  },
+  {
+    "ndex": 494,
+    "english": "Victini",
+    "kana": "ビクティニ"
+  },
+  {
+    "ndex": 495,
+    "english": "Snivy",
+    "kana": "ツタージャ"
+  },
+  {
+    "ndex": 496,
+    "english": "Servine",
+    "kana": "ジャノビー"
+  },
+  {
+    "ndex": 497,
+    "english": "Serperior",
+    "kana": "ジャローダ"
+  },
+  {
+    "ndex": 498,
+    "english": "Tepig",
+    "kana": "ポカブ"
+  },
+  {
+    "ndex": 499,
+    "english": "Pignite",
+    "kana": "チャオブー"
+  },
+  {
+    "ndex": 500,
+    "english": "Emboar",
+    "kana": "エンブオー"
+  },
+  {
+    "ndex": 501,
+    "english": "Oshawott",
+    "kana": "ミジュマル"
+  },
+  {
+    "ndex": 502,
+    "english": "Dewott",
+    "kana": "フタチマル"
+  },
+  {
+    "ndex": 503,
+    "english": "Samurott",
+    "kana": "ダイケンキ"
+  },
+  {
+    "ndex": 504,
+    "english": "Patrat",
+    "kana": "ミネズミ"
+  },
+  {
+    "ndex": 505,
+    "english": "Watchog",
+    "kana": "ミルホッグ"
+  },
+  {
+    "ndex": 506,
+    "english": "Lillipup",
+    "kana": "ヨーテリー"
+  },
+  {
+    "ndex": 507,
+    "english": "Herdier",
+    "kana": "ハーデリア"
+  },
+  {
+    "ndex": 508,
+    "english": "Stoutland",
+    "kana": "ムーランド"
+  },
+  {
+    "ndex": 509,
+    "english": "Purrloin",
+    "kana": "チョロネコ"
+  },
+  {
+    "ndex": 510,
+    "english": "Liepard",
+    "kana": "レパルダス"
+  },
+  {
+    "ndex": 511,
+    "english": "Pansage",
+    "kana": "ヤナップ"
+  },
+  {
+    "ndex": 512,
+    "english": "Simisage",
+    "kana": "ヤナッキー"
+  },
+  {
+    "ndex": 513,
+    "english": "Pansear",
+    "kana": "バオップ"
+  },
+  {
+    "ndex": 514,
+    "english": "Simisear",
+    "kana": "バオッキー"
+  },
+  {
+    "ndex": 515,
+    "english": "Panpour",
+    "kana": "ヒヤップ"
+  },
+  {
+    "ndex": 516,
+    "english": "Simipour",
+    "kana": "ヒヤッキー"
+  },
+  {
+    "ndex": 517,
+    "english": "Munna",
+    "kana": "ムンナ"
+  },
+  {
+    "ndex": 518,
+    "english": "Musharna",
+    "kana": "ムシャーナ"
+  },
+  {
+    "ndex": 519,
+    "english": "Pidove",
+    "kana": "マメパト"
+  },
+  {
+    "ndex": 520,
+    "english": "Tranquill",
+    "kana": "ハトーボー"
+  },
+  {
+    "ndex": 521,
+    "english": "Unfezant",
+    "kana": "ケンホロウ"
+  },
+  {
+    "ndex": 522,
+    "english": "Blitzle",
+    "kana": "シママ"
+  },
+  {
+    "ndex": 523,
+    "english": "Zebstrika",
+    "kana": "ゼブライカ"
+  },
+  {
+    "ndex": 524,
+    "english": "Roggenrola",
+    "kana": "ダンゴロ"
+  },
+  {
+    "ndex": 525,
+    "english": "Boldore",
+    "kana": "ガントル"
+  },
+  {
+    "ndex": 526,
+    "english": "Gigalith",
+    "kana": "ギガイアス"
+  },
+  {
+    "ndex": 527,
+    "english": "Woobat",
+    "kana": "コロモリ"
+  },
+  {
+    "ndex": 528,
+    "english": "Swoobat",
+    "kana": "ココロモリ"
+  },
+  {
+    "ndex": 529,
+    "english": "Drilbur",
+    "kana": "モグリュー"
+  },
+  {
+    "ndex": 530,
+    "english": "Excadrill",
+    "kana": "ドリュウズ"
+  },
+  {
+    "ndex": 531,
+    "english": "Audino",
+    "kana": "タブンネ"
+  },
+  {
+    "ndex": 532,
+    "english": "Timburr",
+    "kana": "ドッコラー"
+  },
+  {
+    "ndex": 533,
+    "english": "Gurdurr",
+    "kana": "ドテッコツ"
+  },
+  {
+    "ndex": 534,
+    "english": "Conkeldurr",
+    "kana": "ローブシン"
+  },
+  {
+    "ndex": 535,
+    "english": "Tympole",
+    "kana": "オタマロ"
+  },
+  {
+    "ndex": 536,
+    "english": "Palpitoad",
+    "kana": "ガマガル"
+  },
+  {
+    "ndex": 537,
+    "english": "Seismitoad",
+    "kana": "ガマゲロゲ"
+  },
+  {
+    "ndex": 538,
+    "english": "Throh",
+    "kana": "ナゲキ"
+  },
+  {
+    "ndex": 539,
+    "english": "Sawk",
+    "kana": "ダゲキ"
+  },
+  {
+    "ndex": 540,
+    "english": "Sewaddle",
+    "kana": "クルミル"
+  },
+  {
+    "ndex": 541,
+    "english": "Swadloon",
+    "kana": "クルマユ"
+  },
+  {
+    "ndex": 542,
+    "english": "Leavanny",
+    "kana": "ハハコモリ"
+  },
+  {
+    "ndex": 543,
+    "english": "Venipede",
+    "kana": "フシデ"
+  },
+  {
+    "ndex": 544,
+    "english": "Whirlipede",
+    "kana": "ホイーガ"
+  },
+  {
+    "ndex": 545,
+    "english": "Scolipede",
+    "kana": "ペンドラー"
+  },
+  {
+    "ndex": 546,
+    "english": "Cottonee",
+    "kana": "モンメン"
+  },
+  {
+    "ndex": 547,
+    "english": "Whimsicott",
+    "kana": "エルフーン"
+  },
+  {
+    "ndex": 548,
+    "english": "Petilil",
+    "kana": "チュリネ"
+  },
+  {
+    "ndex": 549,
+    "english": "Lilligant",
+    "kana": "ドレディア"
+  },
+  {
+    "ndex": 550,
+    "english": "Basculin",
+    "kana": "バスラオ"
+  },
+  {
+    "ndex": 551,
+    "english": "Sandile",
+    "kana": "メグロコ"
+  },
+  {
+    "ndex": 552,
+    "english": "Krokorok",
+    "kana": "ワルビル"
+  },
+  {
+    "ndex": 553,
+    "english": "Krookodile",
+    "kana": "ワルビアル"
+  },
+  {
+    "ndex": 554,
+    "english": "Darumaka",
+    "kana": "ダルマッカ"
+  },
+  {
+    "ndex": 555,
+    "english": "Darmanitan",
+    "kana": "ヒヒダルマ"
+  },
+  {
+    "ndex": 556,
+    "english": "Maractus",
+    "kana": "マラカッチ"
+  },
+  {
+    "ndex": 557,
+    "english": "Dwebble",
+    "kana": "イシズマイ"
+  },
+  {
+    "ndex": 558,
+    "english": "Crustle",
+    "kana": "イワパレス"
+  },
+  {
+    "ndex": 559,
+    "english": "Scraggy",
+    "kana": "ズルッグ"
+  },
+  {
+    "ndex": 560,
+    "english": "Scrafty",
+    "kana": "ズルズキン"
+  },
+  {
+    "ndex": 561,
+    "english": "Sigilyph",
+    "kana": "シンボラー"
+  },
+  {
+    "ndex": 562,
+    "english": "Yamask",
+    "kana": "デスマス"
+  },
+  {
+    "ndex": 563,
+    "english": "Cofagrigus",
+    "kana": "デスカーン"
+  },
+  {
+    "ndex": 564,
+    "english": "Tirtouga",
+    "kana": "プロトーガ"
+  },
+  {
+    "ndex": 565,
+    "english": "Carracosta",
+    "kana": "アバゴーラ"
+  },
+  {
+    "ndex": 566,
+    "english": "Archen",
+    "kana": "アーケン"
+  },
+  {
+    "ndex": 567,
+    "english": "Archeops",
+    "kana": "アーケオス"
+  },
+  {
+    "ndex": 568,
+    "english": "Trubbish",
+    "kana": "ヤブクロン"
+  },
+  {
+    "ndex": 569,
+    "english": "Garbodor",
+    "kana": "ダストダス"
+  },
+  {
+    "ndex": 570,
+    "english": "Zorua",
+    "kana": "ゾロア"
+  },
+  {
+    "ndex": 571,
+    "english": "Zoroark",
+    "kana": "ゾロアーク"
+  },
+  {
+    "ndex": 572,
+    "english": "Minccino",
+    "kana": "チラーミィ"
+  },
+  {
+    "ndex": 573,
+    "english": "Cinccino",
+    "kana": "チラチーノ"
+  },
+  {
+    "ndex": 574,
+    "english": "Gothita",
+    "kana": "ゴチム"
+  },
+  {
+    "ndex": 575,
+    "english": "Gothorita",
+    "kana": "ゴチミル"
+  },
+  {
+    "ndex": 576,
+    "english": "Gothitelle",
+    "kana": "ゴチルゼル"
+  },
+  {
+    "ndex": 577,
+    "english": "Solosis",
+    "kana": "ユニラン"
+  },
+  {
+    "ndex": 578,
+    "english": "Duosion",
+    "kana": "ダブラン"
+  },
+  {
+    "ndex": 579,
+    "english": "Reuniclus",
+    "kana": "ランクルス"
+  },
+  {
+    "ndex": 580,
+    "english": "Ducklett",
+    "kana": "コアルヒー"
+  },
+  {
+    "ndex": 581,
+    "english": "Swanna",
+    "kana": "スワンナ"
+  },
+  {
+    "ndex": 582,
+    "english": "Vanillite",
+    "kana": "バニプッチ"
+  },
+  {
+    "ndex": 583,
+    "english": "Vanillish",
+    "kana": "バニリッチ"
+  },
+  {
+    "ndex": 584,
+    "english": "Vanilluxe",
+    "kana": "バイバニラ"
+  },
+  {
+    "ndex": 585,
+    "english": "Deerling",
+    "kana": "シキジカ"
+  },
+  {
+    "ndex": 586,
+    "english": "Sawsbuck",
+    "kana": "メブキジカ"
+  },
+  {
+    "ndex": 587,
+    "english": "Emolga",
+    "kana": "エモンガ"
+  },
+  {
+    "ndex": 588,
+    "english": "Karrablast",
+    "kana": "カブルモ"
+  },
+  {
+    "ndex": 589,
+    "english": "Escavalier",
+    "kana": "シュバルゴ"
+  },
+  {
+    "ndex": 590,
+    "english": "Foongus",
+    "kana": "タマゲタケ"
+  },
+  {
+    "ndex": 591,
+    "english": "Amoonguss",
+    "kana": "モロバレル"
+  },
+  {
+    "ndex": 592,
+    "english": "Frillish",
+    "kana": "プルリル"
+  },
+  {
+    "ndex": 593,
+    "english": "Jellicent",
+    "kana": "ブルンゲル"
+  },
+  {
+    "ndex": 594,
+    "english": "Alomomola",
+    "kana": "ママンボウ"
+  },
+  {
+    "ndex": 595,
+    "english": "Joltik",
+    "kana": "バチュル"
+  },
+  {
+    "ndex": 596,
+    "english": "Galvantula",
+    "kana": "デンチュラ"
+  },
+  {
+    "ndex": 597,
+    "english": "Ferroseed",
+    "kana": "テッシード"
+  },
+  {
+    "ndex": 598,
+    "english": "Ferrothorn",
+    "kana": "ナットレイ"
+  },
+  {
+    "ndex": 599,
+    "english": "Klink",
+    "kana": "ギアル"
+  },
+  {
+    "ndex": 600,
+    "english": "Klang",
+    "kana": "ギギアル"
+  },
+  {
+    "ndex": 601,
+    "english": "Klinklang",
+    "kana": "ギギギアル"
+  },
+  {
+    "ndex": 602,
+    "english": "Tynamo",
+    "kana": "シビシラス"
+  },
+  {
+    "ndex": 603,
+    "english": "Eelektrik",
+    "kana": "シビビール"
+  },
+  {
+    "ndex": 604,
+    "english": "Eelektross",
+    "kana": "シビルドン"
+  },
+  {
+    "ndex": 605,
+    "english": "Elgyem",
+    "kana": "リグレー"
+  },
+  {
+    "ndex": 606,
+    "english": "Beheeyem",
+    "kana": "オーベム"
+  },
+  {
+    "ndex": 607,
+    "english": "Litwick",
+    "kana": "ヒトモシ"
+  },
+  {
+    "ndex": 608,
+    "english": "Lampent",
+    "kana": "ランプラー"
+  },
+  {
+    "ndex": 609,
+    "english": "Chandelure",
+    "kana": "シャンデラ"
+  },
+  {
+    "ndex": 610,
+    "english": "Axew",
+    "kana": "キバゴ"
+  },
+  {
+    "ndex": 611,
+    "english": "Fraxure",
+    "kana": "オノンド"
+  },
+  {
+    "ndex": 612,
+    "english": "Haxorus",
+    "kana": "オノノクス"
+  },
+  {
+    "ndex": 613,
+    "english": "Cubchoo",
+    "kana": "クマシュン"
+  },
+  {
+    "ndex": 614,
+    "english": "Beartic",
+    "kana": "ツンベアー"
+  },
+  {
+    "ndex": 615,
+    "english": "Cryogonal",
+    "kana": "フリージオ"
+  },
+  {
+    "ndex": 616,
+    "english": "Shelmet",
+    "kana": "チョボマキ"
+  },
+  {
+    "ndex": 617,
+    "english": "Accelgor",
+    "kana": "アギルダー"
+  },
+  {
+    "ndex": 618,
+    "english": "Stunfisk",
+    "kana": "マッギョ"
+  },
+  {
+    "ndex": 619,
+    "english": "Mienfoo",
+    "kana": "コジョフー"
+  },
+  {
+    "ndex": 620,
+    "english": "Mienshao",
+    "kana": "コジョンド"
+  },
+  {
+    "ndex": 621,
+    "english": "Druddigon",
+    "kana": "クリムガン"
+  },
+  {
+    "ndex": 622,
+    "english": "Golett",
+    "kana": "ゴビット"
+  },
+  {
+    "ndex": 623,
+    "english": "Golurk",
+    "kana": "ゴルーグ"
+  },
+  {
+    "ndex": 624,
+    "english": "Pawniard",
+    "kana": "コマタナ"
+  },
+  {
+    "ndex": 625,
+    "english": "Bisharp",
+    "kana": "キリキザン"
+  },
+  {
+    "ndex": 626,
+    "english": "Bouffalant",
+    "kana": "バッフロン"
+  },
+  {
+    "ndex": 627,
+    "english": "Rufflet",
+    "kana": "ワシボン"
+  },
+  {
+    "ndex": 628,
+    "english": "Braviary",
+    "kana": "ウォーグル"
+  },
+  {
+    "ndex": 629,
+    "english": "Vullaby",
+    "kana": "バルチャイ"
+  },
+  {
+    "ndex": 630,
+    "english": "Mandibuzz",
+    "kana": "バルジーナ"
+  },
+  {
+    "ndex": 631,
+    "english": "Heatmor",
+    "kana": "クイタラン"
+  },
+  {
+    "ndex": 632,
+    "english": "Durant",
+    "kana": "アイアント"
+  },
+  {
+    "ndex": 633,
+    "english": "Deino",
+    "kana": "モノズ"
+  },
+  {
+    "ndex": 634,
+    "english": "Zweilous",
+    "kana": "ジヘッド"
+  },
+  {
+    "ndex": 635,
+    "english": "Hydreigon",
+    "kana": "サザンドラ"
+  },
+  {
+    "ndex": 636,
+    "english": "Larvesta",
+    "kana": "メラルバ"
+  },
+  {
+    "ndex": 637,
+    "english": "Volcarona",
+    "kana": "ウルガモス"
+  },
+  {
+    "ndex": 638,
+    "english": "Cobalion",
+    "kana": "コバルオン"
+  },
+  {
+    "ndex": 639,
+    "english": "Terrakion",
+    "kana": "テラキオン"
+  },
+  {
+    "ndex": 640,
+    "english": "Virizion",
+    "kana": "ビリジオン"
+  },
+  {
+    "ndex": 641,
+    "english": "Tornadus",
+    "kana": "トルネロス"
+  },
+  {
+    "ndex": 642,
+    "english": "Thundurus",
+    "kana": "ボルトロス"
+  },
+  {
+    "ndex": 643,
+    "english": "Reshiram",
+    "kana": "レシラム"
+  },
+  {
+    "ndex": 644,
+    "english": "Zekrom",
+    "kana": "ゼクロム"
+  },
+  {
+    "ndex": 645,
+    "english": "Landorus",
+    "kana": "ランドロス"
+  },
+  {
+    "ndex": 646,
+    "english": "Kyurem",
+    "kana": "キュレム"
+  },
+  {
+    "ndex": 647,
+    "english": "Keldeo",
+    "kana": "ケルディオ"
+  },
+  {
+    "ndex": 648,
+    "english": "Meloetta",
+    "kana": "メロエッタ"
+  },
+  {
+    "ndex": 649,
+    "english": "Genesect",
+    "kana": "ゲノセクト"
+  },
+  {
+    "ndex": 650,
+    "english": "Chespin",
+    "kana": "ハリマロン"
+  },
+  {
+    "ndex": 651,
+    "english": "Quilladin",
+    "kana": "ハリボーグ"
+  },
+  {
+    "ndex": 652,
+    "english": "Chesnaught",
+    "kana": "ブリガロン"
+  },
+  {
+    "ndex": 653,
+    "english": "Fennekin",
+    "kana": "フォッコ"
+  },
+  {
+    "ndex": 654,
+    "english": "Braixen",
+    "kana": "テールナー"
+  },
+  {
+    "ndex": 655,
+    "english": "Delphox",
+    "kana": "マフォクシー"
+  },
+  {
+    "ndex": 656,
+    "english": "Froakie",
+    "kana": "ケロマツ"
+  },
+  {
+    "ndex": 657,
+    "english": "Frogadier",
+    "kana": "ゲコガシラ"
+  },
+  {
+    "ndex": 658,
+    "english": "Greninja",
+    "kana": "ゲッコウガ"
+  },
+  {
+    "ndex": 659,
+    "english": "Bunnelby",
+    "kana": "ホルビー"
+  },
+  {
+    "ndex": 660,
+    "english": "Diggersby",
+    "kana": "ホルード"
+  },
+  {
+    "ndex": 661,
+    "english": "Fletchling",
+    "kana": "ヤヤコマ"
+  },
+  {
+    "ndex": 662,
+    "english": "Fletchinder",
+    "kana": "ヒノヤコマ"
+  },
+  {
+    "ndex": 663,
+    "english": "Talonflame",
+    "kana": "ファイアロー"
+  },
+  {
+    "ndex": 664,
+    "english": "Scatterbug",
+    "kana": "コフキムシ"
+  },
+  {
+    "ndex": 665,
+    "english": "Spewpa",
+    "kana": "コフーライ"
+  },
+  {
+    "ndex": 666,
+    "english": "Vivillon",
+    "kana": "ビビヨン"
+  },
+  {
+    "ndex": 667,
+    "english": "Litleo",
+    "kana": "シシコ"
+  },
+  {
+    "ndex": 668,
+    "english": "Pyroar",
+    "kana": "カエンジシ"
+  },
+  {
+    "ndex": 669,
+    "english": "Flabébé",
+    "kana": "フラベベ"
+  },
+  {
+    "ndex": 670,
+    "english": "Floette",
+    "kana": "フラエッテ"
+  },
+  {
+    "ndex": 671,
+    "english": "Florges",
+    "kana": "フラージェス"
+  },
+  {
+    "ndex": 672,
+    "english": "Skiddo",
+    "kana": "メェークル"
+  },
+  {
+    "ndex": 673,
+    "english": "Gogoat",
+    "kana": "ゴーゴート"
+  },
+  {
+    "ndex": 674,
+    "english": "Pancham",
+    "kana": "ヤンチャム"
+  },
+  {
+    "ndex": 675,
+    "english": "Pangoro",
+    "kana": "ゴロンダ"
+  },
+  {
+    "ndex": 676,
+    "english": "Furfrou",
+    "kana": "トリミアン"
+  },
+  {
+    "ndex": 677,
+    "english": "Espurr",
+    "kana": "ニャスパー"
+  },
+  {
+    "ndex": 678,
+    "english": "Meowstic",
+    "kana": "ニャオニクス"
+  },
+  {
+    "ndex": 679,
+    "english": "Honedge",
+    "kana": "ヒトツキ"
+  },
+  {
+    "ndex": 680,
+    "english": "Doublade",
+    "kana": "ニダンギル"
+  },
+  {
+    "ndex": 681,
+    "english": "Aegislash",
+    "kana": "ギルガルド"
+  },
+  {
+    "ndex": 682,
+    "english": "Spritzee",
+    "kana": "シュシュプ"
+  },
+  {
+    "ndex": 683,
+    "english": "Aromatisse",
+    "kana": "フレフワン"
+  },
+  {
+    "ndex": 684,
+    "english": "Swirlix",
+    "kana": "ペロッパフ"
+  },
+  {
+    "ndex": 685,
+    "english": "Slurpuff",
+    "kana": "ペロリーム"
+  },
+  {
+    "ndex": 686,
+    "english": "Inkay",
+    "kana": "マーイーカ"
+  },
+  {
+    "ndex": 687,
+    "english": "Malamar",
+    "kana": "カラマネロ"
+  },
+  {
+    "ndex": 688,
+    "english": "Binacle",
+    "kana": "カメテテ"
+  },
+  {
+    "ndex": 689,
+    "english": "Barbaracle",
+    "kana": "ガメノデス"
+  },
+  {
+    "ndex": 690,
+    "english": "Skrelp",
+    "kana": "クズモー"
+  },
+  {
+    "ndex": 691,
+    "english": "Dragalge",
+    "kana": "ドラミドロ"
+  },
+  {
+    "ndex": 692,
+    "english": "Clauncher",
+    "kana": "ウデッポウ"
+  },
+  {
+    "ndex": 693,
+    "english": "Clawitzer",
+    "kana": "ブロスター"
+  },
+  {
+    "ndex": 694,
+    "english": "Helioptile",
+    "kana": "エリキテル"
+  },
+  {
+    "ndex": 695,
+    "english": "Heliolisk",
+    "kana": "エレザード"
+  },
+  {
+    "ndex": 696,
+    "english": "Tyrunt",
+    "kana": "チゴラス"
+  },
+  {
+    "ndex": 697,
+    "english": "Tyrantrum",
+    "kana": "ガチゴラス"
+  },
+  {
+    "ndex": 698,
+    "english": "Amaura",
+    "kana": "アマルス"
+  },
+  {
+    "ndex": 699,
+    "english": "Aurorus",
+    "kana": "アマルルガ"
+  },
+  {
+    "ndex": 700,
+    "english": "Sylveon",
+    "kana": "ニンフィア"
+  },
+  {
+    "ndex": 701,
+    "english": "Hawlucha",
+    "kana": "ルチャブル"
+  },
+  {
+    "ndex": 702,
+    "english": "Dedenne",
+    "kana": "デデンネ"
+  },
+  {
+    "ndex": 703,
+    "english": "Carbink",
+    "kana": "メレシー"
+  },
+  {
+    "ndex": 704,
+    "english": "Goomy",
+    "kana": "ヌメラ"
+  },
+  {
+    "ndex": 705,
+    "english": "Sliggoo",
+    "kana": "ヌメイル"
+  },
+  {
+    "ndex": 706,
+    "english": "Goodra",
+    "kana": "ヌメルゴン"
+  },
+  {
+    "ndex": 707,
+    "english": "Klefki",
+    "kana": "クレッフィ"
+  },
+  {
+    "ndex": 708,
+    "english": "Phantump",
+    "kana": "ボクレー"
+  },
+  {
+    "ndex": 709,
+    "english": "Trevenant",
+    "kana": "オーロット"
+  },
+  {
+    "ndex": 710,
+    "english": "Pumpkaboo",
+    "kana": "バケッチャ"
+  },
+  {
+    "ndex": 711,
+    "english": "Gourgeist",
+    "kana": "パンプジン"
+  },
+  {
+    "ndex": 712,
+    "english": "Bergmite",
+    "kana": "カチコール"
+  },
+  {
+    "ndex": 713,
+    "english": "Avalugg",
+    "kana": "クレベース"
+  },
+  {
+    "ndex": 714,
+    "english": "Noibat",
+    "kana": "オンバット"
+  },
+  {
+    "ndex": 715,
+    "english": "Noivern",
+    "kana": "オンバーン"
+  },
+  {
+    "ndex": 716,
+    "english": "Xerneas",
+    "kana": "ゼルネアス"
+  },
+  {
+    "ndex": 717,
+    "english": "Yveltal",
+    "kana": "イベルタル"
+  },
+  {
+    "ndex": 718,
+    "english": "Zygarde",
+    "kana": "ジガルデ"
+  },
+  {
+    "ndex": 719,
+    "english": "Diancie",
+    "kana": "ディアンシー"
+  },
+  {
+    "ndex": 720,
+    "english": "Hoopa",
+    "kana": "フーパ"
+  },
+  {
+    "ndex": 721,
+    "english": "Volcanion",
+    "kana": "ボルケニオン"
+  },
+  {
+    "ndex": 722,
+    "english": "Rowlet",
+    "kana": "モクロー"
+  },
+  {
+    "ndex": 723,
+    "english": "Dartrix",
+    "kana": "フクスロー"
+  },
+  {
+    "ndex": 724,
+    "english": "Decidueye",
+    "kana": "ジュナイパー"
+  },
+  {
+    "ndex": 725,
+    "english": "Litten",
+    "kana": "ニャビー"
+  },
+  {
+    "ndex": 726,
+    "english": "Torracat",
+    "kana": "ニャヒート"
+  },
+  {
+    "ndex": 727,
+    "english": "Incineroar",
+    "kana": "ガオガエン"
+  },
+  {
+    "ndex": 728,
+    "english": "Popplio",
+    "kana": "アシマリ"
+  },
+  {
+    "ndex": 729,
+    "english": "Brionne",
+    "kana": "オシャマリ"
+  },
+  {
+    "ndex": 730,
+    "english": "Primarina",
+    "kana": "アシレーヌ"
+  },
+  {
+    "ndex": 731,
+    "english": "Pikipek",
+    "kana": "ツツケラ"
+  },
+  {
+    "ndex": 732,
+    "english": "Trumbeak",
+    "kana": "ケララッパ"
+  },
+  {
+    "ndex": 733,
+    "english": "Toucannon",
+    "kana": "ドデカバシ"
+  },
+  {
+    "ndex": 734,
+    "english": "Yungoos",
+    "kana": "ヤングース"
+  },
+  {
+    "ndex": 735,
+    "english": "Gumshoos",
+    "kana": "デカグース"
+  },
+  {
+    "ndex": 736,
+    "english": "Grubbin",
+    "kana": "アゴジムシ"
+  },
+  {
+    "ndex": 737,
+    "english": "Charjabug",
+    "kana": "デンヂムシ"
+  },
+  {
+    "ndex": 738,
+    "english": "Vikavolt",
+    "kana": "クワガノン"
+  },
+  {
+    "ndex": 739,
+    "english": "Crabrawler",
+    "kana": "マケンカニ"
+  },
+  {
+    "ndex": 740,
+    "english": "Crabominable",
+    "kana": "ケケンカニ"
+  },
+  {
+    "ndex": 741,
+    "english": "Oricorio",
+    "kana": "オドリドリ"
+  },
+  {
+    "ndex": 742,
+    "english": "Cutiefly",
+    "kana": "アブリー"
+  },
+  {
+    "ndex": 743,
+    "english": "Ribombee",
+    "kana": "アブリボン"
+  },
+  {
+    "ndex": 744,
+    "english": "Rockruff",
+    "kana": "イワンコ"
+  },
+  {
+    "ndex": 745,
+    "english": "Lycanroc",
+    "kana": "ルガルガン"
+  },
+  {
+    "ndex": 746,
+    "english": "Wishiwashi",
+    "kana": "ヨワシ"
+  },
+  {
+    "ndex": 747,
+    "english": "Mareanie",
+    "kana": "ヒドイデ"
+  },
+  {
+    "ndex": 748,
+    "english": "Toxapex",
+    "kana": "ドヒドイデ"
+  },
+  {
+    "ndex": 749,
+    "english": "Mudbray",
+    "kana": "ドロバンコ"
+  },
+  {
+    "ndex": 750,
+    "english": "Mudsdale",
+    "kana": "バンバドロ"
+  },
+  {
+    "ndex": 751,
+    "english": "Dewpider",
+    "kana": "シズクモ"
+  },
+  {
+    "ndex": 752,
+    "english": "Araquanid",
+    "kana": "オニシズクモ"
+  },
+  {
+    "ndex": 753,
+    "english": "Fomantis",
+    "kana": "カリキリ"
+  },
+  {
+    "ndex": 754,
+    "english": "Lurantis",
+    "kana": "ラランテス"
+  },
+  {
+    "ndex": 755,
+    "english": "Morelull",
+    "kana": "ネマシュ"
+  },
+  {
+    "ndex": 756,
+    "english": "Shiinotic",
+    "kana": "マシェード"
+  },
+  {
+    "ndex": 757,
+    "english": "Salandit",
+    "kana": "ヤトウモリ"
+  },
+  {
+    "ndex": 758,
+    "english": "Salazzle",
+    "kana": "エンニュート"
+  },
+  {
+    "ndex": 759,
+    "english": "Stufful",
+    "kana": "ヌイコグマ"
+  },
+  {
+    "ndex": 760,
+    "english": "Bewear",
+    "kana": "キテルグマ"
+  },
+  {
+    "ndex": 761,
+    "english": "Bounsweet",
+    "kana": "アマカジ"
+  },
+  {
+    "ndex": 762,
+    "english": "Steenee",
+    "kana": "アママイコ"
+  },
+  {
+    "ndex": 763,
+    "english": "Tsareena",
+    "kana": "アマージョ"
+  },
+  {
+    "ndex": 764,
+    "english": "Comfey",
+    "kana": "キュワワー"
+  },
+  {
+    "ndex": 765,
+    "english": "Oranguru",
+    "kana": "ヤレユータン"
+  },
+  {
+    "ndex": 766,
+    "english": "Passimian",
+    "kana": "ナゲツケサル"
+  },
+  {
+    "ndex": 767,
+    "english": "Wimpod",
+    "kana": "コソクムシ"
+  },
+  {
+    "ndex": 768,
+    "english": "Golisopod",
+    "kana": "グソクムシャ"
+  },
+  {
+    "ndex": 769,
+    "english": "Sandygast",
+    "kana": "スナバァ"
+  },
+  {
+    "ndex": 770,
+    "english": "Palossand",
+    "kana": "シロデスナ"
+  },
+  {
+    "ndex": 771,
+    "english": "Pyukumuku",
+    "kana": "ナマコブシ"
+  },
+  {
+    "ndex": 772,
+    "english": "Type: Null",
+    "kana": "タイプ：ヌル"
+  },
+  {
+    "ndex": 773,
+    "english": "Silvally",
+    "kana": "シルヴァディ"
+  },
+  {
+    "ndex": 774,
+    "english": "Minior",
+    "kana": "メテノ"
+  },
+  {
+    "ndex": 775,
+    "english": "Komala",
+    "kana": "ネッコアラ"
+  },
+  {
+    "ndex": 776,
+    "english": "Turtonator",
+    "kana": "バクガメス"
+  },
+  {
+    "ndex": 777,
+    "english": "Togedemaru",
+    "kana": "トゲデマル"
+  },
+  {
+    "ndex": 778,
+    "english": "Mimikyu",
+    "kana": "ミミッキュ"
+  },
+  {
+    "ndex": 779,
+    "english": "Bruxish",
+    "kana": "ハギギシリ"
+  },
+  {
+    "ndex": 780,
+    "english": "Drampa",
+    "kana": "ジジーロン"
+  },
+  {
+    "ndex": 781,
+    "english": "Dhelmise",
+    "kana": "ダダリン"
+  },
+  {
+    "ndex": 782,
+    "english": "Jangmo-o",
+    "kana": "ジャラコ"
+  },
+  {
+    "ndex": 783,
+    "english": "Hakamo-o",
+    "kana": "ジャランゴ"
+  },
+  {
+    "ndex": 784,
+    "english": "Kommo-o",
+    "kana": "ジャラランガ"
+  },
+  {
+    "ndex": 785,
+    "english": "Tapu Koko",
+    "kana": "カプ・コケコ"
+  },
+  {
+    "ndex": 786,
+    "english": "Tapu Lele",
+    "kana": "カプ・テテフ"
+  },
+  {
+    "ndex": 787,
+    "english": "Tapu Bulu",
+    "kana": "カプ・ブルル"
+  },
+  {
+    "ndex": 788,
+    "english": "Tapu Fini",
+    "kana": "カプ・レヒレ"
+  },
+  {
+    "ndex": 789,
+    "english": "Cosmog",
+    "kana": "コスモッグ"
+  },
+  {
+    "ndex": 790,
+    "english": "Cosmoem",
+    "kana": "コスモウム"
+  },
+  {
+    "ndex": 791,
+    "english": "Solgaleo",
+    "kana": "ソルガレオ"
+  },
+  {
+    "ndex": 792,
+    "english": "Lunala",
+    "kana": "ルナアーラ"
+  },
+  {
+    "ndex": 793,
+    "english": "Nihilego",
+    "kana": "ウツロイド"
+  },
+  {
+    "ndex": 794,
+    "english": "Buzzwole",
+    "kana": "マッシブーン"
+  },
+  {
+    "ndex": 795,
+    "english": "Pheromosa",
+    "kana": "フェローチェ"
+  },
+  {
+    "ndex": 796,
+    "english": "Xurkitree",
+    "kana": "デンジュモク"
+  },
+  {
+    "ndex": 797,
+    "english": "Celesteela",
+    "kana": "テッカグヤ"
+  },
+  {
+    "ndex": 798,
+    "english": "Kartana",
+    "kana": "カミツルギ"
+  },
+  {
+    "ndex": 799,
+    "english": "Guzzlord",
+    "kana": "アクジキング"
+  },
+  {
+    "ndex": 800,
+    "english": "Necrozma",
+    "kana": "ネクロズマ"
+  },
+  {
+    "ndex": 801,
+    "english": "Magearna",
+    "kana": "マギアナ"
+  },
+  {
+    "ndex": 802,
+    "english": "Marshadow",
+    "kana": "マーシャドー"
+  },
+  {
+    "ndex": 803,
+    "english": "Poipole",
+    "kana": "ベベノム"
+  },
+  {
+    "ndex": 804,
+    "english": "Naganadel",
+    "kana": "アーゴヨン"
+  },
+  {
+    "ndex": 805,
+    "english": "Stakataka",
+    "kana": "ツンデツンデ"
+  },
+  {
+    "ndex": 806,
+    "english": "Blacephalon",
+    "kana": "ズガドーン"
+  },
+  {
+    "ndex": 807,
+    "english": "Zeraora",
+    "kana": "ゼラオラ"
+  },
+  {
+    "ndex": 808,
+    "english": "Meltan",
+    "kana": "メルタン"
+  },
+  {
+    "ndex": 809,
+    "english": "Melmetal",
+    "kana": "メルメタル"
+  },
+  {
+    "ndex": 810,
+    "english": "Grookey",
+    "kana": "サルノリ"
+  },
+  {
+    "ndex": 811,
+    "english": "Thwackey",
+    "kana": "バチンキー"
+  },
+  {
+    "ndex": 812,
+    "english": "Rillaboom",
+    "kana": "ゴリランダー"
+  },
+  {
+    "ndex": 813,
+    "english": "Scorbunny",
+    "kana": "ヒバニー"
+  },
+  {
+    "ndex": 814,
+    "english": "Raboot",
+    "kana": "ラビフット"
+  },
+  {
+    "ndex": 815,
+    "english": "Cinderace",
+    "kana": "エースバーン"
+  },
+  {
+    "ndex": 816,
+    "english": "Sobble",
+    "kana": "メッソン"
+  },
+  {
+    "ndex": 817,
+    "english": "Drizzile",
+    "kana": "ジメレオン"
+  },
+  {
+    "ndex": 818,
+    "english": "Inteleon",
+    "kana": "インテレオン"
+  },
+  {
+    "ndex": 819,
+    "english": "Skwovet",
+    "kana": "ホシガリス"
+  },
+  {
+    "ndex": 820,
+    "english": "Greedent",
+    "kana": "ヨクバリス"
+  },
+  {
+    "ndex": 821,
+    "english": "Rookidee",
+    "kana": "ココガラ"
+  },
+  {
+    "ndex": 822,
+    "english": "Corvisquire",
+    "kana": "アオガラス"
+  },
+  {
+    "ndex": 823,
+    "english": "Corviknight",
+    "kana": "アーマーガア"
+  },
+  {
+    "ndex": 824,
+    "english": "Blipbug",
+    "kana": "サッチムシ"
+  },
+  {
+    "ndex": 825,
+    "english": "Dottler",
+    "kana": "レドームシ"
+  },
+  {
+    "ndex": 826,
+    "english": "Orbeetle",
+    "kana": "イオルブ"
+  },
+  {
+    "ndex": 827,
+    "english": "Nickit",
+    "kana": "クスネ"
+  },
+  {
+    "ndex": 828,
+    "english": "Thievul",
+    "kana": "フォクスライ"
+  },
+  {
+    "ndex": 829,
+    "english": "Gossifleur",
+    "kana": "ヒメンカ"
+  },
+  {
+    "ndex": 830,
+    "english": "Eldegoss",
+    "kana": "ワタシラガ"
+  },
+  {
+    "ndex": 831,
+    "english": "Wooloo",
+    "kana": "ウールー"
+  },
+  {
+    "ndex": 832,
+    "english": "Dubwool",
+    "kana": "バイウールー"
+  },
+  {
+    "ndex": 833,
+    "english": "Chewtle",
+    "kana": "カムカメ"
+  },
+  {
+    "ndex": 834,
+    "english": "Drednaw",
+    "kana": "カジリガメ"
+  },
+  {
+    "ndex": 835,
+    "english": "Yamper",
+    "kana": "ワンパチ"
+  },
+  {
+    "ndex": 836,
+    "english": "Boltund",
+    "kana": "パルスワン"
+  },
+  {
+    "ndex": 837,
+    "english": "Rolycoly",
+    "kana": "タンドン"
+  },
+  {
+    "ndex": 838,
+    "english": "Carkol",
+    "kana": "トロッゴン"
+  },
+  {
+    "ndex": 839,
+    "english": "Coalossal",
+    "kana": "セキタンザン"
+  },
+  {
+    "ndex": 840,
+    "english": "Applin",
+    "kana": "カジッチュ"
+  },
+  {
+    "ndex": 841,
+    "english": "Flapple",
+    "kana": "アップリュー"
+  },
+  {
+    "ndex": 842,
+    "english": "Appletun",
+    "kana": "タルップル"
+  },
+  {
+    "ndex": 843,
+    "english": "Silicobra",
+    "kana": "スナヘビ"
+  },
+  {
+    "ndex": 844,
+    "english": "Sandaconda",
+    "kana": "サダイジャ"
+  },
+  {
+    "ndex": 845,
+    "english": "Cramorant",
+    "kana": "ウッウ"
+  },
+  {
+    "ndex": 846,
+    "english": "Arrokuda",
+    "kana": "サシカマス"
+  },
+  {
+    "ndex": 847,
+    "english": "Barraskewda",
+    "kana": "カマスジョー"
+  },
+  {
+    "ndex": 848,
+    "english": "Toxel",
+    "kana": "エレズン"
+  },
+  {
+    "ndex": 849,
+    "english": "Toxtricity",
+    "kana": "ストリンダー"
+  },
+  {
+    "ndex": 850,
+    "english": "Sizzlipede",
+    "kana": "ヤクデ"
+  },
+  {
+    "ndex": 851,
+    "english": "Centiskorch",
+    "kana": "マルヤクデ"
+  },
+  {
+    "ndex": 852,
+    "english": "Clobbopus",
+    "kana": "タタッコ"
+  },
+  {
+    "ndex": 853,
+    "english": "Grapploct",
+    "kana": "オトスパス"
+  },
+  {
+    "ndex": 854,
+    "english": "Sinistea",
+    "kana": "ヤバチャ"
+  },
+  {
+    "ndex": 855,
+    "english": "Polteageist",
+    "kana": "ポットデス"
+  },
+  {
+    "ndex": 856,
+    "english": "Hatenna",
+    "kana": "ミブリム"
+  },
+  {
+    "ndex": 857,
+    "english": "Hattrem",
+    "kana": "テブリム"
+  },
+  {
+    "ndex": 858,
+    "english": "Hatterene",
+    "kana": "ブリムオン"
+  },
+  {
+    "ndex": 859,
+    "english": "Impidimp",
+    "kana": "ベロバー"
+  },
+  {
+    "ndex": 860,
+    "english": "Morgrem",
+    "kana": "ギモー"
+  },
+  {
+    "ndex": 861,
+    "english": "Grimmsnarl",
+    "kana": "オーロンゲ"
+  },
+  {
+    "ndex": 862,
+    "english": "Obstagoon",
+    "kana": "タチフサグマ"
+  },
+  {
+    "ndex": 863,
+    "english": "Perrserker",
+    "kana": "ニャイキング"
+  },
+  {
+    "ndex": 864,
+    "english": "Cursola",
+    "kana": "サニゴーン"
+  },
+  {
+    "ndex": 865,
+    "english": "Sirfetch'd",
+    "kana": "ネギガナイト"
+  },
+  {
+    "ndex": 866,
+    "english": "Mr. Rime",
+    "kana": "バリコオル"
+  },
+  {
+    "ndex": 867,
+    "english": "Runerigus",
+    "kana": "デスバーン"
+  },
+  {
+    "ndex": 868,
+    "english": "Milcery",
+    "kana": "マホミル"
+  },
+  {
+    "ndex": 869,
+    "english": "Alcremie",
+    "kana": "マホイップ"
+  },
+  {
+    "ndex": 870,
+    "english": "Falinks",
+    "kana": "タイレーツ"
+  },
+  {
+    "ndex": 871,
+    "english": "Pincurchin",
+    "kana": "バチンウニ"
+  },
+  {
+    "ndex": 872,
+    "english": "Snom",
+    "kana": "ユキハミ"
+  },
+  {
+    "ndex": 873,
+    "english": "Frosmoth",
+    "kana": "モスノウ"
+  },
+  {
+    "ndex": 874,
+    "english": "Stonjourner",
+    "kana": "イシヘンジン"
+  },
+  {
+    "ndex": 875,
+    "english": "Eiscue",
+    "kana": "コオリッポ"
+  },
+  {
+    "ndex": 876,
+    "english": "Indeedee",
+    "kana": "イエッサン"
+  },
+  {
+    "ndex": 877,
+    "english": "Morpeko",
+    "kana": "モルペコ"
+  },
+  {
+    "ndex": 878,
+    "english": "Cufant",
+    "kana": "ゾウドウ"
+  },
+  {
+    "ndex": 879,
+    "english": "Copperajah",
+    "kana": "ダイオウドウ"
+  },
+  {
+    "ndex": 880,
+    "english": "Dracozolt",
+    "kana": "パッチラゴン"
+  },
+  {
+    "ndex": 881,
+    "english": "Arctozolt",
+    "kana": "パッチルドン"
+  },
+  {
+    "ndex": 882,
+    "english": "Dracovish",
+    "kana": "ウオノラゴン"
+  },
+  {
+    "ndex": 883,
+    "english": "Arctovish",
+    "kana": "ウオチルドン"
+  },
+  {
+    "ndex": 884,
+    "english": "Duraludon",
+    "kana": "ジュラルドン"
+  },
+  {
+    "ndex": 885,
+    "english": "Dreepy",
+    "kana": "ドラメシヤ"
+  },
+  {
+    "ndex": 886,
+    "english": "Drakloak",
+    "kana": "ドロンチ"
+  },
+  {
+    "ndex": 887,
+    "english": "Dragapult",
+    "kana": "ドラパルト"
+  },
+  {
+    "ndex": 888,
+    "english": "Zacian",
+    "kana": "ザシアン"
+  },
+  {
+    "ndex": 889,
+    "english": "Zamazenta",
+    "kana": "ザマゼンタ"
+  },
+  {
+    "ndex": 890,
+    "english": "Eternatus",
+    "kana": "ムゲンダイナ"
+  },
+  {
+    "ndex": 891,
+    "english": "Kubfu",
+    "kana": "ダクマ"
+  },
+  {
+    "ndex": 892,
+    "english": "Urshifu",
+    "kana": "ウーラオス"
+  },
+  {
+    "ndex": 893,
+    "english": "Zarude",
+    "kana": "ザルード"
+  },
+  {
+    "ndex": 894,
+    "english": "Regieleki",
+    "kana": "レジエレキ"
+  },
+  {
+    "ndex": 895,
+    "english": "Regidrago",
+    "kana": "レジドラゴ"
+  },
+  {
+    "ndex": 896,
+    "english": "Glastrier",
+    "kana": "ブリザポス"
+  },
+  {
+    "ndex": 897,
+    "english": "Spectrier",
+    "kana": "レイスポス"
+  },
+  {
+    "ndex": 898,
+    "english": "Calyrex",
+    "kana": "バドレックス"
+  },
+  {
+    "ndex": 899,
+    "english": "Wyrdeer",
+    "kana": "アヤシシ"
+  },
+  {
+    "ndex": 900,
+    "english": "Kleavor",
+    "kana": "バサギリ"
+  },
+  {
+    "ndex": 901,
+    "english": "Ursaluna",
+    "kana": "ガチグマ"
+  },
+  {
+    "ndex": 902,
+    "english": "Basculegion",
+    "kana": "イダイトウ"
+  },
+  {
+    "ndex": 903,
+    "english": "Sneasler",
+    "kana": "オオニューラ"
+  },
+  {
+    "ndex": 904,
+    "english": "Overqwil",
+    "kana": "ハリーマン"
+  },
+  {
+    "ndex": 905,
+    "english": "Enamorus",
+    "kana": "ラブトロス"
+  },
+  {
+    "ndex": 906,
+    "english": "Sprigatito",
+    "kana": "ニャオハ"
+  },
+  {
+    "ndex": 907,
+    "english": "Floragato",
+    "kana": "ニャローテ"
+  },
+  {
+    "ndex": 908,
+    "english": "Meowscarada",
+    "kana": "マスカーニャ"
+  },
+  {
+    "ndex": 909,
+    "english": "Fuecoco",
+    "kana": "ホゲータ"
+  },
+  {
+    "ndex": 910,
+    "english": "Crocalor",
+    "kana": "アチゲータ"
+  },
+  {
+    "ndex": 911,
+    "english": "Skeledirge",
+    "kana": "ラウドボーン"
+  },
+  {
+    "ndex": 912,
+    "english": "Quaxly",
+    "kana": "クワッス"
+  },
+  {
+    "ndex": 913,
+    "english": "Quaxwell",
+    "kana": "ウェルカモ"
+  },
+  {
+    "ndex": 914,
+    "english": "Quaquaval",
+    "kana": "ウェーニバル"
+  },
+  {
+    "ndex": 915,
+    "english": "Lechonk",
+    "kana": "グルトン"
+  },
+  {
+    "ndex": 916,
+    "english": "Oinkologne",
+    "kana": "パフュートン"
+  },
+  {
+    "ndex": 917,
+    "english": "Tarountula",
+    "kana": "タマンチュラ"
+  },
+  {
+    "ndex": 918,
+    "english": "Spidops",
+    "kana": "ワナイダー"
+  },
+  {
+    "ndex": 919,
+    "english": "Nymble",
+    "kana": "マメバッタ"
+  },
+  {
+    "ndex": 920,
+    "english": "Lokix",
+    "kana": "エクスレッグ"
+  },
+  {
+    "ndex": 921,
+    "english": "Pawmi",
+    "kana": "パモ"
+  },
+  {
+    "ndex": 922,
+    "english": "Pawmo",
+    "kana": "パモット"
+  },
+  {
+    "ndex": 923,
+    "english": "Pawmot",
+    "kana": "パーモット"
+  },
+  {
+    "ndex": 924,
+    "english": "Tandemaus",
+    "kana": "ワッカネズミ"
+  },
+  {
+    "ndex": 925,
+    "english": "Maushold",
+    "kana": "イッカネズミ"
+  },
+  {
+    "ndex": 926,
+    "english": "Fidough",
+    "kana": "パピモッチ"
+  },
+  {
+    "ndex": 927,
+    "english": "Dachsbun",
+    "kana": "バウッツェル"
+  },
+  {
+    "ndex": 928,
+    "english": "Smoliv",
+    "kana": "ミニーブ"
+  },
+  {
+    "ndex": 929,
+    "english": "Dolliv",
+    "kana": "オリーニョ"
+  },
+  {
+    "ndex": 930,
+    "english": "Arboliva",
+    "kana": "オリーヴァ"
+  },
+  {
+    "ndex": 931,
+    "english": "Squawkabilly",
+    "kana": "イキリンコ"
+  },
+  {
+    "ndex": 932,
+    "english": "Nacli",
+    "kana": "コジオ"
+  },
+  {
+    "ndex": 933,
+    "english": "Naclstack",
+    "kana": "ジオヅム"
+  },
+  {
+    "ndex": 934,
+    "english": "Garganacl",
+    "kana": "キョジオーン"
+  },
+  {
+    "ndex": 935,
+    "english": "Charcadet",
+    "kana": "カルボウ"
+  },
+  {
+    "ndex": 936,
+    "english": "Armarouge",
+    "kana": "グレンアルマ"
+  },
+  {
+    "ndex": 937,
+    "english": "Ceruledge",
+    "kana": "ソウブレイズ"
+  },
+  {
+    "ndex": 938,
+    "english": "Tadbulb",
+    "kana": "ズピカ"
+  },
+  {
+    "ndex": 939,
+    "english": "Bellibolt",
+    "kana": "ハラバリー"
+  },
+  {
+    "ndex": 940,
+    "english": "Wattrel",
+    "kana": "カイデン"
+  },
+  {
+    "ndex": 941,
+    "english": "Kilowattrel",
+    "kana": "タイカイデン"
+  },
+  {
+    "ndex": 942,
+    "english": "Maschiff",
+    "kana": "オラチフ"
+  },
+  {
+    "ndex": 943,
+    "english": "Mabosstiff",
+    "kana": "マフィティフ"
+  },
+  {
+    "ndex": 944,
+    "english": "Shroodle",
+    "kana": "シルシュルー"
+  },
+  {
+    "ndex": 945,
+    "english": "Grafaiai",
+    "kana": "タギングル"
+  },
+  {
+    "ndex": 946,
+    "english": "Bramblin",
+    "kana": "アノクサ"
+  },
+  {
+    "ndex": 947,
+    "english": "Brambleghast",
+    "kana": "アノホラグサ"
+  },
+  {
+    "ndex": 948,
+    "english": "Toedscool",
+    "kana": "ノノクラゲ"
+  },
+  {
+    "ndex": 949,
+    "english": "Toedscruel",
+    "kana": "リククラゲ"
+  },
+  {
+    "ndex": 950,
+    "english": "Klawf",
+    "kana": "ガケガニ"
+  },
+  {
+    "ndex": 951,
+    "english": "Capsakid",
+    "kana": "カプサイジ"
+  },
+  {
+    "ndex": 952,
+    "english": "Scovillain",
+    "kana": "スコヴィラン"
+  },
+  {
+    "ndex": 953,
+    "english": "Rellor",
+    "kana": "シガロコ"
+  },
+  {
+    "ndex": 954,
+    "english": "Rabsca",
+    "kana": "ベラカス"
+  },
+  {
+    "ndex": 955,
+    "english": "Flittle",
+    "kana": "ヒラヒナ"
+  },
+  {
+    "ndex": 956,
+    "english": "Espathra",
+    "kana": "クエスパトラ"
+  },
+  {
+    "ndex": 957,
+    "english": "Tinkatink",
+    "kana": "カヌチャン"
+  },
+  {
+    "ndex": 958,
+    "english": "Tinkatuff",
+    "kana": "ナカヌチャン"
+  },
+  {
+    "ndex": 959,
+    "english": "Tinkaton",
+    "kana": "デカヌチャン"
+  },
+  {
+    "ndex": 960,
+    "english": "Wiglett",
+    "kana": "ウミディグダ"
+  },
+  {
+    "ndex": 961,
+    "english": "Wugtrio",
+    "kana": "ウミトリオ"
+  },
+  {
+    "ndex": 962,
+    "english": "Bombirdier",
+    "kana": "オトシドリ"
+  },
+  {
+    "ndex": 963,
+    "english": "Finizen",
+    "kana": "ナミイルカ"
+  },
+  {
+    "ndex": 964,
+    "english": "Palafin",
+    "kana": "イルカマン"
+  },
+  {
+    "ndex": 965,
+    "english": "Varoom",
+    "kana": "ブロロン"
+  },
+  {
+    "ndex": 966,
+    "english": "Revavroom",
+    "kana": "ブロロローム"
+  },
+  {
+    "ndex": 967,
+    "english": "Cyclizar",
+    "kana": "モトトカゲ"
+  },
+  {
+    "ndex": 968,
+    "english": "Orthworm",
+    "kana": "ミミズズ"
+  },
+  {
+    "ndex": 969,
+    "english": "Glimmet",
+    "kana": "キラーメ"
+  },
+  {
+    "ndex": 970,
+    "english": "Glimmora",
+    "kana": "キラフロル"
+  },
+  {
+    "ndex": 971,
+    "english": "Greavard",
+    "kana": "ボチ"
+  },
+  {
+    "ndex": 972,
+    "english": "Houndstone",
+    "kana": "ハカドッグ"
+  },
+  {
+    "ndex": 973,
+    "english": "Flamigo",
+    "kana": "カラミンゴ"
+  },
+  {
+    "ndex": 974,
+    "english": "Cetoddle",
+    "kana": "アルクジラ"
+  },
+  {
+    "ndex": 975,
+    "english": "Cetitan",
+    "kana": "ハルクジラ"
+  },
+  {
+    "ndex": 976,
+    "english": "Veluza",
+    "kana": "ミガルーサ"
+  },
+  {
+    "ndex": 977,
+    "english": "Dondozo",
+    "kana": "ヘイラッシャ"
+  },
+  {
+    "ndex": 978,
+    "english": "Tatsugiri",
+    "kana": "シャリタツ"
+  },
+  {
+    "ndex": 979,
+    "english": "Annihilape",
+    "kana": "コノヨザル"
+  },
+  {
+    "ndex": 980,
+    "english": "Clodsire",
+    "kana": "ドオー"
+  },
+  {
+    "ndex": 981,
+    "english": "Farigiraf",
+    "kana": "リキキリン"
+  },
+  {
+    "ndex": 982,
+    "english": "Dudunsparce",
+    "kana": "ノココッチ"
+  },
+  {
+    "ndex": 983,
+    "english": "Kingambit",
+    "kana": "ドドゲザン"
+  },
+  {
+    "ndex": 984,
+    "english": "Great Tusk",
+    "kana": "イダイナキバ"
+  },
+  {
+    "ndex": 985,
+    "english": "Scream Tail",
+    "kana": "サケブシッポ"
+  },
+  {
+    "ndex": 986,
+    "english": "Brute Bonnet",
+    "kana": "アラブルタケ"
+  },
+  {
+    "ndex": 987,
+    "english": "Flutter Mane",
+    "kana": "ハバタクカミ"
+  },
+  {
+    "ndex": 988,
+    "english": "Slither Wing",
+    "kana": "チヲハウハネ"
+  },
+  {
+    "ndex": 989,
+    "english": "Sandy Shocks",
+    "kana": "スナノケガワ"
+  },
+  {
+    "ndex": 990,
+    "english": "Iron Treads",
+    "kana": "テツノワダチ"
+  },
+  {
+    "ndex": 991,
+    "english": "Iron Bundle",
+    "kana": "テツノツツミ"
+  },
+  {
+    "ndex": 992,
+    "english": "Iron Hands",
+    "kana": "テツノカイナ"
+  },
+  {
+    "ndex": 993,
+    "english": "Iron Jugulis",
+    "kana": "テツノコウベ"
+  },
+  {
+    "ndex": 994,
+    "english": "Iron Moth",
+    "kana": "テツノドクガ"
+  },
+  {
+    "ndex": 995,
+    "english": "Iron Thorns",
+    "kana": "テツノイバラ"
+  },
+  {
+    "ndex": 996,
+    "english": "Frigibax",
+    "kana": "セビエ"
+  },
+  {
+    "ndex": 997,
+    "english": "Arctibax",
+    "kana": "セゴール"
+  },
+  {
+    "ndex": 998,
+    "english": "Baxcalibur",
+    "kana": "セグレイブ"
+  },
+  {
+    "ndex": 999,
+    "english": "Gimmighoul",
+    "kana": "コレクレー"
+  },
+  {
+    "ndex": 1000,
+    "english": "Gholdengo",
+    "kana": "サーフゴー"
+  },
+  {
+    "ndex": 1001,
+    "english": "Wo-Chien",
+    "kana": "チオンジェン"
+  },
+  {
+    "ndex": 1002,
+    "english": "Chien-Pao",
+    "kana": "パオジアン"
+  },
+  {
+    "ndex": 1003,
+    "english": "Ting-Lu",
+    "kana": "ディンルー"
+  },
+  {
+    "ndex": 1004,
+    "english": "Chi-Yu",
+    "kana": "イーユイ"
+  },
+  {
+    "ndex": 1005,
+    "english": "Roaring Moon",
+    "kana": "トドロクツキ"
+  },
+  {
+    "ndex": 1006,
+    "english": "Iron Valiant",
+    "kana": "テツノブジン"
+  },
+  {
+    "ndex": 1007,
+    "english": "Koraidon",
+    "kana": "コライドン"
+  },
+  {
+    "ndex": 1008,
+    "english": "Miraidon",
+    "kana": "ミライドン"
+  },
+  {
+    "ndex": 1009,
+    "english": "Walking Wake",
+    "kana": "ウネルミナモ"
+  },
+  {
+    "ndex": 1010,
+    "english": "Iron Leaves",
+    "kana": "テツノイサハ"
+  },
+  {
+    "ndex": 1011,
+    "english": "Dipplin",
+    "kana": "カミッチュ"
+  },
+  {
+    "ndex": 1012,
+    "english": "Poltchageist",
+    "kana": "チャデス"
+  },
+  {
+    "ndex": 1013,
+    "english": "Sinistcha",
+    "kana": "ヤバソチャ"
+  },
+  {
+    "ndex": 1014,
+    "english": "Okidogi",
+    "kana": "イイネイヌ"
+  },
+  {
+    "ndex": 1015,
+    "english": "Munkidori",
+    "kana": "マシマシラ"
+  },
+  {
+    "ndex": 1016,
+    "english": "Fezandipiti",
+    "kana": "キチキギス"
+  },
+  {
+    "ndex": 1017,
+    "english": "Ogerpon",
+    "kana": "オーガポン"
+  },
+  {
+    "ndex": 1018,
+    "english": "Archaludon",
+    "kana": "ブリジュラス"
+  },
+  {
+    "ndex": 1019,
+    "english": "Hydrapple",
+    "kana": "カミツオロチ"
+  },
+  {
+    "ndex": 1020,
+    "english": "Gouging Fire",
+    "kana": "ウガツホムラ"
+  },
+  {
+    "ndex": 1021,
+    "english": "Raging Bolt",
+    "kana": "タケルライコ"
+  },
+  {
+    "ndex": 1022,
+    "english": "Iron Boulder",
+    "kana": "テツノイワオ"
+  },
+  {
+    "ndex": 1023,
+    "english": "Iron Crown",
+    "kana": "テツノカシラ"
+  },
+  {
+    "ndex": 1024,
+    "english": "Terapagos",
+    "kana": "テラパゴス"
+  },
+  {
+    "ndex": 1025,
+    "english": "Pecharunt",
+    "kana": "モモワロウ"
+  },
+  {
+    "ndex": 1026,
+    "english": "Browt",
+    "kana": "ハブロウ"
+  },
+  {
+    "ndex": 1027,
+    "english": "Pombon",
+    "kana": "ポムケン"
+  },
+  {
+    "ndex": 1028,
+    "english": "Gecqua",
+    "kana": "ミオリー"
+  }
+]

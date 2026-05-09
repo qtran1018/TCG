@@ -19,3 +19,4 @@ aiohttp==3.10.9
 python-dotenv==1.0.1
 tenacity==9.0.0
 lxml==5.3.0
+opencv-python-headless==4.10.0.84

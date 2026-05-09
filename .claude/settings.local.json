@@ -14,7 +14,12 @@
       "PowerShell($sdkPath = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"; Get-ChildItem \"$sdkPath\\\\platform-tools\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"$sdkPath\\\\platforms\" -ErrorAction SilentlyContinue | Select-Object Name)",
       "PowerShell(Get-ChildItem \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\" | Select-Object Name)",
       "Bash(docker restart *)",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "Bash(docker-compose up *)",
+      "PowerShell(docker logs *)",
+      "Bash(docker logs *)",
+      "PowerShell(docker compose logs *)",
+      "Bash(docker compose logs *)"
     ]
   }
 }

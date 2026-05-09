@@ -109,6 +109,24 @@ class BatchSearchResult(BaseModel):
     results: list[BatchSearchItem]
 
 
+class DetectRequest(BaseModel):
+    image_base64: str
+    max_cards: int = 10
+
+
+class BoundingBox(BaseModel):
+    left: int
+    top: int
+    width: int
+    height: int
+
+
+class DetectResult(BaseModel):
+    boxes: list[BoundingBox]
+    image_width: int
+    image_height: int
+
+
 class HistoryEntry(BaseModel):
     id: int
     game: str

@@ -83,6 +83,19 @@ export interface PSACertResult {
   price?: PriceOut;
 }
 
+export interface DetectBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface DetectResult {
+  boxes: DetectBox[];
+  image_width: number;
+  image_height: number;
+}
+
 export interface HistoryEntry {
   id: number;
   game: string;
@@ -149,6 +162,14 @@ export const api = {
     const { data } = await client.post<BatchSearchResult>("/search/batch", {
       queries,
       scan_type,
+    });
+    return data;
+  },
+
+  async detectCards(imageBase64: string, maxCards = 10): Promise<DetectResult> {
+    const { data } = await client.post<DetectResult>("/detect", {
+      image_base64: imageBase64,
+      max_cards: maxCards,
     });
     return data;
   },

@@ -69,7 +69,10 @@ export default function MultiResultsScreen() {
           const hasAlternates = dc.searchResult.candidates.length > 1;
           return (
             <View style={styles.card}>
-              <Text style={styles.cardIndex}>Card {index + 1}</Text>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardIndex}>Card {index + 1}</Text>
+                <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
+              </View>
               <View style={styles.cardRow}>
                 {selected?.image_url ? (
                   <Image source={{ uri: selected.image_url }} style={styles.image} resizeMode="contain" />
@@ -175,7 +178,9 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     gap: 8,
   },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardIndex: { color: COLORS.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
+  queryUsed: { color: COLORS.textMuted, fontSize: 11, flex: 1, textAlign: "right", marginLeft: 8 },
   cardRow: { flexDirection: "row", gap: 12 },
   image: { width: 72, height: 100, borderRadius: 6 },
   imagePlaceholder: {
@@ -215,7 +220,7 @@ const styles = StyleSheet.create({
     padding: 16, maxHeight: "75%",
   },
   modalTitle: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginBottom: 12 },
-  modalList: { flex: 1 },
+  modalList: { flexGrow: 1, flexShrink: 1 },
   modalItem: {
     flexDirection: "row", gap: 12, padding: 10,
     borderRadius: 10, marginBottom: 8,

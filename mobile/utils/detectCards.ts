@@ -1,6 +1,7 @@
 // Card region detection utilities.
 // filterBlocksToCardZone: single-card mode — keeps only blocks inside the scan overlay zone.
-// detectCardRegions: multi-card mode — clusters blocks into card-shaped groups.
+// detectCardRegions: multi-card mode fallback — clusters blocks into card-shaped groups.
+// boxesToRegions: converts server-detected bounding boxes into CardRegion objects.
 
 export interface OCRBlock {
   text: string;
@@ -255,4 +256,18 @@ export function detectCardRegions(
     })[0];
 
   return largest ? [toRegion(largest)] : [];
+}
+
+/**
+ * Converts server-detected bounding boxes into CardRegion objects.
+ * Boxes are already in image-pixel coordinates (relative to the resized
+ * image sent to the backend). OCR text is filled in later by the
+ * crop-and-re-OCR step in useMultiCardScan.
+ */
+export function boxesToRegions(boxes: Array<{ left: number; top: number; width: number; height: number }>): CardRegion[] {
+  return boxes.map((box) => ({
+    blocks: [],
+    boundingBox: { top: box.top, left: box.left, width: box.width, height: box.height },
+    text: "",
+  }));
 }

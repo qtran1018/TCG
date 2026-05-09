@@ -28,7 +28,7 @@ export default function ScanScreen() {
 
   const { recognize, isProcessing: isOcrProcessing, error: ocrError } = useOCR();
   const { searchByOCR, searchByCert, isSearching } = useCardSearch();
-  const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress } = useMultiCardScan();
+  const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress, error: multiError } = useMultiCardScan();
 
   const isLoading = isOcrProcessing || isSearching || isMultiProcessing;
 
@@ -66,7 +66,10 @@ export default function ScanScreen() {
   const handleMultiCapture = useCallback(
     async (uri: string) => {
       const result = await multiScan(uri, game, language);
-      if (!result) return;
+      if (!result) {
+        Alert.alert("Scan Failed", multiError ?? "Could not detect cards. Check console for details.");
+        return;
+      }
       if (result.cards.length === 0) {
         Alert.alert("No Cards Found", "Couldn't identify any cards in this photo.");
         return;
