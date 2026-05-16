@@ -27,6 +27,12 @@ pgdata/
 redisdata/
 pgadmindata/
 
+# YOLO model weights (large binary files — add trained .pt files here)
+backend/models/*.pt
+
+# Local card image datasets
+Pokemon TCG/
+
 # OS
 .DS_Store
 Thumbs.db

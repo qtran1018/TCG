@@ -1,7 +1,7 @@
 // Replace with your machine's local IP when testing on a physical device
 // For Android emulator use: http://10.0.2.2:8000
 // For physical device use: http://<your-local-ip>:8000
-export const API_BASE_URL = "http://192.168.1.11:8000/api/v1";
+export const API_BASE_URL = "http://192.168.1.2:8000/api/v1";
 
 export const GAMES = [
   { key: "pokemon", label: "Pokémon" },

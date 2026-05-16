@@ -1,5 +1,7 @@
+import json
 import logging
 import re
+from pathlib import Path
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card
@@ -8,6 +10,12 @@ from app.scrapers.pokemon_tcg_api import PokemonTCGApiScraper
 from app.scrapers.onepiece_api import OnePieceScraper
 from app.services.cache import search_cache, price_cache
 from app.config import get_settings
+from app.data.pokemon_names import kana_to_english, KANA_TO_EN
+
+_SET_PRINTED_TOTALS: dict[str, int] = {}
+_lookup_path = Path(__file__).parent.parent / "data" / "set_printed_totals.json"
+if _lookup_path.exists():
+    _SET_PRINTED_TOTALS = json.loads(_lookup_path.read_text())
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -24,6 +32,25 @@ _ATTACK_BODY_RE = re.compile(
     r"the\s+defending|does\s+\d+\s+damage)",
     re.I,
 )
+
+# Normalized English Pokémon base names for candidate validation.
+# "Mr. Mime" → "mr mime", "Farfetch'd" → "farfetchd", etc.
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
+
+_EN_POKEMON_NAMES_NORM: frozenset[str] = frozenset(_norm(n) for n in KANA_TO_EN.values())
+
+
+def _contains_pokemon_name(text: str) -> bool:
+    """Return True if text contains a known Pokémon base name as a whole token or bigram."""
+    tokens = _norm(text).split()
+    for i, tok in enumerate(tokens):
+        if tok in _EN_POKEMON_NAMES_NORM:
+            return True
+        if i + 1 < len(tokens) and f"{tok} {tokens[i + 1]}" in _EN_POKEMON_NAMES_NORM:
+            return True
+    return False
+
 
 # Terms that are never the card name
 _POKEMON_NON_NAME_RE = re.compile(
@@ -80,7 +107,35 @@ def _find_pokemon_name(lines: list[str]) -> str | None:
         if hp_idx is None and i + 1 < len(lines):
             if _ATTACK_BODY_RE.match(lines[i + 1].strip()):
                 continue
+        # Reject candidates that don't contain a known Pokémon base name.
+        # Trainer/Supporter/Item cards fall through here — handled separately later.
+        if not _contains_pokemon_name(clean):
+            continue
         return clean
+    return None
+
+
+# Japanese equivalents of BASIC / Stage 1 / Stage 2 that appear on card art
+_JA_NON_NAME = frozenset(["たね", "1進化", "2進化", "ステージ1", "ステージ2"])
+
+
+def _find_kana_name(lines: list[str]) -> str | None:
+    """Return the kana Pokémon name from OCR lines by lookup against the known kana dict."""
+    # Exact line match first
+    for line in lines:
+        clean = line.strip()
+        if clean in _JA_NON_NAME:
+            continue
+        if clean in KANA_TO_EN:
+            return clean
+    # Substring match — name may be embedded in a longer OCR line
+    for line in lines:
+        clean = line.strip()
+        if clean in _JA_NON_NAME:
+            continue
+        for kana in KANA_TO_EN:
+            if kana in clean:
+                return kana
     return None
 
 
@@ -101,9 +156,16 @@ def extract_card_hints(ocr_text: str, game: str, language: str) -> dict:
         hp = HP_RE.search(ocr_text)
         if hp:
             hints["hp"] = hp.group(1)
-        name = _find_pokemon_name(lines[:4])
-        if name:
-            hints["probable_name"] = name
+        if language == "ja":
+            kana = _find_kana_name(lines)
+            if kana:
+                english = kana_to_english(kana)
+                if english:
+                    hints["probable_name"] = english
+        else:
+            name = _find_pokemon_name(lines[:4])
+            if name:
+                hints["probable_name"] = name
 
     elif game == "onepiece":
         m = ONEPIECE_CARD_NUM_RE.search(ocr_text)
@@ -176,18 +238,40 @@ class CardMatcherService:
             if key not in seen:
                 seen.add(key)
                 unique.append(c)
-        # Rank: exact card number match first, then prefix match, then rest
+
         card_num = hints.get("card_number", "")
-        if card_num:
-            def rank(c: Card) -> int:
+        set_total = hints.get("set_total", "")
+
+        # Build set of set_codes whose printedTotal matches the scanned card's set_total.
+        # Used to disambiguate cards that share a name and number across multiple sets.
+        matching_set_codes: set[str] = set()
+        if set_total and _SET_PRINTED_TOTALS:
+            try:
+                total_int = int(set_total)
+                matching_set_codes = {
+                    code for code, pt in _SET_PRINTED_TOTALS.items() if pt == total_int
+                }
+            except ValueError:
+                pass
+
+        def rank(c: Card) -> tuple:
+            # Primary: printed_total match (0 = matches, 1 = no match / unknown)
+            set_match = 0 if (c.set_code and c.set_code in matching_set_codes) else 1
+            # Secondary: exact card number match, then prefix, then rest
+            if card_num:
                 num = (c.card_number or "").lstrip("0").split("/")[0]
                 hint = card_num.lstrip("0")
                 if num == hint:
-                    return 0
-                if num.startswith(hint):
-                    return 1
-                return 2
-            unique.sort(key=rank)
+                    num_rank = 0
+                elif num.startswith(hint):
+                    num_rank = 1
+                else:
+                    num_rank = 2
+            else:
+                num_rank = 0
+            return (set_match, num_rank)
+
+        unique.sort(key=rank)
         return unique
 
     async def _search_db(self, hints: dict, game: str, language: str, db: AsyncSession) -> list[Card]:

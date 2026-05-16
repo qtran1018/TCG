@@ -180,4 +180,9 @@ export const api = {
     });
     return data;
   },
+
+  async batchMatchByImage(crops: string[]): Promise<BatchSearchResult> {
+    const { data } = await client.post<BatchSearchResult>("/match-image", { crops });
+    return data;
+  },
 };

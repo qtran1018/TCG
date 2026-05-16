@@ -9,7 +9,9 @@ import { CameraScanner } from "@/components/Scanner/CameraScanner";
 import { GameToggle } from "@/components/UI/GameToggle";
 import { LanguageToggle } from "@/components/UI/LanguageToggle";
 import { ScanTypeToggle } from "@/components/UI/ScanTypeToggle";
+import { ScanModeToggle } from "@/components/UI/ScanModeToggle";
 import { useOCR } from "@/hooks/useOCR";
+import type { ScanMode } from "@/hooks/useMultiCardScan";
 import { useCardSearch } from "@/hooks/useCardSearch";
 import { useMultiCardScan } from "@/hooks/useMultiCardScan";
 import { useScanStore } from "@/store/scanStore";
@@ -22,6 +24,7 @@ export default function ScanScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("settings");
   const [certInput, setCertInput] = useState("");
+  const [scanMode, setScanMode] = useState<ScanMode>("ocr");
 
   const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText, setMultiScanResult } =
     useScanStore();
@@ -65,7 +68,7 @@ export default function ScanScreen() {
 
   const handleMultiCapture = useCallback(
     async (uri: string) => {
-      const result = await multiScan(uri, game, language);
+      const result = await multiScan(uri, game, language, scanMode);
       if (!result) {
         Alert.alert("Scan Failed", multiError ?? "Could not detect cards. Check console for details.");
         return;
@@ -78,7 +81,7 @@ export default function ScanScreen() {
       setMode("settings");
       router.push("/multi-results");
     },
-    [multiScan, game, language, setMultiScanResult, router],
+    [multiScan, game, language, scanMode, setMultiScanResult, router],
   );
 
   const handlePSALookup = useCallback(async () => {
@@ -141,6 +144,10 @@ export default function ScanScreen() {
 
             <Section label="Scan Type">
               <ScanTypeToggle value={scanType} onChange={setScanType} />
+            </Section>
+
+            <Section label="Recognition Mode">
+              <ScanModeToggle value={scanMode} onChange={setScanMode} />
             </Section>
 
             {scanType === "psa" ? (

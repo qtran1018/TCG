@@ -71,6 +71,16 @@ export default function MultiResultsScreen() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardIndex}>Card {index + 1}</Text>
+                {dc.matchSource && (
+                  <Text style={[
+                    styles.sourceBadge,
+                    dc.matchSource === "both" ? styles.sourceBoth
+                    : dc.matchSource === "image" ? styles.sourceImage
+                    : styles.sourceOcr,
+                  ]}>
+                    {dc.matchSource === "both" ? "Both ✓" : dc.matchSource === "image" ? "Image AI" : "OCR"}
+                  </Text>
+                )}
                 <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
               </View>
               <View style={styles.cardRow}>
@@ -180,6 +190,10 @@ const styles = StyleSheet.create({
   },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardIndex: { color: COLORS.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
+  sourceBadge: { fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  sourceBoth: { color: "#22c55e", backgroundColor: "rgba(34,197,94,0.15)" },
+  sourceImage: { color: COLORS.accent, backgroundColor: "rgba(108,99,255,0.15)" },
+  sourceOcr: { color: "#f59e0b", backgroundColor: "rgba(245,158,11,0.15)" },
   queryUsed: { color: COLORS.textMuted, fontSize: 11, flex: 1, textAlign: "right", marginLeft: 8 },
   cardRow: { flexDirection: "row", gap: 12 },
   image: { width: 72, height: 100, borderRadius: 6 },

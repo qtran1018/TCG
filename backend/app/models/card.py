@@ -1,6 +1,7 @@
 from datetime import datetime
 from sqlalchemy import String, Integer, Float, Text, DateTime, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 from app.database import Base
 
 
@@ -22,6 +23,7 @@ class Card(Base):
     pricecharting_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     pricecharting_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # pokemontcg.io id
+    embedding: Mapped[list | None] = mapped_column(Vector(256), nullable=True)  # EfficientNet-B0 + PCA
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
