@@ -105,14 +105,18 @@ export default function MultiResultsScreen() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardIndex}>Card {index + 1}</Text>
-                {dc.matchSource && (
+                {dc.matchSource && dc.matchSource !== "none" && (
                   <Text style={[
                     styles.sourceBadge,
                     dc.matchSource === "both" ? styles.sourceBoth
                     : dc.matchSource === "image" ? styles.sourceImage
+                    : dc.matchSource === "image:low" ? styles.sourceImageLow
                     : styles.sourceOcr,
                   ]}>
-                    {dc.matchSource === "both" ? "Both ✓" : dc.matchSource === "image" ? "Image AI" : "OCR"}
+                    {dc.matchSource === "both" ? "Both ✓"
+                      : dc.matchSource === "image" ? "Image AI"
+                      : dc.matchSource === "image:low" ? "Image ?"
+                      : "OCR"}
                   </Text>
                 )}
                 <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
@@ -245,6 +249,7 @@ const styles = StyleSheet.create({
   sourceBadge: { fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
   sourceBoth: { color: "#22c55e", backgroundColor: "rgba(34,197,94,0.15)" },
   sourceImage: { color: COLORS.accent, backgroundColor: "rgba(108,99,255,0.15)" },
+  sourceImageLow: { color: "#94a3b8", backgroundColor: "rgba(148,163,184,0.15)" },
   sourceOcr: { color: "#f59e0b", backgroundColor: "rgba(245,158,11,0.15)" },
   queryUsed: { color: COLORS.textMuted, fontSize: 11, flex: 1, textAlign: "right", marginLeft: 8 },
   cardRow: { flexDirection: "row", gap: 12 },

@@ -195,7 +195,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
               candidates: item.candidates,
               query_used: item.query_used,
             },
-            matchSource: item.match_source === "none" ? undefined : item.match_source,
+            matchSource: (item.match_source === "none" || !item.match_source) ? undefined : item.match_source,
           };
 
           appendMultiScanCard(card);

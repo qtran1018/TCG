@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 _matcher = CardMatcherService()
 _VALID_GAMES = {"pokemon", "onepiece"}
 _VALID_LANGUAGES = {"en", "ja"}
-_SIM_THRESHOLD = 0.75
+_SIM_THRESHOLD = 0.65
+_SIM_FLOOR = 0.50   # below this, don't show image results at all
 _PHASH_STRONG = 20
 _IMAGE_MIN_SIM_WITH_OCR = 0.83
 _RRF_K = 60
@@ -142,13 +143,21 @@ async def _vector_search(
         phash_strong = h <= _PHASH_STRONG
         passes_clip = sim >= _SIM_THRESHOLD
         if not phash_strong and not passes_clip:
-            continue
+            logger.debug("Below threshold: sim=%.3f hamming=%d", sim, h)
         scored.append(((0 if phash_strong else 1, -sim), sim, phash_strong, dict(row)))
 
     scored.sort(key=lambda x: x[0])
-    candidates = [CardOut.model_validate(row) for _, _, _, row in scored]
     best_sim = max((s for _, s, _, _ in scored), default=0.0)
-    used_phash = any(ph and s < _SIM_THRESHOLD for _, s, ph, _ in scored)
+    # Return top 5 as candidates for swap options, but only if above the floor.
+    # Below _SIM_FLOOR results are too unreliable to be useful even as alternates.
+    if best_sim >= _SIM_FLOOR:
+        candidates = [CardOut.model_validate(row) for _, _, _, row in scored[:5]]
+    else:
+        candidates = []
+        logger.info("Image search: below floor (best_sim=%.3f, floor=%.2f) — no candidates", best_sim, _SIM_FLOOR)
+    if _SIM_FLOOR <= best_sim < _SIM_THRESHOLD:
+        logger.info("Image search: low confidence (best_sim=%.3f, threshold=%.2f)", best_sim, _SIM_THRESHOLD)
+    used_phash = scored[0][2] if scored else False
 
     if used_phash:
         query_used = f"image:{best_sim:.2f}+phash"
@@ -295,7 +304,7 @@ async def scan(req: ScanRequest):
                     crop_index=i,
                     candidates=image_candidates,
                     query_used=image_query,
-                    match_source="image" if image_candidates else "none",
+                    match_source="image" if image_sim >= _SIM_THRESHOLD else ("image:low" if image_candidates else "none"),
                 )
             else:
                 merged, source = _rrf_merge(image_candidates, ocr_candidates, ocr_query, image_sim, req.scan_mode)

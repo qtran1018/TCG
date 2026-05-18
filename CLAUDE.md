@@ -36,6 +36,7 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 ## Known Issues
 - Background text isolation (keyboard keys, shelf labels) is unreliable in single-card mode. The overlay-zone block filter approach has coordinate mapping complexity across devices. Deferred — the multi-card approach will supersede it.
 - On-device YOLO detection (`mobile/utils/yoloDetector.ts`) is scaffolded but disabled — `detectCardsWithYolo` always returns null until `card_detector.tflite` is present. TFLite model export was attempted but not completed; falls back to backend `/detect`.
+- Image AI mode similarity scores for some cards (e.g. Lotad) are around 0.43 — below the `_SIM_FLOOR = 0.50` cutoff, so they return no image candidates. Combined/OCR mode reliably identifies these cards. Image AI works best for visually distinctive cards.
 
 ## Completed Features (Multi-card)
 - Camera mode: capture full image → OCR → detect card regions → crop each → re-OCR → confidence check → batch search backend → results UI
@@ -92,7 +93,12 @@ Image-based card identification as an alternative to OCR text search. Inspired b
 - 50 unembeddable: McDonald's Collection promos (mcd14/15/17/18), `hsp-HGSS18`, `svp-102` — pokemontcg.io CDN returns 404 for these
 - DB previously had duplicate rows (catalog inserted twice) — deduplicated 2026-05-18; `embedding_failures.json` reflects current clean state
 
-**Similarity threshold:** 0.75 cosine similarity + phash re-ranking (`_PHASH_STRONG = 20` Hamming distance)
+**Similarity thresholds** (in `backend/app/api/v1/scan.py`):
+- `_SIM_THRESHOLD = 0.65` — confident match; shows "Image AI" badge
+- `_SIM_FLOOR = 0.50` — minimum to show any candidates; 0.50–0.65 shows "Image ?" badge with swap available
+- Below `_SIM_FLOOR`: no image candidates returned (too unreliable)
+- `_PHASH_STRONG = 20` Hamming distance — phash match promotes result regardless of CLIP score
+- `_IMAGE_MIN_SIM_WITH_OCR = 0.83` — in combined mode, image results excluded when OCR found a result and image sim < 0.83
 
 **Offline pipeline:** `scripts/build_embeddings.py`
 - Fetches all cards from pokemontcg.io API (~82 pages)
