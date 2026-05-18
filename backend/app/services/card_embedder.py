@@ -1,75 +1,81 @@
 import io
 import logging
-import pickle
 from pathlib import Path
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
-_PCA_PATH = Path(__file__).parent.parent.parent / "models" / "pca.pkl"
-
 _model = None
-_transform = None
-_pca = None
+_preprocess = None
+_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+_FINETUNED_WEIGHTS = Path(__file__).parent.parent.parent / "models" / "clip_finetuned.pt"
 
 
 def _load_model():
-    global _model, _transform
+    global _model, _preprocess
     if _model is not None:
         return
-    import timm
-    import torch
-    from torchvision import transforms
+    import open_clip
 
-    logger.info("Loading EfficientNet-B0 embedding model...")
-    _model = timm.create_model("efficientnet_b0", pretrained=True, num_classes=0)
+    logger.info("Loading CLIP ViT-B/32 on %s...", _device)
+    _model, _, _preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
+
+    if _FINETUNED_WEIGHTS.exists():
+        logger.info("Loading fine-tuned visual encoder from %s", _FINETUNED_WEIGHTS)
+        state = torch.load(_FINETUNED_WEIGHTS, map_location=_device)
+        _model.visual.load_state_dict(state)
+        logger.info("Fine-tuned weights loaded")
+    else:
+        logger.info("No fine-tuned weights found — using pretrained OpenAI CLIP")
+
+    _model = _model.to(_device)
     _model.eval()
-    _transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    logger.info("EfficientNet-B0 ready (1280-dim features)")
+    logger.info("CLIP ViT-B/32 ready (512-dim features, device=%s)", _device)
 
 
-def _load_pca() -> bool:
-    global _pca
-    if _pca is not None:
-        return True
-    if not _PCA_PATH.exists():
-        return False
-    with open(_PCA_PATH, "rb") as f:
-        _pca = pickle.load(f)
-    logger.info("PCA model loaded from %s", _PCA_PATH)
-    return True
+def embed_image(image_bytes: bytes) -> np.ndarray:
+    """512-dim L2-normalized CLIP embedding for nearest-neighbor search."""
+    return embed_batch([image_bytes])[0]
 
 
-def embed_raw(image_bytes: bytes) -> np.ndarray:
-    """1280-dim raw EfficientNet-B0 features. Used by build_embeddings.py to fit PCA."""
-    import torch
+def compute_phash(image_bytes: bytes) -> str | None:
+    """Perceptual hash of the art-region crop. Returns hex string or None on error."""
+    try:
+        import imagehash
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return str(imagehash.phash(_crop_art(img)))
+    except Exception:
+        logger.warning("phash computation failed", exc_info=True)
+        return None
+
+
+def _crop_art(img):
+    """Crop to the card art region (works for both standard and full-art cards).
+
+    Standard cards: art box sits roughly at y=10%-56%, x=4%-96%.
+    Full-art cards: illustration covers the whole card; this crop captures the
+    upper subject area, which is where the main Pokémon/character appears.
+    """
+    w, h = img.size
+    return img.crop((int(w * 0.04), int(h * 0.12), int(w * 0.96), int(h * 0.52)))
+
+
+def embed_batch(images_bytes: list[bytes]) -> list[np.ndarray]:
+    """Embed multiple images in one forward pass. Returns list of 512-dim float32 arrays."""
     from PIL import Image
 
     _load_model()
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    tensor = _transform(img).unsqueeze(0)
+    tensors = [
+        _preprocess(_crop_art(Image.open(io.BytesIO(b)).convert("RGB")))
+        for b in images_bytes
+    ]
+    batch = torch.stack(tensors).to(_device)
     with torch.no_grad():
-        features = _model(tensor)
-    return features.squeeze().numpy()
-
-
-def embed_image(image_bytes: bytes) -> np.ndarray | None:
-    """256-dim PCA-reduced embedding for nearest-neighbor search.
-
-    Returns None if PCA hasn't been built yet (run scripts/build_embeddings.py first).
-    """
-    raw = embed_raw(image_bytes)
-    if not _load_pca():
-        logger.warning("PCA not found at %s — run scripts/build_embeddings.py first", _PCA_PATH)
-        return None
-    return _pca.transform(raw.reshape(1, -1))[0].astype(np.float32)
-
-
-def is_ready() -> bool:
-    """True when PCA model exists and image matching can be used."""
-    return _PCA_PATH.exists()
+        features = _model.encode_image(batch)
+        features = features / features.norm(dim=-1, keepdim=True)
+    return [v.cpu().numpy().astype(np.float32) for v in features]

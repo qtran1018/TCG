@@ -26,7 +26,7 @@ export default function ScanScreen() {
   const [certInput, setCertInput] = useState("");
   const [scanMode, setScanMode] = useState<ScanMode>("ocr");
 
-  const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText, setMultiScanResult } =
+  const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText, clearMultiScan, setMultiScanLoading } =
     useScanStore();
 
   const { recognize, isProcessing: isOcrProcessing, error: ocrError } = useOCR();
@@ -68,20 +68,15 @@ export default function ScanScreen() {
 
   const handleMultiCapture = useCallback(
     async (uri: string) => {
-      const result = await multiScan(uri, game, language, scanMode);
-      if (!result) {
-        Alert.alert("Scan Failed", multiError ?? "Could not detect cards. Check console for details.");
-        return;
-      }
-      if (result.cards.length === 0) {
-        Alert.alert("No Cards Found", "Couldn't identify any cards in this photo.");
-        return;
-      }
-      setMultiScanResult(result);
+      clearMultiScan();
+      // Mark loading before navigating so the results screen never sees the
+      // empty state while the scan is in progress.
+      setMultiScanLoading(true);
       setMode("settings");
       router.push("/multi-results");
+      await multiScan(uri, game, language, scanMode);
     },
-    [multiScan, game, language, scanMode, setMultiScanResult, router],
+    [multiScan, game, language, scanMode, clearMultiScan, setMultiScanLoading, router],
   );
 
   const handlePSALookup = useCallback(async () => {
@@ -112,7 +107,7 @@ export default function ScanScreen() {
         </View>
       ) : mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
-          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} />
+          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} showOverlay={false} />
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
             <Text style={styles.backBtnText}>✕  Close Camera</Text>
           </TouchableOpacity>

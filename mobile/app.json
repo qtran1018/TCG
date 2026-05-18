@@ -34,6 +34,13 @@
         {
           "cameraPermission": "Allow TCG Scanner to access your camera to scan cards."
         }
+      ],
+      [
+        "react-native-fast-tflite",
+        {
+          "enableCoreMLDelegate": true,
+          "enableAndroidGpuDelegate": false
+        }
       ]
     ],
     "experiments": {

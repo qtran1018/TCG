@@ -74,16 +74,21 @@ def _detect_yolo(
     h, w = img.shape[:2]
 
     results = model(img, conf=0.25, iou=0.45, verbose=False)
+    total_area = w * h
     boxes: list[dict] = []
     for result in results:
         for box in result.boxes:
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             bw, bh = int(x2 - x1), int(y2 - y1)
             conf = float(box.conf[0])
+            area_frac = (bw * bh) / total_area
             logger.info(
-                "YOLO box: (%d,%d,%d,%d) conf=%.2f",
-                int(x1), int(y1), bw, bh, conf,
+                "YOLO box: (%d,%d,%d,%d) conf=%.2f area_frac=%.3f",
+                int(x1), int(y1), bw, bh, conf, area_frac,
             )
+            if area_frac < _MIN_AREA_FRAC:
+                logger.info("  skip: too small (area_frac=%.4f < %.3f)", area_frac, _MIN_AREA_FRAC)
+                continue
             boxes.append({"left": int(x1), "top": int(y1), "width": bw, "height": bh})
 
     logger.info("YOLO detect: image=%dx%d boxes=%d", w, h, len(boxes))

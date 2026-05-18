@@ -40,6 +40,7 @@ services:
     container_name: tcg_backend
     restart: unless-stopped
     env_file: .env
+    shm_size: "2gb"
     ports:
       - "8000:8000"
     depends_on:
@@ -51,6 +52,14 @@ services:
       - ./backend:/app
       - ./scripts:/scripts
       - ./Pokemon TCG:/pokemon-tcg:ro
+      - ./background-textures:/backgrounds:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:

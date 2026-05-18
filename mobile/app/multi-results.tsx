@@ -8,23 +8,67 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 import type { CardOut } from "@/services/api";
-import type { DetectedCard } from "@/hooks/useMultiCardScan";
+import type { DetectedCard } from "@/types/scan";
 
 export default function MultiResultsScreen() {
   const router = useRouter();
-  const { multiScanResult } = useScanStore();
-  const [selections, setSelections] = useState<Record<number, CardOut>>(() => {
-    const init: Record<number, CardOut> = {};
-    multiScanResult?.cards.forEach((dc) => {
-      if (dc.searchResult.candidates[0]) {
-        init[dc.regionIndex] = dc.searchResult.candidates[0];
-      }
-    });
-    return init;
-  });
+  const {
+    multiScanResult,
+    multiScanLoading,
+    multiScanError,
+    multiScanTotalRegions,
+    language,
+  } = useScanStore();
+
+  const cards = multiScanResult?.cards ?? [];
+
+  const [selections, setSelections] = useState<Record<number, CardOut>>({});
   const [swapTarget, setSwapTarget] = useState<DetectedCard | null>(null);
 
-  if (!multiScanResult || multiScanResult.cards.length === 0) {
+  const getSelected = (dc: DetectedCard): CardOut | undefined =>
+    selections[dc.regionIndex] ?? dc.searchResult.candidates[0];
+
+  const handleViewCard = (card: CardOut) => {
+    router.push({ pathname: "/card/[id]", params: { id: String(card.id), language } });
+  };
+
+  const handleSwapSelect = (dc: DetectedCard, card: CardOut) => {
+    setSelections((prev) => ({ ...prev, [dc.regionIndex]: card }));
+    setSwapTarget(null);
+  };
+
+  // Loading state — navigated here before scan completed, no cards yet
+  if (multiScanLoading && cards.length === 0) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["bottom"]}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Multi-Scan Results</Text>
+          <Text style={styles.subtitle}>Scanning cards...</Text>
+        </View>
+        <View style={styles.loadingCenter}>
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.loadingCenterText}>Identifying cards...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Error state — scan finished with no results
+  if (!multiScanLoading && multiScanError && cards.length === 0) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["bottom"]}>
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>{multiScanError}</Text>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Text style={styles.backBtnText}>← Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Empty state — scan finished with no identifiable cards
+  if (!multiScanLoading && cards.length === 0) {
     return (
       <SafeAreaView style={styles.safe} edges={["bottom"]}>
         <View style={styles.empty}>
@@ -37,16 +81,8 @@ export default function MultiResultsScreen() {
     );
   }
 
-  const { cards, totalRegionsFound, totalConfident } = multiScanResult;
-
-  const handleViewCard = (card: CardOut) => {
-    router.push({ pathname: "/card/[id]", params: { id: String(card.id) } });
-  };
-
-  const handleSwapSelect = (dc: DetectedCard, card: CardOut) => {
-    setSelections((prev) => ({ ...prev, [dc.regionIndex]: card }));
-    setSwapTarget(null);
-  };
+  const totalRegions = multiScanResult?.totalRegionsFound ?? multiScanTotalRegions;
+  const skipped = totalRegions > cards.length ? totalRegions - cards.length : 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
@@ -54,9 +90,7 @@ export default function MultiResultsScreen() {
         <Text style={styles.title}>Multi-Scan Results</Text>
         <Text style={styles.subtitle}>
           {cards.length} card{cards.length !== 1 ? "s" : ""} identified
-          {totalRegionsFound > totalConfident
-            ? ` · ${totalRegionsFound - totalConfident} region${totalRegionsFound - totalConfident !== 1 ? "s" : ""} skipped`
-            : ""}
+          {skipped > 0 ? ` · ${skipped} region${skipped !== 1 ? "s" : ""} skipped` : ""}
         </Text>
       </View>
 
@@ -65,7 +99,7 @@ export default function MultiResultsScreen() {
         keyExtractor={(item) => String(item.regionIndex)}
         contentContainerStyle={styles.list}
         renderItem={({ item: dc, index }) => {
-          const selected = selections[dc.regionIndex] ?? dc.searchResult.candidates[0];
+          const selected = getSelected(dc);
           const hasAlternates = dc.searchResult.candidates.length > 1;
           return (
             <View style={styles.card}>
@@ -127,6 +161,14 @@ export default function MultiResultsScreen() {
             </View>
           );
         }}
+        ListFooterComponent={
+          multiScanLoading ? (
+            <View style={styles.loadingFooter}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+              <Text style={styles.loadingFooterText}>Finding more cards...</Text>
+            </View>
+          ) : null
+        }
       />
 
       {/* Swap modal */}
@@ -145,7 +187,7 @@ export default function MultiResultsScreen() {
                   key={c.id}
                   style={[
                     styles.modalItem,
-                    selections[swapTarget.regionIndex]?.id === c.id && styles.modalItemSelected,
+                    getSelected(swapTarget)?.id === c.id && styles.modalItemSelected,
                   ]}
                   onPress={() => handleSwapSelect(swapTarget, c)}
                 >
@@ -180,6 +222,16 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: COLORS.textMuted, fontSize: 13 },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
+
+  // Loading states
+  loadingCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
+  loadingCenterText: { color: COLORS.textMuted, fontSize: 15 },
+  loadingFooter: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 10, paddingVertical: 20,
+  },
+  loadingFooterText: { color: COLORS.textMuted, fontSize: 13 },
+
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: 14,
@@ -190,7 +242,7 @@ const styles = StyleSheet.create({
   },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardIndex: { color: COLORS.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
-  sourceBadge: { fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  sourceBadge: { fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
   sourceBoth: { color: "#22c55e", backgroundColor: "rgba(34,197,94,0.15)" },
   sourceImage: { color: COLORS.accent, backgroundColor: "rgba(108,99,255,0.15)" },
   sourceOcr: { color: "#f59e0b", backgroundColor: "rgba(245,158,11,0.15)" },
@@ -224,7 +276,7 @@ const styles = StyleSheet.create({
   },
   swapBtnText: { color: COLORS.textMuted, fontSize: 12 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
-  emptyText: { color: COLORS.textMuted, fontSize: 16 },
+  emptyText: { color: COLORS.textMuted, fontSize: 16, textAlign: "center", paddingHorizontal: 32 },
   backBtn: { paddingHorizontal: 24, paddingVertical: 12 },
   backBtnText: { color: COLORS.accent, fontSize: 15, fontWeight: "600" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },

@@ -113,11 +113,13 @@ def _slugify(text: str) -> str:
 
 class PricechartingScraper(BaseScraper):
 
-    def build_game_url(self, name: str, set_name: str, card_number: str, game: str = "pokemon") -> str:
+    def build_game_url(self, name: str, set_name: str, card_number: str, game: str = "pokemon", language: str = "en") -> str:
         num = card_number.split("/")[0].lstrip("0") or "0"
         name_slug = _slugify(name)
         set_slug = _slugify(set_name)
         if game == "pokemon":
+            if language == "ja":
+                return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}-{num}"
             return f"https://www.pricecharting.com/game/pokemon-{set_slug}/{name_slug}-{num}"
         return f"https://www.pricecharting.com/game/{set_slug}/{name_slug}-{num}"
 

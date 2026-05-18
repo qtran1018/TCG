@@ -23,7 +23,7 @@ class Card(Base):
     pricecharting_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     pricecharting_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # pokemontcg.io id
-    embedding: Mapped[list | None] = mapped_column(Vector(256), nullable=True)  # EfficientNet-B0 + PCA
+    embedding: Mapped[list | None] = mapped_column(Vector(512), nullable=True)  # CLIP ViT-B/32
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

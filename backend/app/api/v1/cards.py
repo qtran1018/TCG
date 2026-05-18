@@ -15,14 +15,15 @@ _matcher = CardMatcherService()
 
 
 @router.get("/{card_id}", response_model=CardWithPrice)
-async def get_card(card_id: int, scan_type: str = "raw", db: AsyncSession = Depends(get_db)):
+async def get_card(card_id: int, scan_type: str = "raw", language: str | None = None, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Card).where(Card.id == card_id))
     card = result.scalar_one_or_none()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # Fetch fresh price (cached internally)
-    price_dict = await _matcher.get_prices(card, scan_type)
+    # Fetch fresh price (cached internally). Pass scan language to override card.language
+    # for price URL building — e.g. Japanese scan of an English-stored card.
+    price_dict = await _matcher.get_prices(card, scan_type, language_override=language)
     await db.commit()
 
     price_out = None

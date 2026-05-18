@@ -218,7 +218,9 @@ class CardMatcherService:
 
         db_cards = await self._search_db(hints, game, language, db)
 
-        if name_for_api and len(db_cards) < 3:
+        # Skip external API for Japanese: pokemontcg.io has no Japanese card data.
+        # _search_db already searches the English cards with the kana→EN translated name.
+        if name_for_api and len(db_cards) < 3 and language != "ja":
             api_cards = await self._search_external(name_for_api, game, language, db, hints)
             existing_ids = {c.id for c in db_cards}
             for ac in api_cards:
@@ -279,7 +281,10 @@ class CardMatcherService:
         card_number = hints.get("card_number", "")
         set_total = hints.get("set_total", "")
 
-        stmt = select(Card).where(Card.game == game, Card.language == language)
+        # Japanese Pokemon: kana names are translated to English and all cards are stored as "en".
+        # Querying language="ja" always misses → falls through to slow external API calls.
+        db_language = "en" if (game == "pokemon" and language == "ja") else language
+        stmt = select(Card).where(Card.game == game, Card.language == db_language)
 
         if name and card_number:
             # Prefer name + card number match first
@@ -305,7 +310,16 @@ class CardMatcherService:
             result = await db.execute(
                 stmt.where(Card.name.ilike(f"%{name}%")).limit(10)
             )
-            return list(result.scalars().all())
+            results = list(result.scalars().all())
+            if results:
+                return results
+            # Fuzzy fallback for OCR misreads (e.g. "Lotacl" → Lotad, "Sulcune" → Suicune)
+            fuzzy = await db.execute(
+                stmt.where(func.similarity(Card.name, name) > 0.35)
+                .order_by(func.similarity(Card.name, name).desc())
+                .limit(10)
+            )
+            return list(fuzzy.scalars().all())
 
         return []
 
@@ -373,23 +387,31 @@ class CardMatcherService:
         await db.flush()
         return card
 
-    async def get_prices(self, card: Card, scan_type: str) -> dict | None:
+    async def get_prices(self, card: Card, scan_type: str, language_override: str | None = None) -> dict | None:
         if not card.name:
             return None
 
         # Build URL locally — never modify the card object to avoid unique constraint
         # violations when duplicate rows exist in the DB.
-        pc_url = card.pricecharting_url
-        if pc_url is None and card.set_name and card.card_number:
+        # When language_override="ja", always rebuild with Japanese prefix — the stored URL
+        # (if any) is for the English version and must not be reused.
+        price_language = language_override or card.language
+        if language_override == "ja" and card.set_name and card.card_number:
             pc_url = self.pc_scraper.build_game_url(
-                card.name, card.set_name, card.card_number, card.game
+                card.name, card.set_name, card.card_number, card.game, "ja"
             )
+        else:
+            pc_url = card.pricecharting_url
+            if pc_url is None and card.set_name and card.card_number:
+                pc_url = self.pc_scraper.build_game_url(
+                    card.name, card.set_name, card.card_number, card.game, card.language
+                )
 
         if not pc_url:
             return None
 
         pc_id = pc_url.rstrip("/").split("/")[-1]
-        cache_key = f"{pc_id}:{scan_type}"
+        cache_key = f"{pc_id}:{scan_type}:{price_language}"
         cached = await price_cache.get(cache_key)
         if cached:
             return cached

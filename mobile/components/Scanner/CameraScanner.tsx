@@ -10,9 +10,10 @@ interface Props {
   language: Language;
   onCapture: (uri: string) => void;
   isProcessing: boolean;
+  showOverlay?: boolean;
 }
 
-export function CameraScanner({ language, onCapture, isProcessing }: Props) {
+export function CameraScanner({ language, onCapture, isProcessing, showOverlay = true }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -51,10 +52,12 @@ export function CameraScanner({ language, onCapture, isProcessing }: Props) {
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
-      <ScanOverlay />
+      {showOverlay && <ScanOverlay />}
       <View style={styles.footer}>
         <Text style={styles.hint}>
-          {language === "ja" ? "カードをフレームに合わせる" : "Align card within the frame"}
+          {showOverlay
+            ? (language === "ja" ? "カードをフレームに合わせる" : "Align card within the frame")
+            : (language === "ja" ? "カードを撮影する" : "Capture all cards in frame")}
         </Text>
         <TouchableOpacity
           style={[styles.shutterBtn, isProcessing && styles.shutterDisabled]}

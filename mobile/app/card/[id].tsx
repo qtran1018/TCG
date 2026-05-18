@@ -11,7 +11,7 @@ import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 
 export default function CardDetailScreen() {
-  const { id, psaGrade } = useLocalSearchParams<{ id: string; psaGrade?: string }>();
+  const { id, psaGrade, language: routeLanguage } = useLocalSearchParams<{ id: string; psaGrade?: string; language?: string }>();
   const { scanType } = useScanStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -21,7 +21,7 @@ export default function CardDetailScreen() {
     if (!id) return;
     setIsLoading(true);
     api
-      .getCard(Number(id), scanType)
+      .getCard(Number(id), scanType, routeLanguage)
       .then(setData)
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => setIsLoading(false));
@@ -45,6 +45,7 @@ export default function CardDetailScreen() {
   }
 
   const { card, price } = data;
+  const pcUrl = price?.pricecharting_url ?? card.pricecharting_url;
   const displayName = card.language === "ja" && card.name_ja ? card.name_ja : card.name;
 
   return (
@@ -85,10 +86,10 @@ export default function CardDetailScreen() {
           </View>
         )}
 
-        {card.pricecharting_url && (
+        {pcUrl && (
           <TouchableOpacity
             style={styles.pcLink}
-            onPress={() => Linking.openURL(card.pricecharting_url!)}
+            onPress={() => Linking.openURL(pcUrl)}
           >
             <Text style={styles.pcLinkText}>View on PriceCharting →</Text>
           </TouchableOpacity>

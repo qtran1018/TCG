@@ -4,28 +4,22 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import { api } from "@/services/api";
 import { detectCardRegions, boxesToRegions } from "@/utils/detectCards";
+import { detectCardsWithYolo } from "@/utils/yoloDetector";
 import { assessCardConfidence } from "@/utils/cardConfidence";
+import { useScanStore } from "@/store/scanStore";
 import type { Game, Language } from "@/constants";
-import type { BatchSearchItem, CardOut } from "@/services/api";
+import type { ScanOcrHint, ScanStreamResult } from "@/services/api";
 import type { CardRegion } from "@/utils/detectCards";
+import type { DetectedCard } from "@/types/scan";
 
 export type ScanMode = "ocr" | "image" | "combined";
 
-export interface DetectedCard {
-  regionIndex: number;
-  ocrText: string;
-  searchResult: BatchSearchItem;
-  matchSource?: "ocr" | "image" | "both";
-}
-
-export interface MultiScanResult {
-  cards: DetectedCard[];
-  totalRegionsFound: number;
-  totalConfident: number;
-}
+// Re-export so existing imports still compile
+export type { DetectedCard } from "@/types/scan";
+export type { MultiScanResult } from "@/types/scan";
 
 interface UseMultiCardScanReturn {
-  scan: (imageUri: string, game: Game, language: Language, scanMode?: ScanMode) => Promise<MultiScanResult | null>;
+  scan: (imageUri: string, game: Game, language: Language, scanMode?: ScanMode) => Promise<boolean>;
   isProcessing: boolean;
   progress: string;
   error: string | null;
@@ -35,27 +29,25 @@ function mlKitScript(language: Language): TextRecognitionScript {
   return language === "ja" ? TextRecognitionScript.JAPANESE : TextRecognitionScript.LATIN;
 }
 
-function rrfMerge(
-  imageItem: BatchSearchItem | undefined,
-  ocrItem: BatchSearchItem | undefined,
-): { merged: CardOut[]; matchSource: "ocr" | "image" | "both" } {
-  const scoreMap = new Map<number, { score: number; card: CardOut }>();
-  const addCandidates = (candidates: CardOut[]) => {
-    candidates.forEach((card, rank) => {
-      const delta = 1 / (rank + 60);
-      const existing = scoreMap.get(card.id);
-      if (existing) existing.score += delta;
-      else scoreMap.set(card.id, { score: delta, card });
-    });
-  };
-  if (imageItem?.candidates.length) addCandidates(imageItem.candidates);
-  if (ocrItem?.candidates.length) addCandidates(ocrItem.candidates);
+function normalizeNumber(n: string): string {
+  return n.replace(/^0+/, "") || "0";
+}
 
-  const merged = [...scoreMap.values()].sort((a, b) => b.score - a.score).map((v) => v.card);
-  const hasImage = (imageItem?.candidates.length ?? 0) > 0;
-  const hasOcr = (ocrItem?.candidates.length ?? 0) > 0;
-  const matchSource = hasImage && hasOcr ? "both" : hasImage ? "image" : "ocr";
-  return { merged, matchSource };
+function augmentWithNumberRegion(
+  cropText: string,
+  allBlocks: Array<{ text: string; frame: any }>,
+  cropX: number, cropY: number, cropW: number, cropH: number,
+): string {
+  const numTop = cropY + cropH * 0.78;
+  const numBottom = cropY + cropH;
+  const numberBlocks = allBlocks.filter((b) => {
+    if (!b.frame) return false;
+    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
+    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
+    return cy >= numTop && cy <= numBottom && cx >= cropX && cx <= cropX + cropW;
+  });
+  const numberText = numberBlocks.map((b) => b.text).join(" ");
+  return numberText && /\d/.test(numberText) ? `${cropText}\n${numberText}` : cropText;
 }
 
 export function useMultiCardScan(): UseMultiCardScanReturn {
@@ -63,12 +55,21 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
   const [progress, setProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const {
+    clearMultiScan,
+    setMultiScanLoading,
+    setMultiScanError,
+    appendMultiScanCard,
+    language,
+  } = useScanStore();
+
   const scan = useCallback(
-    async (imageUri: string, game: Game, language: Language, scanMode: ScanMode = "ocr"): Promise<MultiScanResult | null> => {
+    async (imageUri: string, game: Game, lang: Language, scanMode: ScanMode = "ocr"): Promise<boolean> => {
       setIsProcessing(true);
       setError(null);
+
       try {
-        // 1. Resize image
+        // 1. Resize image to 1600px wide (for OCR quality and backend CLIP)
         setProgress("Processing image...");
         const resized = await ImageManipulator.manipulateAsync(
           imageUri,
@@ -76,41 +77,57 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
         );
 
-        // 2. OCR full image + read base64 in parallel
+        // 2. OCR full image (needed for augmentation + OCR mode)
         setProgress("Scanning for cards...");
-        const script = mlKitScript(language);
-        const [fullResult, base64] = await Promise.all([
-          TextRecognition.recognize(resized.uri, script),
-          FileSystem.readAsStringAsync(resized.uri, { encoding: FileSystem.EncodingType.Base64 }),
-        ]);
+        const script = mlKitScript(lang);
+        const fullResult = await TextRecognition.recognize(resized.uri, script);
         const allBlocks = fullResult.blocks
           .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
           .map((b) => ({ text: b.text, frame: b.frame as any }));
 
-        // 3. Detect card outlines via backend; fall back to OCR clustering
+        // 3. Detect card regions — on-device YOLO first, then fallbacks
         let regions: CardRegion[];
-        try {
-          const detected = await api.detectCards(base64, 10);
-          if (detected.boxes.length > 0) {
-            regions = boxesToRegions(detected.boxes);
-            setProgress(`Found ${regions.length} card outline${regions.length !== 1 ? "s" : ""}...`);
-          } else {
+        const yoloResult = await detectCardsWithYolo(resized.uri, resized.width, resized.height);
+
+        if (yoloResult && yoloResult.boxes.length > 0) {
+          regions = boxesToRegions(yoloResult.boxes);
+          setProgress(`Found ${regions.length} card${regions.length !== 1 ? "s" : ""}...`);
+        } else if (!yoloResult) {
+          // YOLO model absent — fall back to backend /detect
+          try {
+            const base64 = await FileSystem.readAsStringAsync(resized.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const detected = await api.detectCards(base64, 10);
+            if (detected.boxes.length > 0) {
+              regions = boxesToRegions(detected.boxes);
+              setProgress(`Found ${regions.length} card outline${regions.length !== 1 ? "s" : ""}...`);
+            } else {
+              regions = detectCardRegions(allBlocks, resized.width, resized.height);
+            }
+          } catch {
             regions = detectCardRegions(allBlocks, resized.width, resized.height);
           }
-        } catch (detectErr) {
-          console.warn("[MultiScan] OpenCV detect failed, falling back to OCR clustering:", detectErr);
+        } else {
+          // YOLO found nothing — fall back to OCR clustering
           regions = detectCardRegions(allBlocks, resized.width, resized.height);
         }
 
         if (regions.length === 0) {
-          setError("No cards detected. Try better lighting or move closer.");
-          return null;
+          const msg = "No cards detected. Try better lighting or move closer.";
+          setMultiScanError(msg);
+          setError(msg);
+          return false;
         }
 
         // 4. Crop each detected region
         setProgress(`Found ${regions.length} region${regions.length !== 1 ? "s" : ""}, reading each...`);
         const regionCount = Math.min(regions.length, 10);
-        const cropData: Array<{ regionIndex: number; uri: string }> = [];
+        const cropData: Array<{
+          regionIndex: number;
+          uri: string;
+          cropX: number; cropY: number; cropW: number; cropH: number;
+        }> = [];
 
         for (let i = 0; i < regionCount; i++) {
           const { boundingBox: bb } = regions[i];
@@ -125,163 +142,87 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
             { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
           );
-          cropData.push({ regionIndex: i, uri: cropped.uri });
+          cropData.push({ regionIndex: i, uri: cropped.uri, cropX, cropY, cropW, cropH });
         }
 
-        // 5. Identify cards — branch by scan mode
-        let cards: DetectedCard[] = [];
-        let totalConfident = 0;
+        // 5. Build crop base64 list + OCR hints for the combined /scan endpoint
+        setProgress(`Identifying ${cropData.length} card${cropData.length !== 1 ? "s" : ""}...`);
 
-        if (scanMode === "image") {
-          setProgress(`Matching ${cropData.length} card${cropData.length !== 1 ? "s" : ""} by image...`);
-          const crops = await Promise.all(
-            cropData.map((c) => FileSystem.readAsStringAsync(c.uri, { encoding: FileSystem.EncodingType.Base64 })),
-          );
-          const result = await api.batchMatchByImage(crops);
+        const crops: string[] = [];
+        const ocrHints: ScanOcrHint[] = [];
 
-          const seenIds = new Set<number>();
-          cards = result.results
-            .map((r, i) => ({
-              regionIndex: cropData[i].regionIndex,
-              ocrText: "",
-              searchResult: r,
-            }))
-            .filter((c) => {
-              if (c.searchResult.candidates.length === 0) return false;
-              const topId = c.searchResult.candidates[0].id;
-              if (seenIds.has(topId)) return false;
-              seenIds.add(topId);
-              return true;
-            });
-          totalConfident = cards.length;
+        for (const { uri, cropX, cropY, cropW, cropH } of cropData) {
+          // Always read crop as base64 (needed for image modes)
+          const cropB64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          crops.push(cropB64);
 
-        } else if (scanMode === "combined") {
-          // OCR each crop, then run both searches in parallel and merge with RRF
-          setProgress("Reading cards...");
-          const ocrTexts: (string | null)[] = [];
-          for (const { uri } of cropData) {
+          // Build OCR hint for this crop (used in ocr + combined modes)
+          let rawText: string | undefined;
+          if (scanMode !== "image") {
             const cropResult = await TextRecognition.recognize(uri, script);
-            const cropText = cropResult.blocks
+            let cropText = cropResult.blocks
               .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
               .map((b) => b.text)
               .join("\n");
+            cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
             const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game);
-            ocrTexts.push(confidence.isCard ? cropText : null);
+            rawText = confidence.isCard ? cropText : undefined;
           }
 
-          const allCropBase64 = await Promise.all(
-            cropData.map((c) => FileSystem.readAsStringAsync(c.uri, { encoding: FileSystem.EncodingType.Base64 })),
-          );
-
-          const confidentIndices: number[] = [];
-          const ocrQueryList: { ocr_text: string; game: Game; language: Language }[] = [];
-          ocrTexts.forEach((text, i) => {
-            if (text !== null) {
-              confidentIndices.push(i);
-              ocrQueryList.push({ ocr_text: text, game, language });
-            }
-          });
-
-          setProgress(`Running combined scan on ${cropData.length} card${cropData.length !== 1 ? "s" : ""}...`);
-          const [imageResult, ocrBatch] = await Promise.all([
-            api.batchMatchByImage(allCropBase64),
-            ocrQueryList.length > 0
-              ? api.batchSearch(ocrQueryList, "raw")
-              : Promise.resolve({ results: [] as BatchSearchItem[] }),
-          ]);
-
-          // Map OCR results back to crop indices
-          const ocrByIndex: Record<number, BatchSearchItem> = {};
-          confidentIndices.forEach((cropIdx, resultIdx) => {
-            if (ocrBatch.results[resultIdx]) {
-              ocrByIndex[cropIdx] = ocrBatch.results[resultIdx];
-            }
-          });
-
-          // RRF merge per crop
-          const seenIds = new Set<number>();
-          for (let i = 0; i < cropData.length; i++) {
-            const imageItem = imageResult.results[i];
-            const ocrItem = ocrByIndex[i];
-            const { merged, matchSource } = rrfMerge(imageItem, ocrItem);
-
-            if (merged.length === 0) continue;
-            const topId = merged[0].id;
-            if (seenIds.has(topId)) continue;
-            seenIds.add(topId);
-
-            // Prefer OCR query string (human-readable); fall back to image query
-            const queryUsed = ocrItem?.query_used ?? imageItem?.query_used ?? "";
-
-            cards.push({
-              regionIndex: cropData[i].regionIndex,
-              ocrText: ocrTexts[i] ?? "",
-              searchResult: { candidates: merged, query_used: queryUsed },
-              matchSource,
-            });
-          }
-          totalConfident = cards.length;
-
-        } else {
-          // OCR mode
-          const confidentQueries: Array<{ regionIndex: number; ocr_text: string }> = [];
-          for (const { regionIndex, uri } of cropData) {
-            const cropResult = await TextRecognition.recognize(uri, script);
-            const cropText = cropResult.blocks
-              .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-              .map((b) => b.text)
-              .join("\n");
-            const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game);
-            if (confidence.isCard) {
-              confidentQueries.push({ regionIndex, ocr_text: cropText });
-            }
-          }
-
-          if (confidentQueries.length === 0) {
-            setError("Regions found but none look like cards. Try better lighting or angle.");
-            return null;
-          }
-
-          totalConfident = confidentQueries.length;
-          setProgress(`Searching ${confidentQueries.length} card${confidentQueries.length !== 1 ? "s" : ""}...`);
-          const result = await api.batchSearch(
-            confidentQueries.map((q) => ({ ocr_text: q.ocr_text, game, language })),
-            "raw",
-          );
-
-          const regionIndices = confidentQueries.map((q) => q.regionIndex);
-          const seenIds = new Set<number>();
-          cards = result.results
-            .map((r, i) => ({
-              regionIndex: regionIndices[i],
-              ocrText: "",
-              searchResult: r,
-            }))
-            .filter((c) => {
-              if (c.searchResult.candidates.length === 0) return false;
-              const topId = c.searchResult.candidates[0].id;
-              if (seenIds.has(topId)) return false;
-              seenIds.add(topId);
-              return true;
-            });
+          ocrHints.push({ raw_text: rawText, language: lang, game });
         }
 
-        return {
-          cards,
-          totalRegionsFound: regions.length,
-          totalConfident,
-        };
+        // 6. Signal the store that streaming is starting
+        setMultiScanLoading(true, regions.length);
+
+        // 7. Stream results from the combined /scan endpoint
+        const seenIds = new Set<number>();
+
+        await api.scanStream(crops, ocrHints, scanMode, (item: ScanStreamResult) => {
+          if (item.candidates.length === 0) return;
+
+          // Deduplicate by top candidate ID
+          const topId = item.candidates[0].id;
+          if (seenIds.has(topId)) return;
+          seenIds.add(topId);
+
+          const card: DetectedCard = {
+            regionIndex: cropData[item.crop_index]?.regionIndex ?? item.crop_index,
+            ocrText: ocrHints[item.crop_index]?.raw_text ?? "",
+            searchResult: {
+              candidates: item.candidates,
+              query_used: item.query_used,
+            },
+            matchSource: item.match_source === "none" ? undefined : item.match_source,
+          };
+
+          appendMultiScanCard(card);
+        });
+
+        setMultiScanLoading(false);
+
+        // Check if anything was found
+        const store = useScanStore.getState();
+        if (!store.multiScanResult || store.multiScanResult.cards.length === 0) {
+          setMultiScanError("No cards could be identified. Try better lighting or angle.");
+          return false;
+        }
+
+        return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Multi-scan failed";
         console.error("[MultiScan] Pipeline error:", err);
         setError(msg);
-        return null;
+        setMultiScanError(msg);
+        return false;
       } finally {
         setIsProcessing(false);
         setProgress("");
       }
     },
-    [],
+    [appendMultiScanCard, clearMultiScan, setMultiScanLoading, setMultiScanError],
   );
 
   return { scan, isProcessing, progress, error };

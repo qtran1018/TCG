@@ -9,12 +9,12 @@ Usage:
         --db-url postgresql://tcg:tcgpass@localhost:5432/tcgdb
 
 The script:
-  1. Fetches all EN Pokemon cards from pokemontcg.io API (~60 requests)
-  2. Upserts any missing cards into the DB
-  3. For each card: uses local Kaggle image first, downloads image_url if not found
-  4. Embeds all images with EfficientNet-B0 in batches
-  5. Fits PCA(256) on the full embedding matrix, saves to backend/models/pca.pkl
-  6. Stores 256-dim embeddings in the cards table
+  1. Migrates the embedding column to vector(512) if it is still vector(256)
+  2. Fetches all EN Pokemon cards from pokemontcg.io API (~82 pages)
+  3. Upserts any missing cards into the DB
+  4. For each card: uses local Kaggle image first, downloads image_url if not found
+  5. Embeds all images with CLIP ViT-B/32 in batches (one forward pass per batch)
+  6. Stores 512-dim embeddings in the cards table
   7. Creates an IVFFlat index on the embedding column
 
 Re-running is safe: already-embedded cards are skipped unless --force is passed.
@@ -23,9 +23,9 @@ Re-running is safe: already-embedded cards are skipped unless --force is passed.
 import argparse
 import asyncio
 import io
+import json
 import logging
 import os
-import pickle
 import re
 import sys
 from pathlib import Path
@@ -39,20 +39,17 @@ for _candidate in [Path(__file__).parent.parent / "backend", Path("/app")]:
         sys.path.insert(0, str(_candidate))
         break
 
-from app.services.card_embedder import embed_raw  # noqa: E402
+from app.services.card_embedder import embed_batch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 PTCG_API = "https://api.pokemontcg.io/v2/cards"
 PAGE_SIZE = 250
-BATCH_SIZE = 32
-PCA_DIMS = 256
+BATCH_SIZE = 64
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png"}
 
-# Resolve the backend root whether running locally (./backend) or inside Docker (/app)
 _BACKEND_ROOT = Path("/app") if Path("/app/app").is_dir() else Path(__file__).parent.parent / "backend"
-PCA_PATH = _BACKEND_ROOT / "models" / "pca.pkl"
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +102,6 @@ def slugify(name: str) -> str:
 
 
 def find_local_image(dataset_path: Path, set_name: str, card_number: str) -> Path | None:
-    """Locate a card image in the Kaggle dataset by set name slug + card number."""
     folder = dataset_path / slugify(set_name)
     if not folder.is_dir():
         return None
@@ -113,12 +109,9 @@ def find_local_image(dataset_path: Path, set_name: str, card_number: str) -> Pat
 
 
 def _match_card_file(folder: Path, card_number: str) -> Path | None:
-    # Normalize target: strip leading alpha prefix (TG01→1, SWSH001→1), strip leading zeros
     digits = re.sub(r"^[A-Za-z]+", "", card_number)
     target = (digits.lstrip("0") or "0")
 
-    # Two-pass: prefer 3-digit tokens (zero-padded modern format) over shorter ones.
-    # This avoids matching set-code digits like the "5" in "sv3-5_en_005_std.jpg".
     for min_len in (3, 1):
         for f in sorted(folder.iterdir()):
             if f.suffix.lower() not in SUPPORTED_EXTS:
@@ -132,14 +125,10 @@ def _match_card_file(folder: Path, card_number: str) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# Image fetch (local file or URL download)
+# Image fetch
 # ---------------------------------------------------------------------------
 
-async def get_image_bytes(
-    card: dict,
-    dataset_path: Path | None,
-    session,
-) -> bytes | None:
+async def get_image_bytes(card: dict, dataset_path: Path | None, session) -> bytes | None:
     set_name = card.get("set", {}).get("name", "")
     card_number = card.get("number", "")
 
@@ -148,7 +137,6 @@ async def get_image_bytes(
         if local:
             return local.read_bytes()
 
-    # Fall back to downloading the small image URL
     url = card.get("images", {}).get("small")
     if not url:
         return None
@@ -166,11 +154,9 @@ async def get_image_bytes(
 # ---------------------------------------------------------------------------
 
 async def upsert_cards(conn, cards: list[dict]) -> dict[str, int]:
-    """Bulk-upsert API cards into DB. Returns {external_id: db_id} map."""
     if not cards:
         return {}
 
-    # Fetch existing external_ids in one query
     ext_ids = [c.get("id", "") for c in cards]
     existing = {
         r["external_id"]: r["id"]
@@ -181,7 +167,6 @@ async def upsert_cards(conn, cards: list[dict]) -> dict[str, int]:
 
     to_insert = [c for c in cards if c.get("id", "") not in existing]
 
-    # Batch insert in chunks of 500
     CHUNK = 500
     new_ids: dict[str, int] = {}
     for i in range(0, len(to_insert), CHUNK):
@@ -216,26 +201,55 @@ async def upsert_cards(conn, cards: list[dict]) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# DB migration
+# ---------------------------------------------------------------------------
+
+async def migrate_embedding_column(conn):
+    """Ensure the embedding column is vector(512). Drops and recreates if still vector(256)."""
+    row = await conn.fetchrow(
+        """
+        SELECT pg_catalog.format_type(atttypid, atttypmod) AS col_type
+        FROM pg_attribute
+        JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+        WHERE pg_class.relname = 'cards' AND pg_attribute.attname = 'embedding'
+        """
+    )
+    if row is None:
+        logger.info("embedding column not found — adding as vector(512)")
+        await conn.execute("ALTER TABLE cards ADD COLUMN embedding vector(512)")
+    elif row["col_type"] == "vector(256)":
+        logger.info("Migrating embedding column from vector(256) to vector(512) — existing embeddings cleared")
+        await conn.execute("DROP INDEX IF EXISTS ix_cards_embedding_ivfflat")
+        await conn.execute("ALTER TABLE cards DROP COLUMN embedding")
+        await conn.execute("ALTER TABLE cards ADD COLUMN embedding vector(512)")
+    elif row["col_type"] == "vector(512)":
+        logger.info("embedding column is already vector(512)")
+    else:
+        logger.warning("Unexpected embedding column type: %s — leaving as-is", row["col_type"])
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 async def main(dataset_path: Path | None, db_url: str, api_key: str | None, force: bool):
     import aiohttp
 
-    # 1. Fetch all cards from pokemontcg.io
     logger.info("Fetching all Pokemon cards from pokemontcg.io...")
     all_cards = await fetch_all_ptcg_cards(api_key)
     logger.info("Total cards fetched: %d", len(all_cards))
 
-    # 2. Upsert into DB
-    logger.info("Upserting cards into DB...")
     conn = await asyncpg.connect(db_url)
     try:
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+        # Ensure column is vector(512)
+        await migrate_embedding_column(conn)
+
+        logger.info("Upserting cards into DB...")
         ext_to_db_id = await upsert_cards(conn, all_cards)
         logger.info("DB now has entries for %d cards", len(ext_to_db_id))
 
-        # Determine which cards still need embeddings
         if force:
             to_embed = all_cards
         else:
@@ -254,18 +268,18 @@ async def main(dataset_path: Path | None, db_url: str, api_key: str | None, forc
         if not to_embed:
             logger.info("Nothing to embed — run with --force to re-embed all.")
         else:
-            # 3. Fetch images and embed
             logger.info("Fetching images and embedding (batch_size=%d)...", BATCH_SIZE)
-            raw_vecs: list[np.ndarray] = []
-            db_ids: list[int] = []
 
             async with aiohttp.ClientSession() as session:
                 for i in range(0, len(to_embed), BATCH_SIZE):
-                    batch = to_embed[i : i + BATCH_SIZE]
+                    batch_cards = to_embed[i : i + BATCH_SIZE]
                     image_bytes_list = await asyncio.gather(
-                        *[get_image_bytes(c, dataset_path, session) for c in batch]
+                        *[get_image_bytes(c, dataset_path, session) for c in batch_cards]
                     )
-                    for card, img_bytes in zip(batch, image_bytes_list):
+
+                    # Filter out cards with no image
+                    valid: list[tuple[dict, bytes]] = []
+                    for card, img_bytes in zip(batch_cards, image_bytes_list):
                         ext_id = card.get("id", "")
                         card_info = {
                             "id": ext_id,
@@ -275,65 +289,44 @@ async def main(dataset_path: Path | None, db_url: str, api_key: str | None, forc
                             "image_url": card.get("images", {}).get("small", ""),
                         }
                         if not img_bytes:
-                            local = find_local_image(dataset_path, card.get("set", {}).get("name", ""), card.get("number", "")) if dataset_path else None
-                            key = "no_image" if local is None else "download_failed"
-                            failures[key].append(card_info)
-                            logger.debug("No image for %s, skipping", ext_id)
-                            continue
-                        try:
-                            vec = embed_raw(img_bytes)
-                            raw_vecs.append(vec)
-                            db_ids.append(ext_to_db_id[card["id"]])
-                        except Exception as e:
-                            logger.warning("Embed failed for %s: %s", ext_id, e)
-                            failures["embed_failed"].append({**card_info, "reason": str(e)})
+                            has_local = bool(
+                                dataset_path and find_local_image(
+                                    dataset_path,
+                                    card.get("set", {}).get("name", ""),
+                                    card.get("number", ""),
+                                )
+                            )
+                            failures["no_image" if not has_local else "download_failed"].append(card_info)
+                        else:
+                            valid.append((card, img_bytes))
 
-                    if (i // BATCH_SIZE + 1) % 20 == 0 or i + BATCH_SIZE >= len(to_embed):
+                    if not valid:
+                        continue
+
+                    try:
+                        vecs = embed_batch([b for _, b in valid])
+                        for (card, _), vec in zip(valid, vecs):
+                            db_id = ext_to_db_id[card["id"]]
+                            await conn.execute(
+                                "UPDATE cards SET embedding = $1::vector WHERE id = $2",
+                                str(vec.tolist()),
+                                db_id,
+                            )
+                    except Exception as e:
+                        logger.warning("embed_batch failed for batch at i=%d: %s", i, e)
+                        for card, _ in valid:
+                            failures["embed_failed"].append({
+                                "id": card.get("id", ""),
+                                "name": card.get("name", ""),
+                                "set": card.get("set", {}).get("name", ""),
+                                "number": card.get("number", ""),
+                                "reason": str(e),
+                            })
+
+                    if (i // BATCH_SIZE + 1) % 10 == 0 or i + BATCH_SIZE >= len(to_embed):
                         logger.info("  Embedded %d / %d", min(i + BATCH_SIZE, len(to_embed)), len(to_embed))
 
-            logger.info("Successfully embedded %d images", len(raw_vecs))
-
-            if len(raw_vecs) < PCA_DIMS:
-                logger.error(
-                    "Need at least %d embeddings to fit PCA — only got %d. "
-                    "Scan more cards first or check the dataset path.",
-                    PCA_DIMS, len(raw_vecs),
-                )
-                return
-
-            # 4. Fit or update PCA
-            from sklearn.decomposition import PCA
-
-            # If PCA already exists, combine old fitted data with new vecs for refitting
-            raw_matrix = np.array(raw_vecs, dtype=np.float32)
-
-            if PCA_PATH.exists() and not force:
-                logger.info("PCA already exists — loading and transforming new vecs only")
-                with open(PCA_PATH, "rb") as f:
-                    pca = pickle.load(f)
-                reduced = pca.transform(raw_matrix).astype(np.float32)
-            else:
-                logger.info("Fitting PCA(%d) on %d vectors...", PCA_DIMS, len(raw_vecs))
-                pca = PCA(n_components=PCA_DIMS, random_state=42)
-                reduced = pca.fit_transform(raw_matrix).astype(np.float32)
-                explained = pca.explained_variance_ratio_.sum()
-                logger.info("PCA explains %.1f%% of variance", explained * 100)
-                PCA_PATH.parent.mkdir(parents=True, exist_ok=True)
-                with open(PCA_PATH, "wb") as f:
-                    pickle.dump(pca, f)
-                logger.info("Saved PCA to %s", PCA_PATH)
-
-            # 5. Store embeddings in DB
-            logger.info("Storing %d embeddings in DB...", len(db_ids))
-            for db_id, vec in zip(db_ids, reduced):
-                await conn.execute(
-                    "UPDATE cards SET embedding = $1::vector WHERE id = $2",
-                    str(vec.tolist()),
-                    db_id,
-                )
-            logger.info("Stored %d embeddings", len(db_ids))
-
-        # 6. Create IVFFlat index
+        # Build IVFFlat index
         count = await conn.fetchval("SELECT COUNT(*) FROM cards WHERE embedding IS NOT NULL")
         lists = min(100, max(1, int(count) // 100))
         logger.info("Creating IVFFlat index (lists=%d, rows_with_embedding=%d)...", lists, count)
@@ -347,10 +340,10 @@ async def main(dataset_path: Path | None, db_url: str, api_key: str | None, forc
         )
         logger.info("IVFFlat index created")
 
-        # 7. Write failure report
-        import json
+        # Write failure report
         total_failed = sum(len(v) for v in failures.values())
         report_path = _BACKEND_ROOT / "models" / "embedding_failures.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         with open(report_path, "w") as f:
             json.dump(failures, f, indent=2)
         logger.info(
@@ -364,7 +357,7 @@ async def main(dataset_path: Path | None, db_url: str, api_key: str | None, forc
     finally:
         await conn.close()
 
-    logger.info("Done. Restart the backend container to load the new PCA model.")
+    logger.info("Done. Restart the backend container to pick up the new embeddings.")
 
 
 if __name__ == "__main__":
@@ -377,7 +370,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--db-url",
-        default=os.getenv("DATABASE_URL", "postgresql://tcg:tcgpass@localhost:5432/tcgdb"),
+        default=os.getenv("DATABASE_URL", "postgresql://tcg:tcgpass@postgres:5432/tcgdb"),
         help="Postgres connection URL",
     )
     parser.add_argument(
@@ -388,7 +381,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-embed cards that already have embeddings and refit PCA",
+        help="Re-embed cards that already have embeddings",
     )
     args = parser.parse_args()
 
