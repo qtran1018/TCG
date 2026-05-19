@@ -253,7 +253,7 @@ const ResultRow = React.memo(function ResultRow({
           {isChecked && <Text style={styles.checkboxMark}>{CHECKMARK}</Text>}
         </View>
         <Text style={styles.cardIndex}>Card {index + 1}</Text>
-        {dc.matchSource && dc.matchSource !== "none" && (
+        {dc.matchSource && (
           <Text style={[
             styles.sourceBadge,
             dc.matchSource === "both" ? styles.sourceBoth

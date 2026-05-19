@@ -62,22 +62,6 @@ services:
               capabilities: [gpu]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: tcg_worker
-    restart: unless-stopped
-    env_file: .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: celery -A app.tasks.scrape_tasks worker --loglevel=info --concurrency=2
-
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: tcg_pgadmin
