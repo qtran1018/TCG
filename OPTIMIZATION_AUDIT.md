@@ -1,7 +1,9 @@
 # Optimization Audit — TCG Card Scanner
 
 Date: 2026-05-19
-Scope: full backend (`backend/app/`) and mobile (`mobile/`) trees. No changes have been applied.
+Scope: full backend (`backend/app/`) and mobile (`mobile/`) trees.
+
+**Status legend:** ✅ = applied · ⚠️ = partially applied · ❌ = deliberately skipped (dependency change) · (no marker) = not yet addressed.
 
 Each finding lists:
 - **File / location** — where to look
@@ -14,63 +16,63 @@ Each finding lists:
 
 ## 1. Performance
 
-### 1.1 First `/scan` and `/detect` calls pay cold-start latency
+### ✅ 1.1 First `/scan` and `/detect` calls pay cold-start latency
 - **File**: `backend/app/services/card_embedder.py:18-37`, `backend/app/services/card_detector.py:26-39`
 - **Current**: CLIP and YOLO are loaded lazily on the first call. CLIP is ~170MB on disk → load + move to GPU = ~2–5s. YOLO load = ~500ms.
 - **Issue**: The first user of the day waits noticeably longer than subsequent users. The mobile XHR timeout is 90s — risky on a cold container.
 - **Recommendation**: Preload both models in `app/main.py` `lifespan` so they're warm before the first request.
 - **Benefit**: Eliminates a multi-second latency spike on the first scan; fully predictable first-call timing.
 
-### 1.2 `/scan` does not stream per crop — all phases complete before any result is emitted
+### ✅ 1.2 `/scan` does not stream per crop — all phases complete before any result is emitted
 - **File**: `backend/app/api/v1/scan.py:262-320`
 - **Current**: `generate()` runs phase 1+2 (all image searches) to completion, then phase 3 (all OCR searches) to completion, then loops crops and yields NDJSON.
 - **Issue**: The "streaming" endpoint is not actually streaming — all results arrive back-to-back at the end. The mobile UI shows blank progress until the entire batch finishes.
 - **Recommendation**: For each crop, kick off `(vector_search, ocr_search)` as a parallel task and `asyncio.as_completed()` over the pairs, yielding NDJSON the moment a crop's pair completes.
 - **Benefit**: True progressive UI — fastest cards appear in 1–2s rather than waiting for the slowest. Major perceived-latency improvement.
 
-### 1.3 Per-crop OCR in mobile pipeline runs sequentially
+### ✅ 1.3 Per-crop OCR in mobile pipeline runs sequentially
 - **File**: `mobile/hooks/useMultiCardScan.ts:154-175`
 - **Current**: `for (const { uri, … } of cropData) { … await TextRecognition.recognize(uri, script); … }` — each crop's OCR awaits before the next starts.
 - **Issue**: With 5 crops at ~200–500ms each, that's 1–2.5s of strictly sequential work before the backend call even begins.
 - **Recommendation**: `await Promise.all(cropData.map(async ({uri, …}) => { … }))` — gather OCR + base64 reads in parallel.
 - **Benefit**: 4–10× speedup on multi-card scans (limited by phone CPU/IO).
 
-### 1.4 CLIP `encode_image` blocks the FastAPI event loop
+### ✅ 1.4 CLIP `encode_image` blocks the FastAPI event loop
 - **File**: `backend/app/services/card_embedder.py:78-80`
 - **Current**: `_model.encode_image(batch)` runs synchronously inside the async endpoint.
 - **Issue**: While CLIP is encoding (~100–500ms on CPU, ~50ms on GPU), the event loop is blocked — no other requests progress.
 - **Recommendation**: Wrap the encode step in `await asyncio.to_thread(_encode_sync, batch)` (or `loop.run_in_executor`).
 - **Benefit**: Other in-flight requests (e.g. price scrapes, history list) don't stall during inference.
 
-### 1.5 Image cache stores ranked CardOut list but key collisions cause re-rank
+### ✅ 1.5 Image cache stores ranked CardOut list but key collisions cause re-rank
 - **File**: `backend/app/services/card_matcher.py:215-217`
 - **Current**: `search_cache` stores only `ids` of cards. On cache hit, code does `SELECT * FROM cards WHERE id IN (...)`, which returns in DB row order — **not** the `_dedupe_and_rank` order from the original write.
 - **Issue**: Extra DB query and lost ranking order on every cache hit.
 - **Recommendation**: Store the ordered serialized `CardOut` array directly. Skip the DB round-trip on hits.
 - **Benefit**: One fewer query per cached search; preserves correct ranking; faster cache hits.
 
-### 1.6 `compute_phash` runs sequentially per crop in `_batch_image_search`
+### ✅ 1.6 `compute_phash` runs sequentially per crop in `_batch_image_search`
 - **File**: `backend/app/api/v1/scan.py:204-213`
 - **Current**: Inside `search_one`, `compute_phash(img_bytes)` is called synchronously before pgvector search.
 - **Issue**: phash for each crop runs serially in a parallel-search loop, partially defeating the gather.
 - **Recommendation**: Pre-compute all phashes in parallel via `await asyncio.gather(*[asyncio.to_thread(compute_phash, b) for _, b in to_embed])` before the search gather.
 - **Benefit**: Phash computation overlaps with embedding, freeing the event loop.
 
-### 1.7 Playwright opens a fresh browser context per scrape
+### ❌ 1.7 Playwright opens a fresh browser context per scrape (skipped — dependency change)
 - **File**: `backend/app/scrapers/base.py:71-82`
 - **Current**: Every `fetch_page` call creates a context, opens a page, waits 800–1500ms random delay, then closes the page and context.
 - **Issue**: For PriceCharting pages that don't require JS-rendered content, this is ~3× slower than `httpx` and burns ~50–100MB extra RAM per concurrent fetch.
 - **Recommendation**: Try `httpx.AsyncClient` with realistic headers for PriceCharting first; fall back to Playwright only on 403/Cloudflare challenge. If PriceCharting fully accepts `httpx`, drop Playwright entirely from PriceCharting path.
 - **Benefit**: 1–2s faster per uncached price lookup; significant RAM reduction; smaller backend container possible (Playwright bundles are ~300MB).
 
-### 1.8 `ScanHistory.scanned_at` is not indexed
+### ✅ 1.8 `ScanHistory.scanned_at` is not indexed
 - **File**: `backend/app/models/card.py:65`
 - **Current**: `scanned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)`
 - **Issue**: `ORDER BY scanned_at DESC LIMIT 50 OFFSET N` will require a sequential scan as the table grows.
 - **Recommendation**: Add `index=True` to the column (or explicit `Index("ix_scanhistory_scanned_at", ScanHistory.scanned_at.desc())`).
 - **Benefit**: O(log n) history list queries instead of O(n).
 
-### 1.9 OpenCV `detect_card_rectangles` does base64 decode in the event loop
+### ✅ 1.9 OpenCV `detect_card_rectangles` does base64 decode in the event loop
 - **File**: `backend/app/services/card_detector.py:69-76`
 - **Current**: `base64.b64decode`, `np.frombuffer`, `cv2.imdecode` all run synchronously in the request handler.
 - **Issue**: For a 1600px JPEG, that's 30–80ms of CPU-bound work blocking the loop.
@@ -84,21 +86,21 @@ Each finding lists:
 - **Recommendation**: Add an early-exit: once any pass produces ≥ 3 card-shaped regions, stop.
 - **Benefit**: Faster fallback path (~3× best case). Low priority since YOLO usually succeeds.
 
-### 1.11 `PriceChart` recomputes max/min on every render
+### ✅ 1.11 `PriceChart` recomputes max/min on every render
 - **File**: `mobile/components/Card/PriceChart.tsx:19-28`
 - **Current**: `Math.max(...prices)`, `labels`, `decimalPlaces` recomputed every render.
 - **Issue**: Negligible at 24 points but happens on every parent state change.
 - **Recommendation**: Wrap in `useMemo([history])`.
 - **Benefit**: Minor — pure cleanup.
 
-### 1.12 `FlatList` items not memoized
+### ⚠️ 1.12 `FlatList` items not memoized (done for multi-results; batch-prices still inline)
 - **File**: `mobile/components/Card/CardListItem.tsx`, `mobile/app/multi-results.tsx:160-234`, `mobile/app/batch-prices.tsx:83`
 - **Current**: List item components are plain function components.
 - **Issue**: `FlatList` re-renders every visible item on any parent state change (e.g. checkbox toggle in `multi-results.tsx` triggers all rows to re-render).
 - **Recommendation**: Wrap with `React.memo` and ensure `keyExtractor` + stable prop refs. For functions passed in, use `useCallback`.
 - **Benefit**: Smoother selection/scroll on lists with 5–10 cards.
 
-### 1.13 `batch-prices.tsx` triggers N independent `setState` calls
+### ✅ 1.13 `batch-prices.tsx` triggers N independent `setState` calls
 - **File**: `mobile/app/batch-prices.tsx:29-46`
 - **Current**: Each `getCard` resolves and calls `setEntries((prev) => …)` — N completions = N re-renders of the entire FlatList.
 - **Issue**: For 10 cards, 10 full list re-renders.
@@ -116,14 +118,14 @@ Each finding lists:
 
 ## 2. Architecture and structure
 
-### 2.1 `CardMatcherService` is instantiated 4 times across endpoints
+### ✅ 2.1 `CardMatcherService` is instantiated 4 times across endpoints
 - **File**: `backend/app/api/v1/cards.py:15`, `scan.py:22`, `psa.py:18`, `search.py:15`
 - **Current**: Each module creates its own `CardMatcherService()`, each holding its own `PricechartingScraper`, `PokemonTCGApiScraper` (which opens an `httpx.AsyncClient`), and `OnePieceScraper`.
 - **Issue**: Four HTTP clients on startup, four sets of session state. No shared connection pooling between endpoints; awkward shutdown.
 - **Recommendation**: Create one `services/__init__.py` module-level singleton (e.g. `matcher = CardMatcherService()`) and import it everywhere. Add `await matcher.close()` to FastAPI `lifespan` shutdown.
 - **Benefit**: Cleaner shutdown, reduced memory, shared HTTP connection pooling, simpler test setup.
 
-### 2.2 Two `compute_phash` implementations with different semantics
+### ✅ 2.2 Two `compute_phash` implementations with different semantics (image_hasher deleted with Celery; only card_embedder remains)
 - **File**: `backend/app/services/image_hasher.py:13`, `backend/app/services/card_embedder.py:45`
 - **Current**: `image_hasher.compute_phash` hashes the full image; `card_embedder.compute_phash` hashes only the art-region crop.
 - **Issue**: Same function name, different behavior — confusing. `_hamming` in `scan.py:59` also does its own `import imagehash` per call.
@@ -137,57 +139,57 @@ Each finding lists:
 - **Recommendation**: Move `_detect_opencv`, `_try_split_box`, `_nms`, `_iou`, `_containment`, and OpenCV-specific constants to `card_detector_opencv.py`. Or delete it entirely — the dataset is robust enough that YOLO failure means "no cards present" and falling back to the broken OpenCV approach won't help.
 - **Benefit**: Smaller, focused module; less surface area for bugs.
 
-### 2.4 Single-card scan path is fully dead but still wired
+### ✅ 2.4 Single-card scan path is fully dead but still wired
 - **Files**: `mobile/hooks/useOCR.ts`, `mobile/hooks/useCardSearch.ts:searchByOCR`, `mobile/app/results.tsx`, `mobile/components/Scanner/ScanOverlay.tsx`, `mobile/utils/detectCards.ts:filterBlocksToCardZone`, `mobile/app/(tabs)/index.tsx:handleCapture`
 - **Current**: CLAUDE.md v10 notes single-card mode is disabled; the "Scan Cards" button only calls `handleMultiCapture`. But the entire single-card code path still exists.
 - **Issue**: Maintenance burden, confusing reads, dead routes (`/results` is registered in `_layout.tsx` but unreachable).
 - **Recommendation**: Delete `useOCR.ts`, `useCardSearch.searchByOCR`, `app/results.tsx`, `filterBlocksToCardZone`, `handleCapture` in `index.tsx`, the `results` Stack.Screen registration in `_layout.tsx`. Keep `ScanOverlay` only if you want to display a frame guide in multi mode (it's currently passed `showOverlay={false}` so it never renders).
 - **Benefit**: ~400 fewer lines of mobile code; clearer mental model.
 
-### 2.5 `POST /search` and `POST /search/batch` are unused
+### ✅ 2.5 `POST /search` and `POST /search/batch` are unused
 - **File**: `backend/app/api/v1/search.py`
 - **Current**: Both endpoints exist and are mounted in `__init__.py`. `api.ts:searchCards` and `api.ts:batchSearch` are still exported.
 - **Issue**: Per CLAUDE.md, `/scan` superseded both. `api.batchSearch` was noted as removed but it's still in api.ts. `searchCards` is only called from the dead `handleCapture` path.
 - **Recommendation**: Delete both backend endpoints and their mobile wrappers.
 - **Benefit**: Smaller API surface; clearer architecture.
 
-### 2.6 `PriceCache` ORM model is never used
+### ✅ 2.6 `PriceCache` ORM model is never used
 - **File**: `backend/app/models/card.py:36-50`
 - **Current**: Table is created by `Base.metadata.create_all`. Defined columns mirror Redis-cached fields.
 - **Issue**: Redis is the actual cache. The table exists but nothing reads or writes to it.
 - **Recommendation**: Delete the model. Add a Alembic migration to drop the table if anything is already created in real environments.
 - **Benefit**: Removes confusion about where prices are cached.
 
-### 2.7 `POST /cards/history` uses query parameters instead of a request body
+### ✅ 2.7 `POST /cards/history` uses query parameters instead of a request body
 - **File**: `backend/app/api/v1/cards.py:53-79`, `mobile/services/api.ts:170-185`
 - **Current**: Every field is a FastAPI query parameter; mobile sends `null` body with all fields as URL params.
 - **Issue**: URL can hit length limits with long `ocr_text` / `resolved_card_name`. Unusual for POST. Hard to extend.
 - **Recommendation**: Define a `ScanHistoryCreate` pydantic model; mobile sends JSON body.
 - **Benefit**: Cleaner API; no URL length risk; auto-validation.
 
-### 2.8 `_VALID_GAMES` and `_VALID_LANGUAGES` duplicated
+### ✅ 2.8 `_VALID_GAMES` and `_VALID_LANGUAGES` duplicated
 - **File**: `backend/app/api/v1/scan.py:23-24`, `backend/app/api/v1/search.py:17-18`
 - **Current**: Both modules define the same sets.
 - **Recommendation**: Move to `app/constants.py` (new file) or `app/schemas/card.py` as `VALID_GAMES`, `VALID_LANGUAGES`.
 - **Benefit**: Single source of truth.
 
-### 2.9 `get_prices` mixes URL building, caching, scraping, and dict transformation
+### ✅ 2.9 `get_prices` mixes URL building, caching, scraping, and dict transformation
 - **File**: `backend/app/services/card_matcher.py:390-449`
 - **Current**: 60-line method does URL construction, two caching strategies, scrape call, and response shaping.
 - **Recommendation**: Split into `_build_pc_url(card, lang) → str`, `_cache_key(card, scan_type, lang) → str`, `_serialize_prices(prices) → dict`. Main method becomes ~15 lines of orchestration.
 - **Benefit**: Testable; easier to add new price providers; clearer responsibilities.
 
-### 2.10 `saleLinkLabel` duplicated across two files
+### ✅ 2.10 `saleLinkLabel` duplicated across two files
 - **File**: `mobile/components/Card/PriceDisplay.tsx:7-11`, `mobile/app/batch-prices.tsx:93-97`
 - **Recommendation**: Move to `mobile/utils/saleLink.ts`.
 - **Benefit**: One place to add new marketplaces (Cardmarket, etc.) in the future.
 
-### 2.11 Unused styles in `index.tsx`
+### ✅ 2.11 Unused styles in `index.tsx`
 - **File**: `mobile/app/(tabs)/index.tsx:246-255`
 - **Current**: `multiScanBtn` and `multiScanBtnText` style definitions exist but no JSX references them.
 - **Recommendation**: Delete.
 
-### 2.12 Routes registered for unused screens
+### ✅ 2.12 Routes registered for unused screens
 - **File**: `mobile/app/_layout.tsx:23` — registers `name="results"` Stack.Screen
 - **Recommendation**: Delete after removing `results.tsx`.
 
@@ -195,27 +197,27 @@ Each finding lists:
 
 ## 3. Async and concurrency
 
-### 3.1 `/scan` phases serialize instead of overlapping
+### ✅ 3.1 `/scan` phases serialize instead of overlapping
 - See **1.2** — phase 1+2 (all image) then phase 3 (all OCR) then yield, instead of per-crop parallel kick-off + yield as completed.
 
-### 3.2 Per-crop mobile OCR sequential
+### ✅ 3.2 Per-crop mobile OCR sequential
 - See **1.3** — fix with `Promise.all`.
 
-### 3.3 Mobile `scanStream` cannot be aborted by callers
+### ✅ 3.3 Mobile `scanStream` cannot be aborted by callers
 - **File**: `mobile/services/api.ts:220-275`, `mobile/hooks/useMultiCardScan.ts:183`
 - **Current**: `scanStream(crops, hints, mode, onResult, signal?)` accepts an `AbortSignal` but `useMultiCardScan` never passes one.
 - **Issue**: If user navigates away mid-scan, the network request continues consuming backend resources. Worse if user starts another scan immediately.
 - **Recommendation**: Create an `AbortController` in `useMultiCardScan`, expose `cancel()`, and pass `controller.signal` to `scanStream`. Abort on unmount.
 - **Benefit**: No wasted backend CPU; cleaner state when user backs out.
 
-### 3.4 Error swallowing in `getHistory`
+### ✅ 3.4 Error swallowing in `getHistory`
 - **File**: `mobile/app/(tabs)/history.tsx:35-37`
 - **Current**: `catch { /* non-critical */ }`
 - **Issue**: Network or backend errors silently disappear. Hard to diagnose.
 - **Recommendation**: `catch (e) { console.warn("[history] load failed", e); }` and surface a small banner.
 - **Benefit**: Diagnosability without breaking the UI.
 
-### 3.5 Per-crop OCR errors crash the whole scan
+### ✅ 3.5 Per-crop OCR errors crash the whole scan
 - **File**: `mobile/hooks/useMultiCardScan.ts:163-172`
 - **Current**: A single crop's `TextRecognition.recognize` throwing will bubble out of the `for` loop and abort the whole pipeline.
 - **Recommendation**: Wrap each crop in `try/catch`; on failure set `rawText = undefined` so backend still gets image-only signal.
@@ -228,19 +230,19 @@ Each finding lists:
 - **Recommendation**: Add a header or response field like `partial: true, reason: "image_failed"` for telemetry, while still returning OCR-only results.
 - **Benefit**: Visibility into degraded mode.
 
-### 3.7 Save history failure swallowed in `results.tsx`
+### ✅ 3.7 Save history failure swallowed in `results.tsx`
 - **File**: `mobile/app/results.tsx:42-44`
 - **Current**: `catch {}` with no logging.
-- **Note**: This whole file is dead per 2.4 anyway. Just delete it.
+- **Note**: This whole file is dead per 2.4 anyway. Just delete it. (Deleted.)
 
 ---
 
 ## 4. Data handling
 
-### 4.1 Search cache loses ranking order on hit
+### ✅ 4.1 Search cache loses ranking order on hit
 - See **1.5** — store the ordered serialized list, not just `ids`.
 
-### 4.2 Image search cache stores `query_used` as a regex-parsed string
+### ✅ 4.2 Image search cache stores `query_used` as a regex-parsed string
 - **File**: `backend/app/api/v1/scan.py:194-195`
 - **Current**: `BatchSearchItem` only has `candidates` and `query_used`; sim score is parsed back out of `query_used` with regex like `image:0.85`.
 - **Issue**: Fragile; if `query_used` format changes, sim parsing breaks silently.
@@ -254,7 +256,7 @@ Each finding lists:
 - **Recommendation**: Add `POST /cards/prices` that accepts `{card_ids: [], language, scan_type}` and returns all prices in one response, with internal parallelism on cache hits + queued/serialized scrapes.
 - **Benefit**: Faster batch loads; clear backend control over scrape concurrency.
 
-### 4.4 `CardOut` includes fields the mobile UI never reads
+### ✅ 4.4 `CardOut` includes fields the mobile UI never reads
 - **File**: `backend/app/schemas/card.py:19-26`, `mobile/services/api.ts:11-27`
 - **Current**: `phash`, `external_id`, `pricecharting_id`, `created_at` always shipped to the client.
 - **Issue**: Wasted bandwidth on every search result and every streamed scan card.
@@ -278,7 +280,7 @@ Each finding lists:
 
 ## 5. Error handling and resilience
 
-### 5.1 Silent error swallowing
+### ⚠️ 5.1 Silent error swallowing (history + phash + pricecharting chart parse done; full pass not exhaustive)
 - **Files**: multiple — `pricecharting.py:213` (`except (json.JSONDecodeError, Exception)` — redundant `Exception` catch), `card_embedder.py:53` (`compute_phash` returns None silently), `scan.py:65` (`_hamming` returns 999 on import error), `history.tsx:35`.
 - **Recommendation**: Log every swallow at WARNING level minimum. Distinguish "expected miss" (no chart data) from "unexpected failure" (import error → real bug).
 - **Benefit**: Operational visibility.
@@ -295,7 +297,7 @@ Each finding lists:
 - **Issue**: Caller can't distinguish completed from aborted.
 - **Recommendation**: Either reject with `AbortError` or set a flag in the resolve value.
 
-### 5.4 `imagehash` and `PIL` imports inside per-call functions
+### ✅ 5.4 `imagehash` and `PIL` imports inside per-call functions
 - **File**: `backend/app/services/card_embedder.py:48-50`, `scan.py:63`
 - **Current**: `import imagehash; from PIL import Image` inside `compute_phash` body.
 - **Issue**: First-call slowness; obscures dependency requirements at startup.
@@ -312,25 +314,25 @@ Each finding lists:
 
 (Many already listed in §2. Consolidated list.)
 
-| Item | File | Recommendation |
-|---|---|---|
-| `useOCR.ts` hook | `mobile/hooks/useOCR.ts` | Delete |
-| `handleCapture` in `index.tsx` | `mobile/app/(tabs)/index.tsx:38-67` | Delete |
-| `results.tsx` route | `mobile/app/results.tsx` + Stack.Screen reg | Delete |
-| `useCardSearch.searchByOCR` | `mobile/hooks/useCardSearch.ts:21-42` | Delete (keep `searchByCert`) |
-| `filterBlocksToCardZone` | `mobile/utils/detectCards.ts:26-54` | Delete |
-| `ScanOverlay` | `mobile/components/Scanner/ScanOverlay.tsx` | Delete or stop importing |
-| `api.searchCards`, `api.batchSearch` | `mobile/services/api.ts:127, 187` | Delete |
-| `POST /search` endpoint | `backend/app/api/v1/search.py:21` | Delete |
-| `POST /search/batch` endpoint | `backend/app/api/v1/search.py:43` | Delete |
-| `PriceCache` ORM model | `backend/app/models/card.py:36-50` | Delete + drop table migration |
-| `_scan_counter` infinite counter | `backend/app/api/v1/detect.py:11` | Replace with `request_id` from FastAPI or remove |
-| Unused mobile styles `multiScanBtn*` | `mobile/app/(tabs)/index.tsx:246-255` | Delete |
-| `get_by_number`, `search_by_number` | `backend/app/scrapers/pokemon_tcg_api.py:56, 69` | Delete unless seed/maintenance |
-| `pop_higher` field set but unused | `backend/app/scrapers/psa.py:21` | Remove or expose in `PSACertResult` |
-| Unused `scanType` import | `mobile/app/multi-results.tsx:25` (`scanType` destructured, never read) | Remove |
+| Status | Item | File | Recommendation |
+|---|---|---|---|
+| ✅ | `useOCR.ts` hook | `mobile/hooks/useOCR.ts` | Delete |
+| ✅ | `handleCapture` in `index.tsx` | `mobile/app/(tabs)/index.tsx:38-67` | Delete |
+| ✅ | `results.tsx` route | `mobile/app/results.tsx` + Stack.Screen reg | Delete |
+| ✅ | `useCardSearch.searchByOCR` | `mobile/hooks/useCardSearch.ts:21-42` | Delete (keep `searchByCert`) |
+| ✅ | `filterBlocksToCardZone` | `mobile/utils/detectCards.ts:26-54` | Delete |
+| ✅ | `ScanOverlay` | `mobile/components/Scanner/ScanOverlay.tsx` | Delete or stop importing |
+| ✅ | `api.searchCards`, `api.batchSearch` | `mobile/services/api.ts:127, 187` | Delete |
+| ✅ | `POST /search` endpoint | `backend/app/api/v1/search.py:21` | Delete |
+| ✅ | `POST /search/batch` endpoint | `backend/app/api/v1/search.py:43` | Delete |
+| ✅ | `PriceCache` ORM model | `backend/app/models/card.py:36-50` | Delete + drop table migration |
+| ✅ | `_scan_counter` infinite counter | `backend/app/api/v1/detect.py:11` | Replace with `request_id` from FastAPI or remove |
+| ✅ | Unused mobile styles `multiScanBtn*` | `mobile/app/(tabs)/index.tsx:246-255` | Delete |
+|  | `get_by_number`, `search_by_number` | `backend/app/scrapers/pokemon_tcg_api.py:56, 69` | Delete unless seed/maintenance |
+|  | `pop_higher` field set but unused | `backend/app/scrapers/psa.py:21` | Remove or expose in `PSACertResult` |
+| ✅ | Unused `scanType` import | `mobile/app/multi-results.tsx:25` (`scanType` destructured, never read) | Remove |
 
-### 6.x Celery worker may be unused
+### ✅ 6.x Celery worker may be unused
 - **File**: `backend/app/tasks/scrape_tasks.py`
 - **Current**: `fetch_card_prices_task` and `seed_pokemon_cards_task` defined.
 - **Issue**: Search the codebase — neither is `.delay()`-called from active flows. `seed_pokemon_cards_task` only chains itself. Likely a relic from earlier seed scripts (`scripts/build_embeddings.py` replaced it).
@@ -340,86 +342,86 @@ Each finding lists:
 
 ## 7. Dependency and bundle hygiene
 
-### 7.1 Playwright is heavy and may be unnecessary for PriceCharting
+### ❌ 7.1 Playwright is heavy and may be unnecessary for PriceCharting (skipped — see Playwright assessment in commit notes)
 - **Issue**: ~300MB browser bundle + ~50–100MB RAM per concurrent fetch.
 - **Recommendation**: Test if `httpx` with a realistic User-Agent can fetch PriceCharting pages successfully. If yes, remove Playwright from PriceCharting path. Keep it only for TCGCollector scraping (offline build step, not request path).
 - **Benefit**: Smaller backend image; faster cold starts; lower per-request memory.
 
-### 7.2 `react-native-chart-kit` ships ~30KB+ with SVG runtime
+### ❌ 7.2 `react-native-chart-kit` ships ~30KB+ with SVG runtime (skipped — dependency change)
 - **Issue**: One chart in the app. Could use bare `react-native-svg` and draw a simple polyline.
 - **Recommendation**: Defer unless app size matters. Low priority.
 
-### 7.3 `axios` + native XHR both shipped
+### ❌ 7.3 `axios` + native XHR both shipped (skipped — dependency change)
 - **Current**: Most endpoints use axios; `scanStream` uses raw XHR.
 - **Issue**: ~14KB extra for axios when `fetch` could handle everything (RN fetch supports streaming via ReactNativeBlobUtil or with explicit handling).
 - **Recommendation**: Low priority — axios is small and the codebase is consistent with it.
 
-### 7.4 Celery + redis-py both pulled for an unused worker
-- See 6.x. If `tasks/scrape_tasks.py` is removed, `celery` can drop from `requirements.txt`.
+### ✅ 7.4 Celery + redis-py both pulled for an unused worker
+- See 6.x. If `tasks/scrape_tasks.py` is removed, `celery` can drop from `requirements.txt`. (Done — `celery` dropped, `redis` retained since cache uses it.)
 
 ---
 
 ## Prioritized Action List (impact vs effort)
 
 ### Tier 1 — High impact, low effort (do first)
-| # | Item | Section |
-|---|---|---|
-| 1 | Preload CLIP + YOLO at startup | 1.1 |
-| 2 | Parallelize per-crop mobile OCR with `Promise.all` | 1.3 |
-| 3 | Add `index=True` on `ScanHistory.scanned_at` | 1.8 |
-| 4 | Cache full ordered `CardOut` list in `search_cache` (not just IDs) | 1.5 |
-| 5 | Hoist `imagehash`, `PIL` imports to module scope | 5.4 |
-| 6 | Delete dead single-card mode files (see table in §6) | 2.4 |
-| 7 | Delete unused `/search` + `/search/batch` endpoints & mobile wrappers | 2.5 |
-| 8 | Delete `PriceCache` model | 2.6 |
-| 9 | Memoize `FlatList` items in `multi-results.tsx`, `batch-prices.tsx` | 1.12 |
-| 10 | Wrap per-crop OCR in try/catch | 3.5 |
-| 11 | Add `AbortController` to mobile scan stream | 3.3 |
+| Status | # | Item | Section |
+|---|---|---|---|
+| ✅ | 1 | Preload CLIP + YOLO at startup | 1.1 |
+| ✅ | 2 | Parallelize per-crop mobile OCR with `Promise.all` | 1.3 |
+| ✅ | 3 | Add `index=True` on `ScanHistory.scanned_at` | 1.8 |
+| ✅ | 4 | Cache full ordered `CardOut` list in `search_cache` (not just IDs) | 1.5 |
+| ✅ | 5 | Hoist `imagehash`, `PIL` imports to module scope | 5.4 |
+| ✅ | 6 | Delete dead single-card mode files (see table in §6) | 2.4 |
+| ✅ | 7 | Delete unused `/search` + `/search/batch` endpoints & mobile wrappers | 2.5 |
+| ✅ | 8 | Delete `PriceCache` model | 2.6 |
+| ⚠️ | 9 | Memoize `FlatList` items in `multi-results.tsx`, `batch-prices.tsx` | 1.12 |
+| ✅ | 10 | Wrap per-crop OCR in try/catch | 3.5 |
+| ✅ | 11 | Add `AbortController` to mobile scan stream | 3.3 |
 
 ### Tier 2 — High impact, medium effort
-| # | Item | Section |
-|---|---|---|
-| 12 | Make `/scan` truly streaming (per-crop parallel + as_completed) | 1.2 |
-| 13 | Move CLIP encode and OpenCV decode to `asyncio.to_thread` | 1.4, 1.9 |
-| 14 | Consolidate `CardMatcherService` into singleton with shared httpx clients | 2.1 |
-| 15 | Cache image search with richer structure (sim score, query_used as fields) | 4.2 |
-| 16 | Convert `POST /cards/history` to JSON body schema | 2.7 |
-| 17 | Parallelize phash computation with embedding | 1.6 |
+| Status | # | Item | Section |
+|---|---|---|---|
+| ✅ | 12 | Make `/scan` truly streaming (per-crop parallel + as_completed) | 1.2 |
+| ✅ | 13 | Move CLIP encode and OpenCV decode to `asyncio.to_thread` | 1.4, 1.9 |
+| ✅ | 14 | Consolidate `CardMatcherService` into singleton with shared httpx clients | 2.1 |
+| ✅ | 15 | Cache image search with richer structure (sim score, query_used as fields) | 4.2 |
+| ✅ | 16 | Convert `POST /cards/history` to JSON body schema | 2.7 |
+| ✅ | 17 | Parallelize phash computation with embedding | 1.6 |
 
 ### Tier 3 — Medium impact, low/medium effort
-| # | Item | Section |
-|---|---|---|
-| 18 | Extract `saleLinkLabel` to shared util | 2.10 |
-| 19 | Move OpenCV detector to a separate module or delete it | 2.3 |
-| 20 | Combine `_VALID_GAMES`/`_VALID_LANGUAGES` into shared module | 2.8 |
-| 21 | Refactor `get_prices` into helper methods | 2.9 |
-| 22 | Add proper error logging in place of silent `except` | 5.1 |
-| 23 | Detect PriceCharting 404 and cache negative results | 5.2 |
-| 24 | Reduce `CardOut` payload via `CardOutLite` schema | 4.4 |
-| 25 | Memoize `PriceChart` computations with `useMemo` | 1.11 |
-| 26 | Single setState in `batch-prices.tsx` via `Promise.allSettled` | 1.13 |
+| Status | # | Item | Section |
+|---|---|---|---|
+| ✅ | 18 | Extract `saleLinkLabel` to shared util | 2.10 |
+|   | 19 | Move OpenCV detector to a separate module or delete it | 2.3 |
+| ✅ | 20 | Combine `_VALID_GAMES`/`_VALID_LANGUAGES` into shared module | 2.8 |
+| ✅ | 21 | Refactor `get_prices` into helper methods | 2.9 |
+| ⚠️ | 22 | Add proper error logging in place of silent `except` | 5.1 |
+|   | 23 | Detect PriceCharting 404 and cache negative results | 5.2 |
+| ✅ | 24 | Reduce `CardOut` payload via `CardOutLite` schema | 4.4 |
+| ✅ | 25 | Memoize `PriceChart` computations with `useMemo` | 1.11 |
+| ✅ | 26 | Single setState in `batch-prices.tsx` via `Promise.allSettled` | 1.13 |
 
 ### Tier 4 — High impact, high effort (evaluate, don't commit yet)
-| # | Item | Section |
-|---|---|---|
-| 27 | Replace Playwright with `httpx` for PriceCharting (test first) | 1.7, 7.1 |
-| 28 | Add `POST /cards/prices` batch price endpoint | 4.3 |
-| 29 | Cap total backend scrape time to match mobile XHR timeout | 5.5 |
+| Status | # | Item | Section |
+|---|---|---|---|
+| ❌ | 27 | Replace Playwright with `httpx` for PriceCharting (test first) | 1.7, 7.1 |
+|   | 28 | Add `POST /cards/prices` batch price endpoint | 4.3 |
+|   | 29 | Cap total backend scrape time to match mobile XHR timeout | 5.5 |
 
 ### Tier 5 — Low priority / cosmetic
-| # | Item | Section |
-|---|---|---|
-| 30 | Confirm Celery is unused and remove worker | 6.x |
-| 31 | Add cursor pagination to history list | 4.5 |
-| 32 | Replace `react-native-chart-kit` with custom SVG (only if app size matters) | 7.2 |
-| 33 | Optional gzip/msgpack for Redis values | 4.6 |
-| 34 | Remove unused mobile styles, unused imports, `_scan_counter` | 6 (table) |
+| Status | # | Item | Section |
+|---|---|---|---|
+| ✅ | 30 | Confirm Celery is unused and remove worker | 6.x |
+|   | 31 | Add cursor pagination to history list | 4.5 |
+| ❌ | 32 | Replace `react-native-chart-kit` with custom SVG (only if app size matters) | 7.2 |
+|   | 33 | Optional gzip/msgpack for Redis values | 4.6 |
+| ✅ | 34 | Remove unused mobile styles, unused imports, `_scan_counter` | 6 (table) |
 
 ---
 
 ## Notes
 
-- This audit was read-only. No files were modified.
-- Findings cite line numbers based on current `HEAD` (commit `bc1f387`).
-- Numbers/timings are estimates from code inspection; actual measurement is recommended before tackling Tier 1.2 (true streaming) since the latency benefit depends on how skewed crop-search times actually are.
-- Several Tier 1 items are quick wins (10 minutes each) that compound noticeably.
+- Original audit was read-only. Findings cite line numbers based on the audit-time `HEAD` (commit `bc1f387`) — line numbers may have shifted in subsequent commits.
+- Implementation applied across commits `1a00032` → `1f4786d`. All non-dependency items in Tiers 1–3 + Celery removal in Tier 5 are done.
+- Skipped intentionally (dependency considerations): 1.7, 7.1 (Playwright), 7.2 (chart-kit), 7.3 (axios), 27 (Playwright replacement), 32 (chart-kit replacement).
+- Not yet done (deferred / requires more work): 1.10 (early-exit clustering), 1.14 (combined ILIKE query), 2.3 (OpenCV module split — left as safety net), 3.6 (image-fail telemetry), 4.3 (batch prices endpoint), 4.5 (history pagination), 4.6 (Redis compression), 5.2 (404 detection), 5.3 (abort vs complete distinction), 5.5 (scrape timeout caps), 19 (OpenCV split), 23 (404), 28, 29, 31, 33, plus a few small dead-code items (`get_by_number`, `pop_higher`).
