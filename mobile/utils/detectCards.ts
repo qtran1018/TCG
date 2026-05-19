@@ -1,6 +1,5 @@
-// Card region detection utilities.
-// filterBlocksToCardZone: single-card mode — keeps only blocks inside the scan overlay zone.
-// detectCardRegions: multi-card mode fallback — clusters blocks into card-shaped groups.
+// Card region detection utilities (multi-card mode).
+// detectCardRegions: fallback — clusters OCR blocks into card-shaped groups.
 // boxesToRegions: converts server-detected bounding boxes into CardRegion objects.
 
 export interface OCRBlock {
@@ -13,47 +12,6 @@ export interface CardRegion {
   boundingBox: { top: number; left: number; width: number; height: number };
   text: string;
 }
-
-// Mirror ScanOverlay.tsx geometry: 75% screen width, 88:63 aspect, -40px Y offset.
-const FRAME_W_FRACTION = 0.75;
-const CARD_ASPECT = 88 / 63;
-const FRAME_Y_OFFSET_PX = 40;
-
-/**
- * Single-card mode: filters OCR blocks to only those whose center falls
- * within the scan overlay zone, correctly mapped to image coordinates.
- */
-export function filterBlocksToCardZone(
-  blocks: OCRBlock[],
-  imgW: number,
-  imgH: number,
-  screenW: number,
-  screenH: number,
-): OCRBlock[] {
-  const scale = Math.max(screenW / imgW, screenH / imgH);
-  const cropX = Math.max(0, (imgW * scale - screenW) / 2 / scale);
-  const cropY = Math.max(0, (imgH * scale - screenH) / 2 / scale);
-
-  const fsW = screenW * FRAME_W_FRACTION;
-  const fsH = fsW * CARD_ASPECT;
-  const fsX = (screenW - fsW) / 2;
-  const fsY = (screenH - fsH) / 2 - FRAME_Y_OFFSET_PX;
-
-  const fiX = cropX + fsX / scale;
-  const fiY = cropY + fsY / scale;
-  const fiW = fsW / scale;
-  const fiH = fsH / scale;
-
-  const filtered = blocks.filter((b) => {
-    const cx = b.frame.left + b.frame.width / 2;
-    const cy = b.frame.top + b.frame.height / 2;
-    return cx >= fiX && cx <= fiX + fiW && cy >= fiY && cy <= fiY + fiH;
-  });
-
-  return filtered.length >= 2 ? filtered : blocks;
-}
-
-// ─── Multi-card helpers ───────────────────────────────────────────────────────
 
 // TCG cards are portrait (W/H ≈ 0.71). Allow some tolerance for angle/perspective.
 const TCG_ASPECT_MIN = 0.40;

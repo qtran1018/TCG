@@ -55,20 +55,6 @@ export interface PriceOut {
   price_history_graded?: PricePoint[];
 }
 
-export interface SearchResult {
-  candidates: CardOut[];
-  query_used: string;
-}
-
-export interface BatchSearchItem {
-  candidates: CardOut[];
-  query_used: string;
-}
-
-export interface BatchSearchResult {
-  results: BatchSearchItem[];
-}
-
 export interface CardWithPrice {
   card: CardOut;
   price?: PriceOut;
@@ -124,21 +110,6 @@ export interface HistoryEntry {
 }
 
 export const api = {
-  async searchCards(
-    ocrText: string,
-    game: Game,
-    scanType: ScanType,
-    language: Language,
-  ): Promise<SearchResult> {
-    const { data } = await client.post<SearchResult>("/search", {
-      ocr_text: ocrText,
-      game,
-      scan_type: scanType,
-      language,
-    });
-    return data;
-  },
-
   async getCard(
     cardId: number,
     scanType: ScanType,
@@ -181,17 +152,6 @@ export const api = {
     const { data } = await client.post<{ id: number }>("/cards/history", null, {
       params: entry,
     });
-    return data;
-  },
-
-  async batchSearch(
-    queries: Array<{ ocr_text: string; game: string; language: string }>,
-    scan_type: string,
-  ): Promise<BatchSearchResult> {
-    const { data } = await client.post<BatchSearchResult>("/search/batch", {
-      queries,
-      scan_type,
-    }, { timeout: 60000 });
     return data;
   },
 

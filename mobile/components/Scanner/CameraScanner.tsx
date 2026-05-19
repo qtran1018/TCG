@@ -1,8 +1,7 @@
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useCallback } from "react";
 import { StyleSheet, View, TouchableOpacity, Text, ActivityIndicator, Alert } from "react-native";
-import { CameraView, CameraType, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
-import { ScanOverlay } from "./ScanOverlay";
 import { COLORS } from "@/constants";
 import type { Language } from "@/constants";
 
@@ -10,10 +9,9 @@ interface Props {
   language: Language;
   onCapture: (uri: string) => void;
   isProcessing: boolean;
-  showOverlay?: boolean;
 }
 
-export function CameraScanner({ language, onCapture, isProcessing, showOverlay = true }: Props) {
+export function CameraScanner({ language, onCapture, isProcessing }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -52,12 +50,9 @@ export function CameraScanner({ language, onCapture, isProcessing, showOverlay =
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
-      {showOverlay && <ScanOverlay />}
       <View style={styles.footer}>
         <Text style={styles.hint}>
-          {showOverlay
-            ? (language === "ja" ? "カードをフレームに合わせる" : "Align card within the frame")
-            : (language === "ja" ? "カードを撮影する" : "Capture all cards in frame")}
+          {language === "ja" ? "カードを撮影する" : "Capture all cards in frame"}
         </Text>
         <TouchableOpacity
           style={[styles.shutterBtn, isProcessing && styles.shutterDisabled]}

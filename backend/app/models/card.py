@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Float, Text, DateTime, Boolean, Index
+from sqlalchemy import String, Integer, Float, Text, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 from app.database import Base
@@ -31,22 +31,6 @@ class Card(Base):
         Index("ix_cards_game_language", "game", "language"),
         Index("ix_cards_name_trgm", "name", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_using="gin"),
     )
-
-
-class PriceCache(Base):
-    __tablename__ = "price_cache"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pricecharting_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    scan_type: Mapped[str] = mapped_column(String(20), nullable=False)     # "raw" | "psa"
-    price_loose: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_cib: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_graded_7: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_graded_8: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_graded_9: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_graded_10: Mapped[float | None] = mapped_column(Float, nullable=True)
-    currency: Mapped[str] = mapped_column(String(10), default="USD")
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ScanHistory(Base):

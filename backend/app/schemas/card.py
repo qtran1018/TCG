@@ -63,18 +63,6 @@ class CardWithPrice(BaseModel):
     ja_image_url: str | None = None
 
 
-class SearchRequest(BaseModel):
-    ocr_text: str
-    game: str          # "pokemon" | "onepiece"
-    scan_type: str     # "raw" | "psa"
-    language: str      # "en" | "ja"
-
-
-class SearchResult(BaseModel):
-    candidates: list[CardOut]
-    query_used: str
-
-
 class PSACertRequest(BaseModel):
     cert_number: str
     game: str
@@ -91,24 +79,10 @@ class PSACertResult(BaseModel):
     price: PriceOut | None = None
 
 
-class BatchQueryItem(BaseModel):
-    ocr_text: str
-    game: str = "pokemon"
-    language: str = "en"
-
-
-class BatchSearchRequest(BaseModel):
-    queries: list[BatchQueryItem]
-    scan_type: str = "raw"
-
-
 class BatchSearchItem(BaseModel):
+    """Cached image-search payload. Used internally by /scan for embedding cache hits."""
     candidates: list[CardOut]
     query_used: str
-
-
-class BatchSearchResult(BaseModel):
-    results: list[BatchSearchItem]
 
 
 class DetectRequest(BaseModel):

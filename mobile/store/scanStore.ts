@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Game, Language, ScanType } from "@/constants";
-import type { CardOut, SearchResult } from "@/services/api";
+import type { CardOut } from "@/services/api";
 import type { DetectedCard, MultiScanResult } from "@/types/scan";
 
 interface ScanState {
@@ -8,10 +8,6 @@ interface ScanState {
   language: Language;
   scanType: ScanType;
   psaCertInput: string;
-
-  lastOcrText: string;
-  lastSearchResult: SearchResult | null;
-  selectedCard: CardOut | null;
 
   // Multi-scan state — updated progressively as cards stream in
   multiScanResult: MultiScanResult | null;
@@ -26,9 +22,6 @@ interface ScanState {
   setLanguage: (language: Language) => void;
   setScanType: (scanType: ScanType) => void;
   setPsaCertInput: (cert: string) => void;
-  setLastOcrText: (text: string) => void;
-  setLastSearchResult: (result: SearchResult | null) => void;
-  setSelectedCard: (card: CardOut | null) => void;
   setMultiScanResult: (result: MultiScanResult | null) => void;
   setBatchPriceCards: (cards: CardOut[]) => void;
 
@@ -46,9 +39,6 @@ export const useScanStore = create<ScanState>((set) => ({
   language: "en",
   scanType: "raw",
   psaCertInput: "",
-  lastOcrText: "",
-  lastSearchResult: null,
-  selectedCard: null,
   multiScanResult: null,
   multiScanLoading: false,
   multiScanTotalRegions: 0,
@@ -59,9 +49,6 @@ export const useScanStore = create<ScanState>((set) => ({
   setLanguage: (language) => set({ language }),
   setScanType: (scanType) => set({ scanType }),
   setPsaCertInput: (psaCertInput) => set({ psaCertInput }),
-  setLastOcrText: (lastOcrText) => set({ lastOcrText }),
-  setLastSearchResult: (lastSearchResult) => set({ lastSearchResult }),
-  setSelectedCard: (selectedCard) => set({ selectedCard }),
   setMultiScanResult: (multiScanResult) => set({ multiScanResult, multiScanLoading: false }),
   setBatchPriceCards: (batchPriceCards) => set({ batchPriceCards }),
 
@@ -72,7 +59,7 @@ export const useScanStore = create<ScanState>((set) => ({
     multiScanError: null,
   }),
 
-  setMultiScanLoading: (loading, totalRegions) => set((s) => ({
+  setMultiScanLoading: (loading, totalRegions) => set(() => ({
     multiScanLoading: loading,
     ...(totalRegions !== undefined ? { multiScanTotalRegions: totalRegions } : {}),
     ...(loading ? { multiScanError: null } : {}),
@@ -102,9 +89,6 @@ export const useScanStore = create<ScanState>((set) => ({
 
   reset: () =>
     set({
-      lastOcrText: "",
-      lastSearchResult: null,
-      selectedCard: null,
       psaCertInput: "",
       multiScanResult: null,
       multiScanLoading: false,

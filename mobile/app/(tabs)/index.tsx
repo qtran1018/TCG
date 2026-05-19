@@ -10,15 +10,13 @@ import { GameToggle } from "@/components/UI/GameToggle";
 import { LanguageToggle } from "@/components/UI/LanguageToggle";
 import { ScanTypeToggle } from "@/components/UI/ScanTypeToggle";
 import { ScanModeToggle } from "@/components/UI/ScanModeToggle";
-import { useOCR } from "@/hooks/useOCR";
 import type { ScanMode } from "@/hooks/useMultiCardScan";
 import { useCardSearch } from "@/hooks/useCardSearch";
 import { useMultiCardScan } from "@/hooks/useMultiCardScan";
 import { useScanStore } from "@/store/scanStore";
-import { assessCardConfidence } from "@/utils/cardConfidence";
 import { COLORS } from "@/constants";
 
-type Mode = "camera" | "multi-camera" | "settings";
+type Mode = "multi-camera" | "settings";
 
 export default function ScanScreen() {
   const router = useRouter();
@@ -26,45 +24,13 @@ export default function ScanScreen() {
   const [certInput, setCertInput] = useState("");
   const [scanMode, setScanMode] = useState<ScanMode>("ocr");
 
-  const { game, language, scanType, setGame, setLanguage, setScanType, setLastSearchResult, setLastOcrText, clearMultiScan, setMultiScanLoading } =
+  const { game, language, scanType, setGame, setLanguage, setScanType, clearMultiScan, setMultiScanLoading } =
     useScanStore();
 
-  const { recognize, isProcessing: isOcrProcessing, error: ocrError } = useOCR();
-  const { searchByOCR, searchByCert, isSearching } = useCardSearch();
+  const { searchByCert, isSearching } = useCardSearch();
   const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress, error: multiError } = useMultiCardScan();
 
-  const isLoading = isOcrProcessing || isSearching || isMultiProcessing;
-
-  const handleCapture = useCallback(
-    async (uri: string) => {
-      const ocrResult = await recognize(uri, language);
-      if (!ocrResult) {
-        Alert.alert("OCR Failed", ocrError ?? "Could not read the card. Try repositioning.");
-        return;
-      }
-      if (!ocrResult.text.trim()) {
-        Alert.alert("No Text Found", "Card was read but no text detected. Try better lighting or repositioning.");
-        return;
-      }
-
-      const confidence = assessCardConfidence(ocrResult.text, ocrResult.blocks.length, game);
-      if (!confidence.isCard) {
-        Alert.alert("Not a Card", confidence.reason ?? "Could not confirm this is a TCG card. Try repositioning.");
-        return;
-      }
-
-      setLastOcrText(ocrResult.text);
-      const result = await searchByOCR(ocrResult.text, game, scanType, language);
-      if (!result || result.candidates.length === 0) {
-        Alert.alert("No Cards Found", `No matching cards found for:\n"${ocrResult.text.slice(0, 80)}"`);
-        return;
-      }
-
-      setLastSearchResult(result);
-      router.push("/results");
-    },
-    [recognize, searchByOCR, game, scanType, language, setLastOcrText, setLastSearchResult, router],
-  );
+  const isLoading = isSearching || isMultiProcessing;
 
   const handleMultiCapture = useCallback(
     async (uri: string) => {
@@ -100,7 +66,7 @@ export default function ScanScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
-          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} showOverlay={false} />
+          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} />
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
             <Text style={styles.backBtnText}>✕  Close Camera</Text>
           </TouchableOpacity>
@@ -173,7 +139,7 @@ export default function ScanScreen() {
 
             {isLoading && (
               <Text style={styles.loadingText}>
-                {isMultiProcessing ? multiProgress || "Processing..." : isOcrProcessing ? "Reading card text..." : "Searching database..."}
+                {isMultiProcessing ? multiProgress || "Processing..." : "Searching database..."}
               </Text>
             )}
           </ScrollView>
@@ -243,16 +209,6 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   scanBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  multiScanBtn: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    paddingVertical: 18,
-    alignItems: "center",
-    marginTop: 10,
-    borderWidth: 1.5,
-    borderColor: COLORS.accent,
-  },
-  multiScanBtnText: { color: COLORS.accent, fontSize: 16, fontWeight: "700" },
   btnDisabled: { opacity: 0.5 },
   loadingText: { color: COLORS.textMuted, textAlign: "center", marginTop: 16, fontSize: 14 },
   multiProgressBanner: {

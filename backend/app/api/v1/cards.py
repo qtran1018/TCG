@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models.card import Card, PriceCache, ScanHistory
+from app.models.card import Card, ScanHistory
 from app.schemas.card import CardOut, CardWithPrice, PriceOut, HistoryEntry
 from app.services.card_matcher import CardMatcherService
 from app.services.ja_image_lookup import find_ja_image
