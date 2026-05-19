@@ -149,9 +149,7 @@ export const api = {
     price_loose?: number;
     price_graded_10?: number;
   }): Promise<{ id: number }> {
-    const { data } = await client.post<{ id: number }>("/cards/history", null, {
-      params: entry,
-    });
+    const { data } = await client.post<{ id: number }>("/cards/history", entry);
     return data;
   },
 

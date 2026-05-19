@@ -1,9 +1,11 @@
 from app.services.cache import CacheService, price_cache, card_cache, search_cache
-from app.services.image_hasher import compute_phash, compute_phash_from_url, is_similar
 from app.services.card_matcher import CardMatcherService
+
+# Module-level singleton shared across all endpoints — one set of HTTP clients,
+# one Playwright browser, one connection pool. Closed in app lifespan.
+matcher = CardMatcherService()
 
 __all__ = [
     "CacheService", "price_cache", "card_cache", "search_cache",
-    "compute_phash", "compute_phash_from_url", "is_similar",
-    "CardMatcherService",
+    "CardMatcherService", "matcher",
 ]

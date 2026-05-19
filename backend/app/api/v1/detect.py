@@ -1,5 +1,5 @@
+import asyncio
 import logging
-from itertools import count
 
 from fastapi import APIRouter, HTTPException
 
@@ -8,17 +8,15 @@ from app.services.card_detector import detect_card_rectangles
 
 router = APIRouter(prefix="/detect", tags=["detect"])
 logger = logging.getLogger(__name__)
-_scan_counter = count(1)
 
 
 @router.post("", response_model=DetectResult)
 async def detect_cards(req: DetectRequest):
-    scan_id = next(_scan_counter)
-    logger.info("=" * 60)
-    logger.info("SCAN #%d", scan_id)
-    logger.info("=" * 60)
     try:
-        boxes, img_w, img_h = detect_card_rectangles(req.image_base64, req.max_cards)
+        # Run YOLO + image decode off the event loop — both are CPU-bound.
+        boxes, img_w, img_h = await asyncio.to_thread(
+            detect_card_rectangles, req.image_base64, req.max_cards,
+        )
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Detection failed: {e}")
     return DetectResult(

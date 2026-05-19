@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models.card import Card
 from app.schemas.card import PSACertRequest, PSACertResult, CardOut, PriceOut
 from app.scrapers.psa import PSAScraper
-from app.services.card_matcher import CardMatcherService
+from app.services import matcher as _matcher
 from app.services.cache import price_cache
 from datetime import datetime
 
@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/psa", tags=["psa"])
 
 _psa = PSAScraper()
-_matcher = CardMatcherService()
 
 
 @router.post("/cert", response_model=PSACertResult)

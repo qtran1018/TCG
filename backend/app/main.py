@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.database import create_tables
 from app.api.v1 import router as v1_router
 from app.scrapers.base import BaseScraper
-from app.services import card_detector, card_embedder
+from app.services import card_detector, card_embedder, matcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info("Models preloaded; backend ready.")
     yield
     logger.info("Shutting down TCG backend...")
+    await matcher.close()
     await BaseScraper.close()
 
 

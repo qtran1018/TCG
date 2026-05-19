@@ -194,6 +194,11 @@ class CardMatcherService:
         self.pokemon_api = PokemonTCGApiScraper()
         self.op_scraper = OnePieceScraper()
 
+    async def close(self) -> None:
+        """Close all underlying HTTP clients. Called from app lifespan shutdown."""
+        await self.pokemon_api.close()
+        await self.op_scraper.close()
+
     async def search_cards(
         self,
         ocr_text: str,

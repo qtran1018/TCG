@@ -71,7 +71,11 @@ def _crop_art(img):
 
 
 def embed_batch(images_bytes: list[bytes]) -> list[np.ndarray]:
-    """Embed multiple images in one forward pass. Returns list of 512-dim float32 arrays."""
+    """Embed multiple images in one forward pass. Returns list of 512-dim float32 arrays.
+
+    Synchronous (CPU/GPU). Callers in async contexts should wrap with asyncio.to_thread
+    so the event loop isn't blocked during the forward pass.
+    """
     _load_model()
     tensors = [
         _preprocess(_crop_art(Image.open(io.BytesIO(b)).convert("RGB")))

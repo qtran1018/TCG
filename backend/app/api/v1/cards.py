@@ -5,14 +5,12 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.card import Card, ScanHistory
-from app.schemas.card import CardOut, CardWithPrice, PriceOut, HistoryEntry
-from app.services.card_matcher import CardMatcherService
+from app.schemas.card import CardOut, CardWithPrice, PriceOut, HistoryEntry, ScanHistoryCreate
+from app.services import matcher as _matcher
 from app.services.ja_image_lookup import find_ja_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cards", tags=["cards"])
-
-_matcher = CardMatcherService()
 
 
 @router.get("/{card_id}", response_model=CardWithPrice)
@@ -52,28 +50,10 @@ async def get_card(
 
 @router.post("/history", status_code=201)
 async def save_history(
-    card_id: int | None = None,
-    game: str = "pokemon",
-    scan_type: str = "raw",
-    language: str = "en",
-    ocr_text: str | None = None,
-    psa_cert: str | None = None,
-    resolved_card_name: str | None = None,
-    price_loose: float | None = None,
-    price_graded_10: float | None = None,
+    req: ScanHistoryCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    entry = ScanHistory(
-        card_id=card_id,
-        game=game,
-        scan_type=scan_type,
-        language=language,
-        ocr_text=ocr_text,
-        psa_cert=psa_cert,
-        resolved_card_name=resolved_card_name,
-        price_loose=price_loose,
-        price_graded_10=price_graded_10,
-    )
+    entry = ScanHistory(**req.model_dump())
     db.add(entry)
     await db.commit()
     return {"id": entry.id}

@@ -10,24 +10,22 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Float, cast, select
 
+from app.constants import VALID_GAMES, VALID_LANGUAGES
 from app.database import AsyncSessionLocal
 from app.models.card import Card
-from app.schemas.card import BatchSearchItem, CardOut
+from app.schemas.card import CardOut
 from app.services.cache import search_cache
+from app.services import matcher as _matcher
 from app.services.card_embedder import compute_phash, embed_batch
-from app.services.card_matcher import CardMatcherService
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 logger = logging.getLogger(__name__)
-
-_matcher = CardMatcherService()
-_VALID_GAMES = {"pokemon", "onepiece"}
-_VALID_LANGUAGES = {"en", "ja"}
 _SIM_THRESHOLD = 0.65
 _SIM_FLOOR = 0.50   # below this, don't show image results at all
 _PHASH_STRONG = 20
 _IMAGE_MIN_SIM_WITH_OCR = 0.83
 _RRF_K = 60
+_IMAGE_CACHE_TTL = 3600
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +49,13 @@ class ScanResultItem(BaseModel):
     candidates: list[CardOut]
     query_used: str
     match_source: str  # "ocr" | "image" | "both" | "none"
+
+
+class _ImageSearchCache(BaseModel):
+    """Cached image-search payload — preserves the sim score so it doesn't have to be regex'd back out of query_used."""
+    candidates: list[CardOut]
+    best_sim: float
+    query_used: str
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +155,6 @@ async def _vector_search(
     scored.sort(key=lambda x: x[0])
     best_sim = max((s for _, s, _, _ in scored), default=0.0)
     # Return top 5 as candidates for swap options, but only if above the floor.
-    # Below _SIM_FLOOR results are too unreliable to be useful even as alternates.
     if best_sim >= _SIM_FLOOR:
         candidates = [CardOut.model_validate(row) for _, _, _, row in scored[:5]]
     else:
@@ -167,20 +171,49 @@ async def _vector_search(
     else:
         query_used = "image:no_match"
 
-    # Cache result
-    item = BatchSearchItem(candidates=candidates, query_used=query_used)
+    # Cache with structured sim score — no more regex parsing.
+    cache_item = _ImageSearchCache(candidates=candidates, best_sim=best_sim, query_used=query_used)
     key = hashlib.sha256(img_bytes).hexdigest()
-    await search_cache.set("embedding", key, ttl=3600, value=item.model_dump(mode="json"))
+    await search_cache.set("embedding", key, ttl=_IMAGE_CACHE_TTL, value=cache_item.model_dump(mode="json"))
     return candidates, best_sim, query_used
+
+
+async def _image_search_one(
+    idx: int,
+    img_bytes: bytes | None,
+) -> tuple[list[CardOut], float, str]:
+    """Per-crop image search. Caches by SHA-256 of crop bytes."""
+    if img_bytes is None:
+        return [], 0.0, "image:no_match"
+
+    key = hashlib.sha256(img_bytes).hexdigest()
+    cached = await search_cache.get("embedding", key)
+    if cached is not None:
+        # Backwards-compat: old cache entries used BatchSearchItem layout (no best_sim).
+        if "best_sim" in cached:
+            item = _ImageSearchCache(**cached)
+            return item.candidates, item.best_sim, item.query_used
+        m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
+        return (
+            [CardOut(**c) for c in cached.get("candidates", [])],
+            float(m.group(1)) if m else 0.0,
+            cached.get("query_used", "image:no_match"),
+        )
+
+    # Run embedding + phash off the event loop in parallel.
+    embedding, query_phash = await asyncio.gather(
+        asyncio.to_thread(lambda: embed_batch([img_bytes])[0]),
+        asyncio.to_thread(compute_phash, img_bytes),
+    )
+    return await _vector_search(embedding, query_phash, img_bytes)
 
 
 async def _batch_image_search(
     imgs: list[bytes | None],
 ) -> dict[int, tuple[list[CardOut], float, str]]:
     """
-    Batch embed all crops in one CLIP forward pass, then run pgvector searches.
-    Each search gets its own DB session so they can run concurrently.
-    Returns {crop_index: (candidates, best_sim, query_used)}.
+    Embed all uncached crops in one CLIP forward pass, then run pgvector searches in parallel.
+    For cached crops, return immediately. Returns {crop_index: (candidates, best_sim, query_used)}.
     """
     results: dict[int, tuple[list[CardOut], float, str]] = {}
     to_embed: list[tuple[int, bytes]] = []
@@ -191,25 +224,33 @@ async def _batch_image_search(
         key = hashlib.sha256(img_bytes).hexdigest()
         cached = await search_cache.get("embedding", key)
         if cached is not None:
-            item = BatchSearchItem(**cached)
-            m = re.search(r"image:([\d.]+)", item.query_used)
-            results[i] = (item.candidates, float(m.group(1)) if m else 0.0, item.query_used)
+            if "best_sim" in cached:
+                item = _ImageSearchCache(**cached)
+                results[i] = (item.candidates, item.best_sim, item.query_used)
+            else:
+                # Legacy cache layout fallback.
+                m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
+                results[i] = (
+                    [CardOut(**c) for c in cached.get("candidates", [])],
+                    float(m.group(1)) if m else 0.0,
+                    cached.get("query_used", "image:no_match"),
+                )
         else:
             to_embed.append((i, img_bytes))
 
     if to_embed:
-        # One CLIP forward pass for all uncached crops
-        batch_embeddings = embed_batch([b for _, b in to_embed])
+        # Batch CLIP forward pass + phash in parallel, both off the event loop.
+        batch_embeddings, phashes = await asyncio.gather(
+            asyncio.to_thread(embed_batch, [b for _, b in to_embed]),
+            asyncio.gather(*[asyncio.to_thread(compute_phash, b) for _, b in to_embed]),
+        )
 
-        # Parallel pgvector searches — each _vector_search opens its own session
-        async def search_one(idx: int, img_bytes: bytes, embedding) -> tuple[int, tuple[list[CardOut], float, str]]:
-            query_phash = compute_phash(img_bytes)
-            result = await _vector_search(embedding, query_phash, img_bytes)
-            return idx, result
+        async def search_one(idx: int, img_bytes: bytes, embedding, qhash: str | None):
+            return idx, await _vector_search(embedding, qhash, img_bytes)
 
         vector_results = await asyncio.gather(*[
-            search_one(idx, img_bytes, emb)
-            for (idx, img_bytes), emb in zip(to_embed, batch_embeddings)
+            search_one(idx, img_bytes, emb, qh)
+            for (idx, img_bytes), emb, qh in zip(to_embed, batch_embeddings, phashes)
         ])
         results.update(dict(vector_results))
 
@@ -222,8 +263,8 @@ async def _ocr_search_one(
     """Search by OCR text. Opens its own DB session so callers can run concurrently."""
     if not hint.raw_text or not hint.raw_text.strip():
         return [], ""
-    game = hint.game if hint.game in _VALID_GAMES else "pokemon"
-    language = hint.language if hint.language in _VALID_LANGUAGES else "en"
+    game = hint.game if hint.game in VALID_GAMES else "pokemon"
+    language = hint.language if hint.language in VALID_LANGUAGES else "en"
     try:
         async with AsyncSessionLocal() as db:
             cards, query_used = await _matcher.search_cards(
@@ -238,6 +279,38 @@ async def _ocr_search_one(
         return [], ""
 
 
+def _build_result(
+    idx: int,
+    scan_mode: str,
+    image: tuple[list[CardOut], float, str],
+    ocr: tuple[list[CardOut], str],
+) -> ScanResultItem:
+    image_candidates, image_sim, image_query = image
+    ocr_candidates, ocr_query = ocr
+
+    if scan_mode == "ocr":
+        return ScanResultItem(
+            crop_index=idx,
+            candidates=ocr_candidates,
+            query_used=ocr_query or "unknown",
+            match_source="ocr" if ocr_candidates else "none",
+        )
+    if scan_mode == "image":
+        return ScanResultItem(
+            crop_index=idx,
+            candidates=image_candidates,
+            query_used=image_query,
+            match_source="image" if image_sim >= _SIM_THRESHOLD else ("image:low" if image_candidates else "none"),
+        )
+    merged, source = _rrf_merge(image_candidates, ocr_candidates, ocr_query, image_sim, scan_mode)
+    return ScanResultItem(
+        crop_index=idx,
+        candidates=merged,
+        query_used=ocr_query if ocr_candidates else image_query,
+        match_source=source,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -245,77 +318,56 @@ async def _ocr_search_one(
 @router.post("")
 async def scan(req: ScanRequest):
     """
-    Combined card identification endpoint. Accepts crops + OCR hints, returns NDJSON stream
-    of results — one JSON object per crop as it completes. Replaces the separate
-    /detect + /match-image + /search/batch pipeline.
+    Combined card identification endpoint. Streams NDJSON results — one JSON object
+    per crop as soon as that crop's image+OCR searches both complete.
 
-    Flow:
-      1. Batch CLIP embed all crops in one forward pass (fast)
-      2. Parallel pgvector searches for all crops
-      3. Parallel OCR searches for all crops
-      4. Per-crop RRF merge, streamed as NDJSON
+    Per crop, image search and OCR search run concurrently; results are yielded in
+    completion order (not crop order) so fast cards appear in the UI without
+    waiting for slow ones.
     """
     crops = req.crops[:10]
     hints = list(req.ocr_hints[:10])
     while len(hints) < len(crops):
         hints.append(OcrHint())
 
+    # Decode all crops up front (cheap).
+    imgs: list[bytes | None] = []
+    for b64 in crops:
+        try:
+            imgs.append(base64.b64decode(b64))
+        except Exception:
+            imgs.append(None)
+
+    do_image = req.scan_mode in ("image", "combined")
+    do_ocr = req.scan_mode in ("ocr", "combined")
+
+    async def _empty_image(_i: int) -> tuple[list[CardOut], float, str]:
+        return [], 0.0, "image:no_match"
+
+    async def _empty_ocr(_h: OcrHint) -> tuple[list[CardOut], str]:
+        return [], ""
+
+    async def per_crop(i: int) -> ScanResultItem:
+        image_task = _image_search_one(i, imgs[i]) if do_image else _empty_image(i)
+        ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
+        try:
+            image, ocr = await asyncio.gather(image_task, ocr_task)
+        except Exception:
+            logger.exception("Per-crop search failed for crop %d", i)
+            image, ocr = ([], 0.0, "image:no_match"), ([], "")
+        return _build_result(i, req.scan_mode, image, ocr)
+
     async def generate():
-        # Decode all crops
-        imgs: list[bytes | None] = []
-        for b64 in crops:
-            try:
-                imgs.append(base64.b64decode(b64))
-            except Exception:
-                imgs.append(None)
-
-        # Phase 1+2: batch CLIP embed + parallel pgvector searches
-        image_results: dict[int, tuple[list[CardOut], float, str]] = {}
-        if req.scan_mode in ("image", "combined"):
-            try:
-                image_results = await _batch_image_search(imgs)
-            except Exception:
-                logger.exception("Batch image search failed")
-
-        # Phase 3: parallel OCR searches — each opens its own session
-        ocr_results: list[tuple[list[CardOut], str]] = [([], "")] * len(crops)
-        if req.scan_mode in ("ocr", "combined"):
-            try:
-                gathered = await asyncio.gather(*[
-                    _ocr_search_one(hints[i]) for i in range(len(crops))
-                ])
-                ocr_results = list(gathered)
-            except Exception:
-                logger.exception("Batch OCR search failed")
-
-        # Phase 4: merge + stream per crop
-        for i in range(len(crops)):
-            image_candidates, image_sim, image_query = image_results.get(i, ([], 0.0, "image:no_match"))
-            ocr_candidates, ocr_query = ocr_results[i]
-
-            if req.scan_mode == "ocr":
-                result = ScanResultItem(
-                    crop_index=i,
-                    candidates=ocr_candidates,
-                    query_used=ocr_query or "unknown",
-                    match_source="ocr" if ocr_candidates else "none",
-                )
-            elif req.scan_mode == "image":
-                result = ScanResultItem(
-                    crop_index=i,
-                    candidates=image_candidates,
-                    query_used=image_query,
-                    match_source="image" if image_sim >= _SIM_THRESHOLD else ("image:low" if image_candidates else "none"),
-                )
-            else:
-                merged, source = _rrf_merge(image_candidates, ocr_candidates, ocr_query, image_sim, req.scan_mode)
-                result = ScanResultItem(
-                    crop_index=i,
-                    candidates=merged,
-                    query_used=ocr_query if ocr_candidates else image_query,
-                    match_source=source,
-                )
-
-            yield result.model_dump_json() + "\n"
+        # Kick off all crops in parallel; yield each result as it completes.
+        tasks = [asyncio.create_task(per_crop(i)) for i in range(len(crops))]
+        try:
+            for coro in asyncio.as_completed(tasks):
+                result = await coro
+                yield result.model_dump_json() + "\n"
+        finally:
+            # If the client disconnected, cancel remaining tasks to stop wasted work.
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")

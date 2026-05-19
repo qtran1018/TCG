@@ -79,12 +79,6 @@ class PSACertResult(BaseModel):
     price: PriceOut | None = None
 
 
-class BatchSearchItem(BaseModel):
-    """Cached image-search payload. Used internally by /scan for embedding cache hits."""
-    candidates: list[CardOut]
-    query_used: str
-
-
 class DetectRequest(BaseModel):
     image_base64: str
     max_cards: int = 10
@@ -101,6 +95,18 @@ class DetectResult(BaseModel):
     boxes: list[BoundingBox]
     image_width: int
     image_height: int
+
+
+class ScanHistoryCreate(BaseModel):
+    card_id: int | None = None
+    game: str = "pokemon"
+    scan_type: str = "raw"
+    language: str = "en"
+    ocr_text: str | None = None
+    psa_cert: str | None = None
+    resolved_card_name: str | None = None
+    price_loose: float | None = None
+    price_graded_10: float | None = None
 
 
 class HistoryEntry(BaseModel):
