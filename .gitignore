@@ -45,7 +45,10 @@ runs/
 Pokemon TCG/
 
 # Background texture photos (only needed for CLIP fine-tuning)
-background-textures/
+assets/backgrounds/
+
+# Process logs
+logs/
 
 # Scratch / temp files
 TCGScanner.html

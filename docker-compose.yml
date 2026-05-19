@@ -52,7 +52,7 @@ services:
       - ./backend:/app
       - ./scripts:/scripts
       - ./Pokemon TCG:/pokemon-tcg:ro
-      - ./background-textures:/backgrounds:ro
+      - ./assets/backgrounds:/backgrounds:ro
     deploy:
       resources:
         reservations:

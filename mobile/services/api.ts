@@ -210,11 +210,6 @@ export const api = {
     return data;
   },
 
-  async batchMatchByImage(crops: string[]): Promise<BatchSearchResult> {
-    const { data } = await client.post<BatchSearchResult>("/match-image", { crops });
-    return data;
-  },
-
   /**
    * Combined card identification endpoint. Streams NDJSON results — one JSON object per crop
    * as it completes. Replaces separate /match-image + /search/batch calls.
