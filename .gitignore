@@ -58,6 +58,7 @@ cleanup-plan.md
 
 # IDE / personal settings
 .claude/
+.vscode/
 
 # OS
 .DS_Store

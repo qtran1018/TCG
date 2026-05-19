@@ -228,7 +228,7 @@ All of the following are correctly extracted and searched:
 **Step 1 (now): Assess phash + crop changes**
 - Test real scans with tighter crop (`y=12%–52%`), threshold 0.75, and phash Hamming re-ranking
 - Watch for: fewer wrong-card results, any correct cards being missed (threshold too aggressive)
-- phash logs show `hamming=N` per candidate — tune `_PHASH_STRONG` in `match_image.py` if needed
+- phash logs show `hamming=N` per candidate — tune `_PHASH_STRONG` in `scan.py` if needed
 
 **Step 2 (if still unreliable): DINOv2 / DINOv3 (research evaluation only)**
 - Both use dense patch-level matching better suited to card identity than CLIP's global embedding
@@ -296,7 +296,8 @@ Japanese scans show the Japanese card art instead of the English art. Lookup is 
 **Data source: TCGCollector.com**
 - 27,255 Japanese cards, all eras from 1996 → present (Base Set through current SV sets)
 - Scraped with Playwright (headed Chromium to bypass Cloudflare) — `scripts/scrape_tcgcollector.py`
-- Output: `backend/app/data/tcgcollector_ja.json` — list of `{name_en, set_name, card_number, set_total, image_url, card_id}`
+- Output: `backend/app/data/tcgcollector_ja.json` — list of `{name_en, set_name, card_number, card_number_raw, set_total, image_url, card_id}`
+  - `card_number` — normalized integer string (e.g. `"1"`); `card_number_raw` — original zero-padded string (e.g. `"001"`)
 - `set_total` is extracted from fraction-format card numbers (e.g. `001/029` → set_total=29); used for disambiguation
 - pokemon-card.com data (`ja_images.json`, SV era only, 6,851 entries) retained as fallback
 
@@ -324,7 +325,7 @@ Japanese scans show the Japanese card art instead of the English art. Lookup is 
 - `mobile/hooks/useMultiCardScan.ts` — multi-card pipeline: detect → crop → re-OCR or image match → results; accepts `scanMode: 'ocr' | 'image' | 'combined'`; RRF merge in combined mode
 - `mobile/utils/detectCards.ts` — `filterBlocksToCardZone` (single), `detectCardRegions` (fallback), `boxesToRegions` (converts backend boxes)
 - `mobile/utils/cardConfidence.ts` — single-card confidence scoring
-- `mobile/services/api.ts` — `api.detectCards()`, `api.batchSearch()`, `api.batchMatchByImage()`, `api.scanStream()` (streaming unified scan), all API calls
+- `mobile/services/api.ts` — `api.detectCards()`, `api.batchSearch()`, `api.scanStream()` (streaming unified scan), all API calls
 - `mobile/utils/yoloDetector.ts` — `detectCardsWithYolo()` stub; returns null until `card_detector.tflite` is present
 - `mobile/components/Scanner/ScanOverlay.tsx` — scan frame dimensions (75% W, 88/63 ratio, -40px Y)
 - `mobile/components/UI/ScanModeToggle.tsx` — OCR / Image AI / Combined toggle component
@@ -404,16 +405,16 @@ A chronological record of major technical decisions, for portfolio and reference
 - Mobile uses XHR `onprogress` to parse partial NDJSON; `appendMultiScanCard` updates the store card-by-card
 - Attempted TFLite export of YOLO11n for on-device detection — model export not completed; `detectCardsWithYolo()` stub in place for future integration when `card_detector.tflite` is available
 
-### v9 — CLIP ViT-B/32 synthetic augmentation fine-tuning (in progress)
+### v9 — CLIP ViT-B/32 synthetic augmentation fine-tuning ✅
 - Fine-tuning CLIP visual encoder on (clean official art crop, augmented simulated photo) pairs to close the domain gap between training data and real phone photos of physical cards
 - Augmentation pipeline: paste card onto random background texture → perspective warp → color jitter → gaussian blur → JPEG compression → art-region crop (`y=12%–52%`)
-- 5 background textures: black cloth, black gray, gray white, gray, white linen (tablecloth photos in `background-textures/`)
+- 5 background textures: black cloth, black gray, gray white, gray, white linen (tablecloth photos in `assets/backgrounds/`)
 - 20,741 card images × 4 augmented pairs = 82,964 pairs per epoch; 10 epochs planned
 - Only visual encoder fine-tuned (87.8M params); text encoder frozen
 - InfoNCE contrastive loss, temperature=0.07, AdamW lr=1e-5, cosine LR schedule
 - Script: `scripts/fine_tune_clip.py`; output: `backend/models/clip_finetuned.pt`
 - `card_embedder.py` auto-loads fine-tuned weights at startup if `backend/models/clip_finetuned.pt` exists
-- `docker-compose.yml`: added `shm_size: 2gb` for backend container (required for PyTorch DataLoader workers), added `./background-textures:/backgrounds:ro` volume mount
+- `docker-compose.yml`: added `shm_size: 2gb` for backend container (required for PyTorch DataLoader workers), added `./assets/backgrounds:/backgrounds:ro` volume mount
 - Training on RTX 3080 (GPU); ~6-9s/batch with 4 DataLoader workers, ~1.5hr/epoch, ~15hr total
 - **Monitor training:** `docker exec -it tcg_backend tail -f /tmp/finetune.log`
 - **After training:** run `python scripts/build_embeddings.py --dataset /pokemon-tcg --force` to re-embed all 20k cards with fine-tuned weights
@@ -435,3 +436,13 @@ A chronological record of major technical decisions, for portfolio and reference
 | 9 | 0.0083 | 3.42e-07 | 79 min | 2026-05-18 16:52 UTC |
 | 10 | 0.0081 | 1.00e-07 | 82 min | 2026-05-18 18:14 UTC |
 | **Best** | **0.0077** | — | — | **Epoch 7 — saved to `backend/models/clip_finetuned.pt`** |
+
+### v10 — Project reorganization and dead code removal (2026-05-18)
+- Moved `background-textures/` → `assets/backgrounds/`; updated `docker-compose.yml` volume mount accordingly
+- Moved scraper logs to `logs/` (gitignored)
+- Deleted dead files: `runs/`, `yolo11n.pt` (base model, training artifact), `pca.pkl`, `card_detector.onnx`, calibration `.npy` files, `TCGScanner.html`
+- Removed `backend/app/api/v1/match_image.py` (`POST /api/v1/match-image` endpoint) — fully superseded by `/scan`
+- Removed `batchMatchByImage()` from `mobile/services/api.ts` — was never called after v8
+- Moved one-off scripts to `scripts/archive/`
+- Expanded `.gitignore`: `assets/backgrounds/`, `logs/`, `*.npy`, `*.onnx`, `*.pkl`, `runs/`
+- **Single-card scan mode disabled**: the "Scan Cards" button in `index.tsx` now always launches multi-card mode (`handleMultiCapture`). The single-card `handleCapture` path (overlay zone filtering, `useOCR` confidence gate) still exists in the file but has no UI entry point — multi-card supersedes it for all use cases
