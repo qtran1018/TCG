@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card
 from app.scrapers.pricecharting import PricechartingScraper
@@ -214,7 +214,10 @@ class CardMatcherService:
             card_ids = cached.get("ids", [])
             if card_ids:
                 result = await db.execute(select(Card).where(Card.id.in_(card_ids)))
-                return list(result.scalars().all()), query
+                by_id = {c.id: c for c in result.scalars().all()}
+                # Preserve cached ranking order rather than DB row order.
+                ordered = [by_id[i] for i in card_ids if i in by_id]
+                return ordered, query
 
         db_cards = await self._search_db(hints, game, language, db)
 
