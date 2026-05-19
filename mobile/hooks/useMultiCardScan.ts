@@ -188,14 +188,34 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           if (seenIds.has(topId)) return;
           seenIds.add(topId);
 
+          const hint = ocrHints[item.crop_index];
+          const rawText = hint?.raw_text ?? "";
+
+          // Extract kana name, card number, and set total for Japanese image lookup
+          let kanaName: string | undefined;
+          let setTotal: number | undefined;
+          let cardNumber: string | undefined;
+          if (lang === "ja" && rawText) {
+            const kanaMatch = rawText.match(/[゠-ヿー]+/g);
+            if (kanaMatch) kanaName = kanaMatch.reduce((a, b) => (a.length >= b.length ? a : b), "");
+            const numMatch = rawText.match(/(\d+)\/(\d+)/);
+            if (numMatch) {
+              cardNumber = numMatch[1];
+              setTotal = parseInt(numMatch[2], 10);
+            }
+          }
+
           const card: DetectedCard = {
             regionIndex: cropData[item.crop_index]?.regionIndex ?? item.crop_index,
-            ocrText: ocrHints[item.crop_index]?.raw_text ?? "",
+            ocrText: rawText,
             searchResult: {
               candidates: item.candidates,
               query_used: item.query_used,
             },
             matchSource: (item.match_source === "none" || !item.match_source) ? undefined : item.match_source,
+            kanaName,
+            setTotal,
+            cardNumber,
           };
 
           appendMultiScanCard(card);

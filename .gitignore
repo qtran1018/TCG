@@ -12,8 +12,8 @@ mobile/android/app/build/
 mobile/android/.gradle/
 
 # Python
-backend/__pycache__/
-backend/**/__pycache__/
+__pycache__/
+**/__pycache__/
 backend/.venv/
 *.pyc
 *.pyo
@@ -27,11 +27,34 @@ pgdata/
 redisdata/
 pgadmindata/
 
-# YOLO model weights (large binary files — add trained .pt files here)
-backend/models/*.pt
+# Base pretrained model (not project-produced)
+yolo11n.pt
 
-# Local card image datasets
+# Generated model artifacts
+backend/models/*.pkl
+backend/models/*.onnx
+backend/models/embedding_failures.json
+
+# YOLO training run output (weights, plots, metrics)
+runs/
+
+# Numpy calibration / intermediate data files
+*.npy
+
+# Local card image datasets (too large for git)
 Pokemon TCG/
+
+# Background texture photos (only needed for CLIP fine-tuning)
+background-textures/
+
+# Scratch / temp files
+TCGScanner.html
+pokemon_jp_en_map.html
+cleanup-plan.md
+*.log
+
+# IDE / personal settings
+.claude/
 
 # OS
 .DS_Store

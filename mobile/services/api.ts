@@ -30,6 +30,7 @@ export interface SaleRecord {
   date: string;
   title: string;
   price: number | null;
+  url?: string;
 }
 
 export interface PricePoint {
@@ -71,6 +72,7 @@ export interface BatchSearchResult {
 export interface CardWithPrice {
   card: CardOut;
   price?: PriceOut;
+  ja_image_url?: string;
 }
 
 export interface PSACertResult {
@@ -137,9 +139,22 @@ export const api = {
     return data;
   },
 
-  async getCard(cardId: number, scanType: ScanType, language?: string): Promise<CardWithPrice> {
+  async getCard(
+    cardId: number,
+    scanType: ScanType,
+    language?: string,
+    kanaName?: string,
+    setTotal?: number,
+    cardNumber?: string,
+  ): Promise<CardWithPrice> {
     const { data } = await client.get<CardWithPrice>(`/cards/${cardId}`, {
-      params: { scan_type: scanType, ...(language && { language }) },
+      params: {
+        scan_type: scanType,
+        ...(language && { language }),
+        ...(kanaName && { kana_name: kanaName }),
+        ...(setTotal && { set_total: setTotal }),
+        ...(cardNumber && { card_number: cardNumber }),
+      },
     });
     return data;
   },

@@ -30,6 +30,7 @@ class SaleRecord(BaseModel):
     date: str
     title: str
     price: float | None = None
+    url: str | None = None
 
 
 class PricePoint(BaseModel):
@@ -59,6 +60,7 @@ class PriceOut(BaseModel):
 class CardWithPrice(BaseModel):
     card: CardOut
     price: PriceOut | None = None
+    ja_image_url: str | None = None
 
 
 class SearchRequest(BaseModel):

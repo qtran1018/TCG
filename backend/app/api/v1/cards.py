@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.card import Card, PriceCache, ScanHistory
 from app.schemas.card import CardOut, CardWithPrice, PriceOut, HistoryEntry
 from app.services.card_matcher import CardMatcherService
+from app.services.ja_image_lookup import find_ja_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -15,7 +16,15 @@ _matcher = CardMatcherService()
 
 
 @router.get("/{card_id}", response_model=CardWithPrice)
-async def get_card(card_id: int, scan_type: str = "raw", language: str | None = None, db: AsyncSession = Depends(get_db)):
+async def get_card(
+    card_id: int,
+    scan_type: str = "raw",
+    language: str | None = None,
+    kana_name: str | None = None,
+    set_total: int | None = None,
+    card_number: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Card).where(Card.id == card_id))
     card = result.scalar_one_or_none()
     if not card:
@@ -33,7 +42,12 @@ async def get_card(card_id: int, scan_type: str = "raw", language: str | None = 
             fetched_at=datetime.utcnow(),
         )
 
-    return CardWithPrice(card=CardOut.model_validate(card), price=price_out)
+    # For Japanese scans, look up the Japanese card image
+    ja_image_url: str | None = None
+    if language == "ja" and kana_name:
+        ja_image_url = find_ja_image(kana_name, set_total, card_number)
+
+    return CardWithPrice(card=CardOut.model_validate(card), price=price_out, ja_image_url=ja_image_url)
 
 
 @router.post("/history", status_code=201)

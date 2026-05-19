@@ -10,6 +10,8 @@ import { COLORS } from "@/constants";
 import type { CardOut } from "@/services/api";
 import type { DetectedCard } from "@/types/scan";
 
+const CHECKMARK = "✓";
+
 export default function MultiResultsScreen() {
   const router = useRouter();
   const {
@@ -18,23 +20,64 @@ export default function MultiResultsScreen() {
     multiScanError,
     multiScanTotalRegions,
     language,
+    setBatchPriceCards,
+    scanType,
   } = useScanStore();
 
   const cards = multiScanResult?.cards ?? [];
 
   const [selections, setSelections] = useState<Record<number, CardOut>>({});
   const [swapTarget, setSwapTarget] = useState<DetectedCard | null>(null);
+  const [checkedIndices, setCheckedIndices] = useState<Set<number>>(new Set());
 
   const getSelected = (dc: DetectedCard): CardOut | undefined =>
     selections[dc.regionIndex] ?? dc.searchResult.candidates[0];
 
-  const handleViewCard = (card: CardOut) => {
-    router.push({ pathname: "/card/[id]", params: { id: String(card.id), language } });
+  const handleViewCard = (card: CardOut, dc?: DetectedCard) => {
+    router.push({
+      pathname: "/card/[id]",
+      params: {
+        id: String(card.id),
+        language,
+        ...(dc?.kanaName && { kana_name: dc.kanaName }),
+        ...(dc?.setTotal && { set_total: String(dc.setTotal) }),
+        ...(dc?.cardNumber && { card_number: dc.cardNumber }),
+      },
+    });
   };
 
   const handleSwapSelect = (dc: DetectedCard, card: CardOut) => {
     setSelections((prev) => ({ ...prev, [dc.regionIndex]: card }));
     setSwapTarget(null);
+  };
+
+  const toggleCheck = (regionIndex: number) => {
+    setCheckedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(regionIndex)) next.delete(regionIndex);
+      else next.add(regionIndex);
+      return next;
+    });
+  };
+
+  const allChecked = cards.length > 0 && checkedIndices.size === cards.length;
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setCheckedIndices(new Set());
+    } else {
+      setCheckedIndices(new Set(cards.map((dc) => dc.regionIndex)));
+    }
+  };
+
+  const handleGetPrices = () => {
+    const selected = cards
+      .filter((dc) => checkedIndices.has(dc.regionIndex))
+      .map((dc) => getSelected(dc))
+      .filter((c): c is CardOut => !!c);
+    if (selected.length === 0) return;
+    setBatchPriceCards(selected);
+    router.push({ pathname: "/batch-prices" });
   };
 
   // Loading state — navigated here before scan completed, no cards yet
@@ -92,6 +135,22 @@ export default function MultiResultsScreen() {
           {cards.length} card{cards.length !== 1 ? "s" : ""} identified
           {skipped > 0 ? ` · ${skipped} region${skipped !== 1 ? "s" : ""} skipped` : ""}
         </Text>
+        {cards.length > 0 && !multiScanLoading && (
+          <View style={styles.batchRow}>
+            <TouchableOpacity style={styles.selectAllBtn} onPress={toggleAll}>
+              <Text style={styles.selectAllText}>
+                {allChecked ? "Deselect All" : "Select All"}
+              </Text>
+            </TouchableOpacity>
+            {checkedIndices.size > 0 && (
+              <TouchableOpacity style={styles.getPricesBtn} onPress={handleGetPrices}>
+                <Text style={styles.getPricesBtnText}>
+                  Get Prices ({checkedIndices.size})
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
 
       <FlatList
@@ -101,9 +160,17 @@ export default function MultiResultsScreen() {
         renderItem={({ item: dc, index }) => {
           const selected = getSelected(dc);
           const hasAlternates = dc.searchResult.candidates.length > 1;
+          const isChecked = checkedIndices.has(dc.regionIndex);
           return (
-            <View style={styles.card}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => toggleCheck(dc.regionIndex)}
+              style={[styles.card, isChecked && styles.cardChecked]}
+            >
               <View style={styles.cardHeader}>
+                <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
+                  {isChecked && <Text style={styles.checkboxMark}>{CHECKMARK}</Text>}
+                </View>
                 <Text style={styles.cardIndex}>Card {index + 1}</Text>
                 {dc.matchSource && dc.matchSource !== "none" && (
                   <Text style={[
@@ -145,14 +212,14 @@ export default function MultiResultsScreen() {
                   <View style={styles.actions}>
                     <TouchableOpacity
                       style={styles.viewBtn}
-                      onPress={() => selected && handleViewCard(selected)}
+                      onPress={(e) => { e.stopPropagation?.(); selected && handleViewCard(selected, dc); }}
                     >
                       <Text style={styles.viewBtnText}>View Price</Text>
                     </TouchableOpacity>
                     {hasAlternates && (
                       <TouchableOpacity
                         style={styles.swapBtn}
-                        onPress={() => setSwapTarget(dc)}
+                        onPress={(e) => { e.stopPropagation?.(); setSwapTarget(dc); }}
                       >
                         <Text style={styles.swapBtnText}>
                           Swap ({dc.searchResult.candidates.length})
@@ -162,7 +229,7 @@ export default function MultiResultsScreen() {
                   </View>
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         }}
         ListFooterComponent={
@@ -225,6 +292,11 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 4 },
   title: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: COLORS.textMuted, fontSize: 13 },
+  batchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 },
+  selectAllBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
+  selectAllText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  getPricesBtn: { backgroundColor: COLORS.accent, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
+  getPricesBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
 
   // Loading states
@@ -244,6 +316,15 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     gap: 8,
   },
+  cardChecked: { borderColor: COLORS.accent, backgroundColor: COLORS.accentDim },
+  checkbox: {
+    width: 20, height: 20, borderRadius: 5,
+    borderWidth: 1.5, borderColor: COLORS.border,
+    alignItems: "center", justifyContent: "center",
+    marginRight: 2,
+  },
+  checkboxChecked: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  checkboxMark: { color: "#fff", fontSize: 11, fontWeight: "800" },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardIndex: { color: COLORS.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
   sourceBadge: { fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },

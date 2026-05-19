@@ -29,6 +29,7 @@ class SaleRecord:
     date: str
     title: str
     price: float | None
+    url: str | None = None
 
 
 @dataclass
@@ -212,18 +213,24 @@ class PricechartingScraper(BaseScraper):
             except (json.JSONDecodeError, Exception):
                 pass
 
-        # Recent sales table
-        sales_table = soup.find("table", class_=lambda c: c and "hoverable-rows" in c and "sortable" in c)
-        if sales_table:
+        # Recent sales — collect from ALL hoverable/sortable tables (eBay + TCGPlayer)
+        all_rows: list[tuple[str, str, float | None, str | None]] = []  # (date, title, price, url)
+        sales_tables = soup.find_all("table", class_=lambda c: c and "hoverable-rows" in c and "sortable" in c)
+        for sales_table in sales_tables:
             tbody = sales_table.find("tbody") or sales_table
-            for row in tbody.find_all("tr")[:recent_sales_limit]:
+            for row in tbody.find_all("tr"):
                 cells = row.find_all("td")
                 if len(cells) < 4:
                     continue
-                prices.recent_sales.append(SaleRecord(
-                    date=cells[0].get_text(strip=True),
-                    title=cells[2].get_text(strip=True),
-                    price=_parse_price_cell(cells[3]),
+                anchor = cells[2].find("a", href=True)
+                ebay_url = anchor["href"] if anchor else None
+                all_rows.append((
+                    cells[0].get_text(strip=True),
+                    cells[2].get_text(strip=True),
+                    _parse_price_cell(cells[3]),
+                    ebay_url,
                 ))
+        for date, title, price, url in all_rows[:recent_sales_limit]:
+            prices.recent_sales.append(SaleRecord(date=date, title=title, price=price, url=url))
 
         return prices

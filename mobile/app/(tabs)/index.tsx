@@ -98,14 +98,7 @@ export default function ScanScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {mode === "camera" ? (
-        <View style={styles.cameraContainer}>
-          <CameraScanner language={language} onCapture={handleCapture} isProcessing={isLoading} />
-          <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
-            <Text style={styles.backBtnText}>✕  Close Camera</Text>
-          </TouchableOpacity>
-        </View>
-      ) : mode === "multi-camera" ? (
+      {mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
           <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} showOverlay={false} />
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
@@ -168,24 +161,14 @@ export default function ScanScreen() {
                 </View>
               </Section>
             ) : (
-              <>
-                <TouchableOpacity
-                  style={[styles.scanBtn, isLoading && styles.btnDisabled]}
-                  onPress={() => setMode("camera")}
-                  disabled={isLoading}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.scanBtnText}>📷  Scan Single Card</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.multiScanBtn, isLoading && styles.btnDisabled]}
-                  onPress={() => setMode("multi-camera")}
-                  disabled={isLoading}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.multiScanBtnText}>🗂  Scan Multiple Cards</Text>
-                </TouchableOpacity>
-              </>
+              <TouchableOpacity
+                style={[styles.scanBtn, isLoading && styles.btnDisabled]}
+                onPress={() => setMode("multi-camera")}
+                disabled={isLoading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.scanBtnText}>📷  Scan Cards</Text>
+              </TouchableOpacity>
             )}
 
             {isLoading && (

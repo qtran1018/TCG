@@ -410,7 +410,10 @@ class CardMatcherService:
         if not pc_url:
             return None
 
-        pc_id = pc_url.rstrip("/").split("/")[-1]
+        # Use last two path segments (set-slug + card-slug) so same-number cards
+        # from different sets don't collide in the cache (e.g. gastly-36 in Fossil vs Team Rocket)
+        _parts = pc_url.rstrip("/").split("/")
+        pc_id = "_".join(_parts[-2:]) if len(_parts) >= 2 else _parts[-1]
         cache_key = f"{pc_id}:{scan_type}:{price_language}"
         cached = await price_cache.get(cache_key)
         if cached:
@@ -429,7 +432,7 @@ class CardMatcherService:
             "price_graded_10": prices.graded_10,
             "currency": "USD",
             "recent_sales": [
-                {"date": s.date, "title": s.title, "price": s.price}
+                {"date": s.date, "title": s.title, "price": s.price, "url": s.url}
                 for s in prices.recent_sales
             ],
             "price_history_ungraded": [

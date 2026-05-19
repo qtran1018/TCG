@@ -11,7 +11,9 @@ import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 
 export default function CardDetailScreen() {
-  const { id, psaGrade, language: routeLanguage } = useLocalSearchParams<{ id: string; psaGrade?: string; language?: string }>();
+  const { id, psaGrade, language: routeLanguage, kana_name, set_total, card_number } = useLocalSearchParams<{
+    id: string; psaGrade?: string; language?: string; kana_name?: string; set_total?: string; card_number?: string;
+  }>();
   const { scanType } = useScanStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -21,7 +23,14 @@ export default function CardDetailScreen() {
     if (!id) return;
     setIsLoading(true);
     api
-      .getCard(Number(id), scanType, routeLanguage)
+      .getCard(
+        Number(id),
+        scanType,
+        routeLanguage,
+        kana_name,
+        set_total ? parseInt(set_total, 10) : undefined,
+        card_number,
+      )
       .then(setData)
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => setIsLoading(false));
@@ -44,16 +53,18 @@ export default function CardDetailScreen() {
     );
   }
 
-  const { card, price } = data;
+  const { card, price, ja_image_url } = data;
   const pcUrl = price?.pricecharting_url ?? card.pricecharting_url;
   const displayName = card.language === "ja" && card.name_ja ? card.name_ja : card.name;
+  // Prefer Japanese card image for Japanese scans; fall back to English art
+  const displayImageUrl = ja_image_url ?? card.image_url_hi ?? card.image_url;
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <ScrollView contentContainerStyle={styles.content}>
-        {card.image_url_hi || card.image_url ? (
+        {displayImageUrl ? (
           <Image
-            source={{ uri: card.image_url_hi ?? card.image_url! }}
+            source={{ uri: displayImageUrl }}
             style={styles.cardImage}
             resizeMode="contain"
           />

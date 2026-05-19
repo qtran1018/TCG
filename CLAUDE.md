@@ -23,6 +23,10 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 - Single-card confidence gate: OCR text scored before hitting backend (card number, HP, keywords, copyright)
 - Backend card number ranking: exact match ranks first (handles zero-padded numbers like "024")
 - Query display format: `Name #N` (e.g. `Suicune #24`) — denominator dropped, `#` prefix added
+- **Batch price retrieval**: multi-results screen lets you select cards (tap to check, Select All), then "Get Prices (N)" navigates to `batch-prices.tsx` showing each card's market price + last sold entry
+- **Sale listing links**: recent sales rows on both individual price page and batch-prices page show "eBay →" or "TCGPlayer →" links; tapping opens in app/browser via `Linking.openURL`
+- **All-source sales scraping**: PriceCharting scraper collects from all `hoverable-rows sortable` tables on the page (eBay + TCGPlayer), not just the first one
+- **Price cache key fix**: cache key uses `{set-slug}_{card-slug}` instead of just `{card-slug}`, preventing same-number cards from different sets (e.g. Gastly #36 in Fossil vs Base Set 2) from colliding in Redis
 
 ## Current Scan Flow (single card)
 1. Camera captures photo
@@ -286,18 +290,28 @@ All of the following are correctly extracted and searched:
 - **Known limitation**: PriceCharting Japanese set slug is derived from the English set name (e.g., "Scarlet & Violet" → `pokemon-japanese-scarlet-violet`). PriceCharting may use a different slug for some Japanese sets — these will return no pricing data
 - Special cases (Tag Team, regional forms in Japanese) deferred
 
-#### Japanese card images (not yet implemented)
-Currently, Japanese scans return English card records from the DB, so English card art is shown. Japanese physical cards often have the same Pokémon art but different card layout (Japanese text, different border).
+#### Japanese card images ✅
+Japanese scans show the Japanese card art instead of the English art. Lookup is display-only — identification still uses OCR (kana→EN) + English DB records.
 
-**Sources evaluated:**
-- **Serebii** (`serebii.net/card/japanese.shtml`) — does not cover old Japanese sets (Base Set era); incomplete
-- **pokemon-card.com** (official Japanese site) — complete coverage of all Japanese sets, CDN images at predictable paths; requires knowing the Japanese set code (e.g., `sv1J`) which differs from English (e.g., `sv1`). Best option if implemented.
+**Data source: TCGCollector.com**
+- 27,255 Japanese cards, all eras from 1996 → present (Base Set through current SV sets)
+- Scraped with Playwright (headed Chromium to bypass Cloudflare) — `scripts/scrape_tcgcollector.py`
+- Output: `backend/app/data/tcgcollector_ja.json` — list of `{name_en, set_name, card_number, set_total, image_url, card_id}`
+- `set_total` is extracted from fraction-format card numbers (e.g. `001/029` → set_total=29); used for disambiguation
+- pokemon-card.com data (`ja_images.json`, SV era only, 6,851 entries) retained as fallback
 
-**Implementation approach (if pursued):**
-- One-time scrape of pokemon-card.com set listings → build a `(card_number, set_total, kana_name) → image_url` lookup table
-- At scan time, use OCR-extracted card number + set total to find the Japanese image
-- Fall back to English card image if no Japanese entry found
-- Japanese card numbers are independent from English (different numbering per set) — cannot derive one from the other without a lookup table
+**Lookup service: `backend/app/services/ja_image_lookup.py`**
+- Primary: TCGCollector index keyed by English name (lowercased)
+- Inputs: `kana_name` (OCR) → translated to English via `kana_to_english()`, plus optional `set_total` and `card_number`
+- Match priority: (name + set_total + card_number) → (name + set_total) → (name + card_number) → first by name
+- Fallback: pokemon-card.com data (kana_name + set_total match)
+- `card_number` (numerator from OCR, e.g. "172" from "172/742") is now extracted in `useMultiCardScan` and threaded through route params → `api.getCard()` → backend
+
+**PriceCharting Japanese URL**: `build_game_url` uses `pokemon-japanese-{set_slug}` prefix when `language="ja"`. `card_matcher.py` forces this path whenever `language_override="ja"` regardless of the stored card URL.
+
+**Known limitation**: Japanese-exclusive cards (promos, sets with no English release) have no English DB entry, so identification fails for those. Image AI for Japanese-exclusive cards is deferred — low priority for US use cases.
+
+**Re-scraping**: `py -3 scripts/scrape_tcgcollector.py --output-dir backend/app/data` (resumable with `--start-page N`). Stops automatically when page returns 0 cards or >50% duplicate card IDs (loop detection). After re-scraping, restart backend to reload data.
 
 ### 5. PSA graded card recognition via camera
 - Target: Japanese card shops that cover cert numbers with price stickers
@@ -316,10 +330,11 @@ Currently, Japanese scans return English card records from the DB, so English ca
 - `mobile/components/UI/ScanModeToggle.tsx` — OCR / Image AI / Combined toggle component
 - `mobile/components/Card/PriceChart.tsx` — trend graph
 - `backend/app/services/card_detector.py` — OpenCV card outline detection (`detect_card_rectangles`)
-- `backend/app/services/card_embedder.py` — EfficientNet-B0 embedding: `embed_raw()` (1280-dim), `embed_image()` (256-dim after PCA), `is_ready()` — **to be replaced by CLIP ViT-B/32**
+- `backend/app/services/card_embedder.py` — CLIP ViT-B/32 embedding (fine-tuned weights loaded from `backend/models/clip_finetuned.pt` if present)
+- `backend/app/services/ja_image_lookup.py` — Japanese card image lookup: TCGCollector primary (27,255 cards), pokemon-card.com fallback (SV era); keyed by English name + set_total + card_number
 - `backend/app/api/v1/scan.py` — `POST /api/v1/scan` unified endpoint: batch CLIP embed + parallel pgvector + parallel OCR + NDJSON stream
 - `backend/app/api/v1/detect.py` — `POST /api/v1/detect` endpoint
-- `backend/app/api/v1/match_image.py` — `POST /api/v1/match-image` endpoint (image embedding search, legacy)
+- `backend/app/data/tcgcollector_ja.json` — 27,255 JP card entries scraped from TCGCollector.com (all eras 1996–present)
 - `backend/app/scrapers/pricecharting.py` — PriceCharting scraper
 - `backend/app/services/card_matcher.py` — search orchestration, ranking, price caching
 - `backend/app/data/pokemon_kana_to_en.json` — kana→English name dict (1028 entries)

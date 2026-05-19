@@ -1,8 +1,14 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
 import { COLORS } from "@/constants";
 import type { PriceOut, SaleRecord } from "@/services/api";
 import { PriceChart } from "./PriceChart";
+
+function saleLinkLabel(url: string): string {
+  if (url.includes("tcgplayer")) return "TCGPlayer →";
+  if (url.includes("ebay")) return "eBay →";
+  return "View →";
+}
 
 interface Props {
   price: PriceOut;
@@ -48,7 +54,14 @@ export function PriceDisplay({ price, scanType }: Props) {
                 <Text style={styles.saleDate}>{sale.date}</Text>
                 <Text style={styles.saleTitle} numberOfLines={1}>{sale.title}</Text>
               </View>
-              <Text style={styles.salePrice}>{sale.price != null ? `$${sale.price.toFixed(2)}` : "N/A"}</Text>
+              <View style={styles.salePriceWrap}>
+                <Text style={styles.salePrice}>{sale.price != null ? `$${sale.price.toFixed(2)}` : "N/A"}</Text>
+                {sale.url && (
+                  <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch(() => {})}>
+                    <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           ))}
         </View>
@@ -125,10 +138,19 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 12,
   },
+  salePriceWrap: {
+    alignItems: "flex-end",
+    gap: 2,
+    flexShrink: 0,
+  },
   salePrice: {
     color: COLORS.text,
     fontSize: 13,
     fontWeight: "600",
-    flexShrink: 0,
+  },
+  saleLink: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: "600",
   },
 });

@@ -19,6 +19,9 @@ interface ScanState {
   multiScanTotalRegions: number;
   multiScanError: string | null;
 
+  // Cards selected for batch price lookup
+  batchPriceCards: CardOut[];
+
   setGame: (game: Game) => void;
   setLanguage: (language: Language) => void;
   setScanType: (scanType: ScanType) => void;
@@ -27,6 +30,7 @@ interface ScanState {
   setLastSearchResult: (result: SearchResult | null) => void;
   setSelectedCard: (card: CardOut | null) => void;
   setMultiScanResult: (result: MultiScanResult | null) => void;
+  setBatchPriceCards: (cards: CardOut[]) => void;
 
   // Progressive multi-scan actions
   clearMultiScan: () => void;
@@ -49,6 +53,7 @@ export const useScanStore = create<ScanState>((set) => ({
   multiScanLoading: false,
   multiScanTotalRegions: 0,
   multiScanError: null,
+  batchPriceCards: [],
 
   setGame: (game) => set({ game }),
   setLanguage: (language) => set({ language }),
@@ -58,6 +63,7 @@ export const useScanStore = create<ScanState>((set) => ({
   setLastSearchResult: (lastSearchResult) => set({ lastSearchResult }),
   setSelectedCard: (selectedCard) => set({ selectedCard }),
   setMultiScanResult: (multiScanResult) => set({ multiScanResult, multiScanLoading: false }),
+  setBatchPriceCards: (batchPriceCards) => set({ batchPriceCards }),
 
   clearMultiScan: () => set({
     multiScanResult: null,
@@ -104,5 +110,6 @@ export const useScanStore = create<ScanState>((set) => ({
       multiScanLoading: false,
       multiScanTotalRegions: 0,
       multiScanError: null,
+      batchPriceCards: [],
     }),
 }));
