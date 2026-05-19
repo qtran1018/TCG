@@ -4,6 +4,7 @@ import hashlib
 import logging
 import re
 
+import imagehash
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -60,9 +61,9 @@ def _hamming(a: str | None, b: str | None) -> int:
     if not a or not b:
         return 999
     try:
-        import imagehash
         return imagehash.hex_to_hash(a) - imagehash.hex_to_hash(b)
     except Exception:
+        logger.warning("phash hamming failed for a=%s b=%s", a, b, exc_info=True)
         return 999
 
 

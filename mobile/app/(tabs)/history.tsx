@@ -32,8 +32,8 @@ export default function HistoryScreen() {
     try {
       const data = await api.getHistory(50, 0);
       setEntries(data);
-    } catch {
-      /* non-critical */
+    } catch (e) {
+      console.warn("[history] load failed:", e);
     } finally {
       setIsLoading(false);
       setRefreshing(false);

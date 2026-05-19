@@ -2,8 +2,10 @@ import io
 import logging
 from pathlib import Path
 
+import imagehash
 import numpy as np
 import torch
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,11 @@ _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 _FINETUNED_WEIGHTS = Path(__file__).parent.parent.parent / "models" / "clip_finetuned.pt"
+
+
+def preload() -> None:
+    """Eagerly load the CLIP model at startup so the first /scan call is fast."""
+    _load_model()
 
 
 def _load_model():
@@ -45,8 +52,6 @@ def embed_image(image_bytes: bytes) -> np.ndarray:
 def compute_phash(image_bytes: bytes) -> str | None:
     """Perceptual hash of the art-region crop. Returns hex string or None on error."""
     try:
-        import imagehash
-        from PIL import Image
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         return str(imagehash.phash(_crop_art(img)))
     except Exception:
@@ -67,8 +72,6 @@ def _crop_art(img):
 
 def embed_batch(images_bytes: list[bytes]) -> list[np.ndarray]:
     """Embed multiple images in one forward pass. Returns list of 512-dim float32 arrays."""
-    from PIL import Image
-
     _load_model()
     tensors = [
         _preprocess(_crop_art(Image.open(io.BytesIO(b)).convert("RGB")))

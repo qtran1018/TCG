@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   Image, Modal, ScrollView, ActivityIndicator,
@@ -21,7 +21,6 @@ export default function MultiResultsScreen() {
     multiScanTotalRegions,
     language,
     setBatchPriceCards,
-    scanType,
   } = useScanStore();
 
   const cards = multiScanResult?.cards ?? [];
@@ -30,47 +29,51 @@ export default function MultiResultsScreen() {
   const [swapTarget, setSwapTarget] = useState<DetectedCard | null>(null);
   const [checkedIndices, setCheckedIndices] = useState<Set<number>>(new Set());
 
-  const getSelected = (dc: DetectedCard): CardOut | undefined =>
-    selections[dc.regionIndex] ?? dc.searchResult.candidates[0];
+  const getSelected = useCallback(
+    (dc: DetectedCard): CardOut | undefined =>
+      selections[dc.regionIndex] ?? dc.searchResult.candidates[0],
+    [selections],
+  );
 
-  const handleViewCard = (card: CardOut, dc?: DetectedCard) => {
-    router.push({
-      pathname: "/card/[id]",
-      params: {
-        id: String(card.id),
-        language,
-        ...(dc?.kanaName && { kana_name: dc.kanaName }),
-        ...(dc?.setTotal && { set_total: String(dc.setTotal) }),
-        ...(dc?.cardNumber && { card_number: dc.cardNumber }),
-      },
-    });
-  };
+  const handleViewCard = useCallback(
+    (card: CardOut, dc?: DetectedCard) => {
+      router.push({
+        pathname: "/card/[id]",
+        params: {
+          id: String(card.id),
+          language,
+          ...(dc?.kanaName && { kana_name: dc.kanaName }),
+          ...(dc?.setTotal && { set_total: String(dc.setTotal) }),
+          ...(dc?.cardNumber && { card_number: dc.cardNumber }),
+        },
+      });
+    },
+    [router, language],
+  );
 
-  const handleSwapSelect = (dc: DetectedCard, card: CardOut) => {
+  const handleSwapSelect = useCallback((dc: DetectedCard, card: CardOut) => {
     setSelections((prev) => ({ ...prev, [dc.regionIndex]: card }));
     setSwapTarget(null);
-  };
+  }, []);
 
-  const toggleCheck = (regionIndex: number) => {
+  const toggleCheck = useCallback((regionIndex: number) => {
     setCheckedIndices((prev) => {
       const next = new Set(prev);
       if (next.has(regionIndex)) next.delete(regionIndex);
       else next.add(regionIndex);
       return next;
     });
-  };
+  }, []);
 
   const allChecked = cards.length > 0 && checkedIndices.size === cards.length;
 
-  const toggleAll = () => {
-    if (allChecked) {
-      setCheckedIndices(new Set());
-    } else {
-      setCheckedIndices(new Set(cards.map((dc) => dc.regionIndex)));
-    }
-  };
+  const toggleAll = useCallback(() => {
+    setCheckedIndices((prev) =>
+      prev.size === cards.length ? new Set() : new Set(cards.map((dc) => dc.regionIndex)),
+    );
+  }, [cards]);
 
-  const handleGetPrices = () => {
+  const handleGetPrices = useCallback(() => {
     const selected = cards
       .filter((dc) => checkedIndices.has(dc.regionIndex))
       .map((dc) => getSelected(dc))
@@ -78,7 +81,9 @@ export default function MultiResultsScreen() {
     if (selected.length === 0) return;
     setBatchPriceCards(selected);
     router.push({ pathname: "/batch-prices" });
-  };
+  }, [cards, checkedIndices, getSelected, setBatchPriceCards, router]);
+
+  const handleOpenSwap = useCallback((dc: DetectedCard) => setSwapTarget(dc), []);
 
   // Loading state — navigated here before scan completed, no cards yet
   if (multiScanLoading && cards.length === 0) {
@@ -157,81 +162,17 @@ export default function MultiResultsScreen() {
         data={cards}
         keyExtractor={(item) => String(item.regionIndex)}
         contentContainerStyle={styles.list}
-        renderItem={({ item: dc, index }) => {
-          const selected = getSelected(dc);
-          const hasAlternates = dc.searchResult.candidates.length > 1;
-          const isChecked = checkedIndices.has(dc.regionIndex);
-          return (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => toggleCheck(dc.regionIndex)}
-              style={[styles.card, isChecked && styles.cardChecked]}
-            >
-              <View style={styles.cardHeader}>
-                <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
-                  {isChecked && <Text style={styles.checkboxMark}>{CHECKMARK}</Text>}
-                </View>
-                <Text style={styles.cardIndex}>Card {index + 1}</Text>
-                {dc.matchSource && dc.matchSource !== "none" && (
-                  <Text style={[
-                    styles.sourceBadge,
-                    dc.matchSource === "both" ? styles.sourceBoth
-                    : dc.matchSource === "image" ? styles.sourceImage
-                    : dc.matchSource === "image:low" ? styles.sourceImageLow
-                    : styles.sourceOcr,
-                  ]}>
-                    {dc.matchSource === "both" ? "Both ✓"
-                      : dc.matchSource === "image" ? "Image AI"
-                      : dc.matchSource === "image:low" ? "Image ?"
-                      : "OCR"}
-                  </Text>
-                )}
-                <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
-              </View>
-              <View style={styles.cardRow}>
-                {selected?.image_url ? (
-                  <Image source={{ uri: selected.image_url }} style={styles.image} resizeMode="contain" />
-                ) : (
-                  <View style={styles.imagePlaceholder}>
-                    <Text style={styles.placeholderText}>?</Text>
-                  </View>
-                )}
-                <View style={styles.info}>
-                  <Text style={styles.name} numberOfLines={2}>{selected?.name ?? "Unknown"}</Text>
-                  {selected?.set_name && (
-                    <Text style={styles.setName} numberOfLines={1}>{selected.set_name}</Text>
-                  )}
-                  <View style={styles.badges}>
-                    {selected?.card_number && (
-                      <Text style={styles.badge}>#{selected.card_number}</Text>
-                    )}
-                    {selected?.rarity && (
-                      <Text style={styles.badge}>{selected.rarity}</Text>
-                    )}
-                  </View>
-                  <View style={styles.actions}>
-                    <TouchableOpacity
-                      style={styles.viewBtn}
-                      onPress={(e) => { e.stopPropagation?.(); selected && handleViewCard(selected, dc); }}
-                    >
-                      <Text style={styles.viewBtnText}>View Price</Text>
-                    </TouchableOpacity>
-                    {hasAlternates && (
-                      <TouchableOpacity
-                        style={styles.swapBtn}
-                        onPress={(e) => { e.stopPropagation?.(); setSwapTarget(dc); }}
-                      >
-                        <Text style={styles.swapBtnText}>
-                          Swap ({dc.searchResult.candidates.length})
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={({ item: dc, index }) => (
+          <ResultRow
+            dc={dc}
+            index={index}
+            isChecked={checkedIndices.has(dc.regionIndex)}
+            selected={getSelected(dc)}
+            onToggle={toggleCheck}
+            onView={handleViewCard}
+            onSwap={handleOpenSwap}
+          />
+        )}
         ListFooterComponent={
           multiScanLoading ? (
             <View style={styles.loadingFooter}>
@@ -286,6 +227,92 @@ export default function MultiResultsScreen() {
     </SafeAreaView>
   );
 }
+
+interface ResultRowProps {
+  dc: DetectedCard;
+  index: number;
+  isChecked: boolean;
+  selected: CardOut | undefined;
+  onToggle: (regionIndex: number) => void;
+  onView: (card: CardOut, dc: DetectedCard) => void;
+  onSwap: (dc: DetectedCard) => void;
+}
+
+const ResultRow = React.memo(function ResultRow({
+  dc, index, isChecked, selected, onToggle, onView, onSwap,
+}: ResultRowProps) {
+  const hasAlternates = dc.searchResult.candidates.length > 1;
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={() => onToggle(dc.regionIndex)}
+      style={[styles.card, isChecked && styles.cardChecked]}
+    >
+      <View style={styles.cardHeader}>
+        <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
+          {isChecked && <Text style={styles.checkboxMark}>{CHECKMARK}</Text>}
+        </View>
+        <Text style={styles.cardIndex}>Card {index + 1}</Text>
+        {dc.matchSource && dc.matchSource !== "none" && (
+          <Text style={[
+            styles.sourceBadge,
+            dc.matchSource === "both" ? styles.sourceBoth
+            : dc.matchSource === "image" ? styles.sourceImage
+            : dc.matchSource === "image:low" ? styles.sourceImageLow
+            : styles.sourceOcr,
+          ]}>
+            {dc.matchSource === "both" ? "Both ✓"
+              : dc.matchSource === "image" ? "Image AI"
+              : dc.matchSource === "image:low" ? "Image ?"
+              : "OCR"}
+          </Text>
+        )}
+        <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
+      </View>
+      <View style={styles.cardRow}>
+        {selected?.image_url ? (
+          <Image source={{ uri: selected.image_url }} style={styles.image} resizeMode="contain" />
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Text style={styles.placeholderText}>?</Text>
+          </View>
+        )}
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={2}>{selected?.name ?? "Unknown"}</Text>
+          {selected?.set_name && (
+            <Text style={styles.setName} numberOfLines={1}>{selected.set_name}</Text>
+          )}
+          <View style={styles.badges}>
+            {selected?.card_number && (
+              <Text style={styles.badge}>#{selected.card_number}</Text>
+            )}
+            {selected?.rarity && (
+              <Text style={styles.badge}>{selected.rarity}</Text>
+            )}
+          </View>
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={styles.viewBtn}
+              onPress={(e) => { e.stopPropagation?.(); selected && onView(selected, dc); }}
+            >
+              <Text style={styles.viewBtnText}>View Price</Text>
+            </TouchableOpacity>
+            {hasAlternates && (
+              <TouchableOpacity
+                style={styles.swapBtn}
+                onPress={(e) => { e.stopPropagation?.(); onSwap(dc); }}
+              >
+                <Text style={styles.swapBtnText}>
+                  Swap ({dc.searchResult.candidates.length})
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },

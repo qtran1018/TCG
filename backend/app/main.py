@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from app.config import get_settings
 from app.database import create_tables
 from app.api.v1 import router as v1_router
 from app.scrapers.base import BaseScraper
+from app.services import card_detector, card_embedder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -16,6 +18,14 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     logger.info("Starting TCG backend...")
     await create_tables()
+    # Preload heavy models so the first request doesn't pay cold-start cost.
+    # Run off the event loop since model load is CPU-bound and uses torch's blocking IO.
+    logger.info("Preloading ML models (CLIP + YOLO)...")
+    await asyncio.gather(
+        asyncio.to_thread(card_embedder.preload),
+        asyncio.to_thread(card_detector.preload),
+    )
+    logger.info("Models preloaded; backend ready.")
     yield
     logger.info("Shutting down TCG backend...")
     await BaseScraper.close()

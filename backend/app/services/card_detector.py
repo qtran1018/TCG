@@ -15,6 +15,12 @@ _MODEL_PATH = Path(os.getenv("YOLO_MODEL_PATH", "models/card_detector.pt"))
 # Loaded lazily on first detect call — None until model file exists.
 _yolo_model = None
 
+
+def preload() -> None:
+    """Eagerly load the YOLO model at startup so the first /detect call is fast."""
+    _get_yolo_model()
+
+
 # TCG portrait card W/H ≈ 0.716. Allow ±25% for camera angle / slight tilt.
 _ASPECT_MIN = 0.50
 _ASPECT_MAX = 0.95

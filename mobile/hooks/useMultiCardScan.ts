@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import TextRecognition, { TextRecognitionScript } from "@react-native-ml-kit/text-recognition";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
@@ -54,14 +54,17 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const {
     clearMultiScan,
     setMultiScanLoading,
     setMultiScanError,
     appendMultiScanCard,
-    language,
   } = useScanStore();
+
+  // Abort any in-flight scan stream when the hook unmounts (e.g. user navigates away).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const scan = useCallback(
     async (imageUri: string, game: Game, lang: Language, scanMode: ScanMode = "ocr"): Promise<boolean> => {
@@ -148,37 +151,52 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         // 5. Build crop base64 list + OCR hints for the combined /scan endpoint
         setProgress(`Identifying ${cropData.length} card${cropData.length !== 1 ? "s" : ""}...`);
 
-        const crops: string[] = [];
-        const ocrHints: ScanOcrHint[] = [];
+        // Read base64 + OCR each crop IN PARALLEL — was sequential before.
+        const cropResults = await Promise.all(
+          cropData.map(async ({ uri, cropX, cropY, cropW, cropH }) => {
+            // Always read crop as base64 (needed for image modes)
+            const cropB64 = await FileSystem.readAsStringAsync(uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
 
-        for (const { uri, cropX, cropY, cropW, cropH } of cropData) {
-          // Always read crop as base64 (needed for image modes)
-          const cropB64 = await FileSystem.readAsStringAsync(uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          crops.push(cropB64);
+            // Build OCR hint for this crop (used in ocr + combined modes)
+            let rawText: string | undefined;
+            if (scanMode !== "image") {
+              try {
+                const cropResult = await TextRecognition.recognize(uri, script);
+                let cropText = cropResult.blocks
+                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                  .map((b) => b.text)
+                  .join("\n");
+                cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
+                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game);
+                rawText = confidence.isCard ? cropText : undefined;
+              } catch (e) {
+                // One bad crop must not abort the entire scan — fall back to image-only signal.
+                console.warn("[MultiScan] crop OCR failed:", e);
+                rawText = undefined;
+              }
+            }
 
-          // Build OCR hint for this crop (used in ocr + combined modes)
-          let rawText: string | undefined;
-          if (scanMode !== "image") {
-            const cropResult = await TextRecognition.recognize(uri, script);
-            let cropText = cropResult.blocks
-              .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-              .map((b) => b.text)
-              .join("\n");
-            cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
-            const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game);
-            rawText = confidence.isCard ? cropText : undefined;
-          }
+            return { cropB64, rawText };
+          }),
+        );
 
-          ocrHints.push({ raw_text: rawText, language: lang, game });
-        }
+        const crops: string[] = cropResults.map((r) => r.cropB64);
+        const ocrHints: ScanOcrHint[] = cropResults.map((r) => ({
+          raw_text: r.rawText,
+          language: lang,
+          game,
+        }));
 
         // 6. Signal the store that streaming is starting
         setMultiScanLoading(true, regions.length);
 
         // 7. Stream results from the combined /scan endpoint
         const seenIds = new Set<number>();
+        abortRef.current?.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
 
         await api.scanStream(crops, ocrHints, scanMode, (item: ScanStreamResult) => {
           if (item.candidates.length === 0) return;
@@ -219,7 +237,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           };
 
           appendMultiScanCard(card);
-        });
+        }, controller.signal);
 
         setMultiScanLoading(false);
 
