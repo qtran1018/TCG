@@ -210,8 +210,10 @@ class PricechartingScraper(BaseScraper):
                 chart_data = json.loads(chart_match.group(1))
                 prices.price_history_ungraded = _parse_chart_series(chart_data.get("used", []))
                 prices.price_history_graded = _parse_chart_series(chart_data.get("graded", []))
-            except (json.JSONDecodeError, Exception):
-                pass
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse VGPC chart_data JSON for %s", pc_id)
+            except Exception:
+                logger.exception("Unexpected error parsing chart data for %s", pc_id)
 
         # Recent sales — collect from ALL hoverable/sortable tables (eBay + TCGPlayer)
         all_rows: list[tuple[str, str, float | None, str | None]] = []  # (date, title, price, url)

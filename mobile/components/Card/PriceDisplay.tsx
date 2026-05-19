@@ -1,14 +1,9 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
 import { COLORS } from "@/constants";
-import type { PriceOut, SaleRecord } from "@/services/api";
+import type { PriceOut } from "@/services/api";
 import { PriceChart } from "./PriceChart";
-
-function saleLinkLabel(url: string): string {
-  if (url.includes("tcgplayer")) return "TCGPlayer →";
-  if (url.includes("ebay")) return "eBay →";
-  return "View →";
-}
+import { saleLinkLabel } from "@/utils/saleLink";
 
 interface Props {
   price: PriceOut;

@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api, CardOut, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
+import { saleLinkLabel } from "@/utils/saleLink";
 
 interface CardPriceEntry {
   card: CardOut;
@@ -26,23 +27,26 @@ export default function BatchPricesScreen() {
   useEffect(() => {
     if (batchPriceCards.length === 0) return;
 
-    batchPriceCards.forEach((card, i) => {
-      api.getCard(card.id, scanType, language)
-        .then((data) => {
-          setEntries((prev) => {
-            const next = [...prev];
-            next[i] = { ...next[i], data, loading: false };
-            return next;
-          });
-        })
-        .catch(() => {
-          setEntries((prev) => {
-            const next = [...prev];
-            next[i] = { ...next[i], loading: false, error: true };
-            return next;
-          });
-        });
-    });
+    let cancelled = false;
+    (async () => {
+      const settled = await Promise.allSettled(
+        batchPriceCards.map((card) => api.getCard(card.id, scanType, language)),
+      );
+      if (cancelled) return;
+      // Single setState — replaces N independent updates that re-rendered the
+      // FlatList for every individual price resolution.
+      setEntries((prev) =>
+        prev.map((entry, i) => {
+          const res = settled[i];
+          if (res.status === "fulfilled") {
+            return { ...entry, data: res.value, loading: false };
+          }
+          return { ...entry, loading: false, error: true };
+        }),
+      );
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (batchPriceCards.length === 0) {
@@ -89,12 +93,6 @@ function CardPriceRow({ entry, scanType }: { entry: CardPriceEntry; scanType: st
   const openUrl = (url: string) => {
     Linking.openURL(url).catch(() => {});
   };
-
-  function saleLinkLabel(url: string): string {
-    if (url.includes("tcgplayer")) return "TCGPlayer →";
-    if (url.includes("ebay")) return "eBay →";
-    return "View →";
-  }
 
   return (
     <View style={styles.row}>

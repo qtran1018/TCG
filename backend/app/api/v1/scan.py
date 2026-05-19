@@ -13,7 +13,7 @@ from sqlalchemy import Float, cast, select
 from app.constants import VALID_GAMES, VALID_LANGUAGES
 from app.database import AsyncSessionLocal
 from app.models.card import Card
-from app.schemas.card import CardOut
+from app.schemas.card import CardOutLite
 from app.services.cache import search_cache
 from app.services import matcher as _matcher
 from app.services.card_embedder import compute_phash, embed_batch
@@ -46,14 +46,14 @@ class ScanRequest(BaseModel):
 
 class ScanResultItem(BaseModel):
     crop_index: int
-    candidates: list[CardOut]
+    candidates: list[CardOutLite]
     query_used: str
     match_source: str  # "ocr" | "image" | "both" | "none"
 
 
 class _ImageSearchCache(BaseModel):
     """Cached image-search payload — preserves the sim score so it doesn't have to be regex'd back out of query_used."""
-    candidates: list[CardOut]
+    candidates: list[CardOutLite]
     best_sim: float
     query_used: str
 
@@ -77,20 +77,20 @@ def _normalize_number(n: str) -> str:
 
 
 def _rrf_merge(
-    image_candidates: list[CardOut],
-    ocr_candidates: list[CardOut],
+    image_candidates: list[CardOutLite],
+    ocr_candidates: list[CardOutLite],
     ocr_query: str,
     image_sim: float,
     scan_mode: str,
-) -> tuple[list[CardOut], str]:
+) -> tuple[list[CardOutLite], str]:
     use_image = scan_mode in ("image", "combined")
     if scan_mode == "combined":
         has_good_ocr = bool(ocr_candidates)
         use_image = not has_good_ocr or image_sim >= _IMAGE_MIN_SIM_WITH_OCR
 
-    score_map: dict[int, tuple[float, CardOut]] = {}
+    score_map: dict[int, tuple[float, CardOutLite]] = {}
 
-    def add(candidates: list[CardOut], weight: float) -> None:
+    def add(candidates: list[CardOutLite], weight: float) -> None:
         for rank, card in enumerate(candidates):
             delta = weight / (rank + _RRF_K)
             if card.id in score_map:
@@ -123,7 +123,7 @@ async def _vector_search(
     embedding,
     query_phash: str | None,
     img_bytes: bytes,
-) -> tuple[list[CardOut], float, str]:
+) -> tuple[list[CardOutLite], float, str]:
     """pgvector nearest-neighbor search + phash re-ranking. Returns (candidates, best_sim, query_used)."""
     embedding_list = embedding.tolist()
     distance_col = cast(Card.embedding.op("<=>")(embedding_list), Float).label("distance")
@@ -156,7 +156,7 @@ async def _vector_search(
     best_sim = max((s for _, s, _, _ in scored), default=0.0)
     # Return top 5 as candidates for swap options, but only if above the floor.
     if best_sim >= _SIM_FLOOR:
-        candidates = [CardOut.model_validate(row) for _, _, _, row in scored[:5]]
+        candidates = [CardOutLite.model_validate(row) for _, _, _, row in scored[:5]]
     else:
         candidates = []
         logger.info("Image search: below floor (best_sim=%.3f, floor=%.2f) — no candidates", best_sim, _SIM_FLOOR)
@@ -181,7 +181,7 @@ async def _vector_search(
 async def _image_search_one(
     idx: int,
     img_bytes: bytes | None,
-) -> tuple[list[CardOut], float, str]:
+) -> tuple[list[CardOutLite], float, str]:
     """Per-crop image search. Caches by SHA-256 of crop bytes."""
     if img_bytes is None:
         return [], 0.0, "image:no_match"
@@ -195,7 +195,7 @@ async def _image_search_one(
             return item.candidates, item.best_sim, item.query_used
         m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
         return (
-            [CardOut(**c) for c in cached.get("candidates", [])],
+            [CardOutLite(**c) for c in cached.get("candidates", [])],
             float(m.group(1)) if m else 0.0,
             cached.get("query_used", "image:no_match"),
         )
@@ -210,12 +210,12 @@ async def _image_search_one(
 
 async def _batch_image_search(
     imgs: list[bytes | None],
-) -> dict[int, tuple[list[CardOut], float, str]]:
+) -> dict[int, tuple[list[CardOutLite], float, str]]:
     """
     Embed all uncached crops in one CLIP forward pass, then run pgvector searches in parallel.
     For cached crops, return immediately. Returns {crop_index: (candidates, best_sim, query_used)}.
     """
-    results: dict[int, tuple[list[CardOut], float, str]] = {}
+    results: dict[int, tuple[list[CardOutLite], float, str]] = {}
     to_embed: list[tuple[int, bytes]] = []
 
     for i, img_bytes in enumerate(imgs):
@@ -231,7 +231,7 @@ async def _batch_image_search(
                 # Legacy cache layout fallback.
                 m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
                 results[i] = (
-                    [CardOut(**c) for c in cached.get("candidates", [])],
+                    [CardOutLite(**c) for c in cached.get("candidates", [])],
                     float(m.group(1)) if m else 0.0,
                     cached.get("query_used", "image:no_match"),
                 )
@@ -259,7 +259,7 @@ async def _batch_image_search(
 
 async def _ocr_search_one(
     hint: OcrHint,
-) -> tuple[list[CardOut], str]:
+) -> tuple[list[CardOutLite], str]:
     """Search by OCR text. Opens its own DB session so callers can run concurrently."""
     if not hint.raw_text or not hint.raw_text.strip():
         return [], ""
@@ -273,7 +273,7 @@ async def _ocr_search_one(
                 language=language,
                 db=db,
             )
-        return [CardOut.model_validate(c) for c in cards], query_used
+        return [CardOutLite.model_validate(c) for c in cards], query_used
     except Exception:
         logger.exception("OCR search failed for text: %s", (hint.raw_text or "")[:60])
         return [], ""
@@ -282,8 +282,8 @@ async def _ocr_search_one(
 def _build_result(
     idx: int,
     scan_mode: str,
-    image: tuple[list[CardOut], float, str],
-    ocr: tuple[list[CardOut], str],
+    image: tuple[list[CardOutLite], float, str],
+    ocr: tuple[list[CardOutLite], str],
 ) -> ScanResultItem:
     image_candidates, image_sim, image_query = image
     ocr_candidates, ocr_query = ocr
@@ -341,10 +341,10 @@ async def scan(req: ScanRequest):
     do_image = req.scan_mode in ("image", "combined")
     do_ocr = req.scan_mode in ("ocr", "combined")
 
-    async def _empty_image(_i: int) -> tuple[list[CardOut], float, str]:
+    async def _empty_image(_i: int) -> tuple[list[CardOutLite], float, str]:
         return [], 0.0, "image:no_match"
 
-    async def _empty_ocr(_h: OcrHint) -> tuple[list[CardOut], str]:
+    async def _empty_ocr(_h: OcrHint) -> tuple[list[CardOutLite], str]:
         return [], ""
 
     async def per_crop(i: int) -> ScanResultItem:

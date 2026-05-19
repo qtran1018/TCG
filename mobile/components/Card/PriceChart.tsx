@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, Dimensions } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { COLORS } from "@/constants";
@@ -12,21 +12,24 @@ interface Props {
 const CHART_WIDTH = Dimensions.get("window").width - 48;
 
 export function PriceChart({ history, label }: Props) {
-  if (!history || history.length < 2) return null;
-
   // Show at most 24 most-recent points; keep every Nth label to avoid crowding
-  const points = history.slice(-24);
-  const labelStep = Math.ceil(points.length / 6);
-  const labels = points.map((p, i) =>
-    i % labelStep === 0 ? p.date.slice(0, 7) : ""
-  );
-  const prices = points.map((p) => p.price);
-  const maxPrice = Math.max(...prices);
-  const decimalPlaces = maxPrice < 1 ? 2 : maxPrice < 10 ? 1 : 0;
-  const formatYLabel = (v: string) => {
-    const n = Number(v);
-    return maxPrice < 1 ? `$${n.toFixed(2)}` : maxPrice < 10 ? `$${n.toFixed(1)}` : `$${n.toFixed(0)}`;
-  };
+  const chart = useMemo(() => {
+    if (!history || history.length < 2) return null;
+    const points = history.slice(-24);
+    const labelStep = Math.ceil(points.length / 6);
+    const labels = points.map((p, i) => (i % labelStep === 0 ? p.date.slice(0, 7) : ""));
+    const prices = points.map((p) => p.price);
+    const maxPrice = Math.max(...prices);
+    const decimalPlaces = maxPrice < 1 ? 2 : maxPrice < 10 ? 1 : 0;
+    const formatYLabel = (v: string) => {
+      const n = Number(v);
+      return maxPrice < 1 ? `$${n.toFixed(2)}` : maxPrice < 10 ? `$${n.toFixed(1)}` : `$${n.toFixed(0)}`;
+    };
+    return { labels, prices, decimalPlaces, formatYLabel };
+  }, [history]);
+
+  if (!chart) return null;
+  const { labels, prices, decimalPlaces, formatYLabel } = chart;
 
   return (
     <View style={styles.container}>

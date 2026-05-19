@@ -26,6 +26,14 @@ class CardOut(CardBase):
     model_config = {"from_attributes": True}
 
 
+class CardOutLite(CardBase):
+    """Slim variant of CardOut for list/stream responses — drops fields the
+    mobile UI never reads (phash, external_id, pricecharting_id, created_at)."""
+    id: int
+
+    model_config = {"from_attributes": True}
+
+
 class SaleRecord(BaseModel):
     date: str
     title: str

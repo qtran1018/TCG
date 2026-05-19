@@ -395,40 +395,37 @@ class CardMatcherService:
         await db.flush()
         return card
 
-    async def get_prices(self, card: Card, scan_type: str, language_override: str | None = None) -> dict | None:
-        if not card.name:
-            return None
+    def _build_pc_url(self, card: Card, language_override: str | None) -> str | None:
+        """Build PriceCharting URL for the given card and language.
 
-        # Build URL locally — never modify the card object to avoid unique constraint
-        # violations when duplicate rows exist in the DB.
-        # When language_override="ja", always rebuild with Japanese prefix — the stored URL
-        # (if any) is for the English version and must not be reused.
-        price_language = language_override or card.language
+        Never modifies the card object — duplicate rows in DB could trigger
+        unique constraint violations if we write back. For language_override="ja",
+        always rebuild with Japanese prefix since the stored URL (if any) is for
+        the English version.
+        """
         if language_override == "ja" and card.set_name and card.card_number:
-            pc_url = self.pc_scraper.build_game_url(
+            return self.pc_scraper.build_game_url(
                 card.name, card.set_name, card.card_number, card.game, "ja"
             )
-        else:
-            pc_url = card.pricecharting_url
-            if pc_url is None and card.set_name and card.card_number:
-                pc_url = self.pc_scraper.build_game_url(
-                    card.name, card.set_name, card.card_number, card.game, card.language
-                )
+        pc_url = card.pricecharting_url
+        if pc_url is None and card.set_name and card.card_number:
+            return self.pc_scraper.build_game_url(
+                card.name, card.set_name, card.card_number, card.game, card.language
+            )
+        return pc_url
 
-        if not pc_url:
-            return None
+    @staticmethod
+    def _price_cache_key(pc_url: str, scan_type: str, price_language: str) -> tuple[str, str]:
+        """Returns (pc_id, cache_key). Cache key includes scan_type and language
+        so same-number cards from different sets don't collide
+        (e.g. gastly-36 in Fossil vs Team Rocket; or EN vs JA Suicune)."""
+        parts = pc_url.rstrip("/").split("/")
+        pc_id = "_".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+        return pc_id, f"{pc_id}:{scan_type}:{price_language}"
 
-        # Use last two path segments (set-slug + card-slug) so same-number cards
-        # from different sets don't collide in the cache (e.g. gastly-36 in Fossil vs Team Rocket)
-        _parts = pc_url.rstrip("/").split("/")
-        pc_id = "_".join(_parts[-2:]) if len(_parts) >= 2 else _parts[-1]
-        cache_key = f"{pc_id}:{scan_type}:{price_language}"
-        cached = await price_cache.get(cache_key)
-        if cached:
-            return cached
-
-        prices = await self.pc_scraper.get_prices(pc_url)
-        price_dict = {
+    @staticmethod
+    def _serialize_prices(prices, pc_id: str, pc_url: str, scan_type: str) -> dict:
+        return {
             "pricecharting_id": pc_id,
             "pricecharting_url": pc_url,
             "scan_type": scan_type,
@@ -453,5 +450,22 @@ class CardMatcherService:
             ],
         }
 
+    async def get_prices(self, card: Card, scan_type: str, language_override: str | None = None) -> dict | None:
+        if not card.name:
+            return None
+
+        pc_url = self._build_pc_url(card, language_override)
+        if not pc_url:
+            return None
+
+        price_language = language_override or card.language
+        pc_id, cache_key = self._price_cache_key(pc_url, scan_type, price_language)
+
+        cached = await price_cache.get(cache_key)
+        if cached:
+            return cached
+
+        prices = await self.pc_scraper.get_prices(pc_url)
+        price_dict = self._serialize_prices(prices, pc_id, pc_url, scan_type)
         await price_cache.set(cache_key, ttl=settings.scrape_cache_ttl_prices, value=price_dict)
         return price_dict
