@@ -7,7 +7,6 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraScanner } from "@/components/Scanner/CameraScanner";
 import { GameToggle } from "@/components/UI/GameToggle";
-import { LanguageToggle } from "@/components/UI/LanguageToggle";
 import { ScanTypeToggle } from "@/components/UI/ScanTypeToggle";
 import { ScanModeToggle } from "@/components/UI/ScanModeToggle";
 import type { ScanMode } from "@/hooks/useMultiCardScan";
@@ -24,7 +23,7 @@ export default function ScanScreen() {
   const [certInput, setCertInput] = useState("");
   const [scanMode, setScanMode] = useState<ScanMode>("ocr");
 
-  const { game, language, scanType, setGame, setLanguage, setScanType, clearMultiScan, setMultiScanLoading } =
+  const { game, scanType, setGame, setScanType, clearMultiScan, setMultiScanLoading } =
     useScanStore();
 
   const { searchByCert, isSearching } = useCardSearch();
@@ -40,9 +39,9 @@ export default function ScanScreen() {
       setMultiScanLoading(true);
       setMode("settings");
       router.push("/multi-results");
-      await multiScan(uri, game, language, scanMode);
+      await multiScan(uri, game, scanMode);
     },
-    [multiScan, game, language, scanMode, clearMultiScan, setMultiScanLoading, router],
+    [multiScan, game, scanMode, clearMultiScan, setMultiScanLoading, router],
   );
 
   const handlePSALookup = useCallback(async () => {
@@ -66,7 +65,7 @@ export default function ScanScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
-          <CameraScanner language={language} onCapture={handleMultiCapture} isProcessing={isLoading} />
+          <CameraScanner onCapture={handleMultiCapture} isProcessing={isLoading} />
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
             <Text style={styles.backBtnText}>✕  Close Camera</Text>
           </TouchableOpacity>
@@ -90,10 +89,6 @@ export default function ScanScreen() {
 
             <Section label="Game">
               <GameToggle value={game} onChange={setGame} />
-            </Section>
-
-            <Section label="Language">
-              <LanguageToggle value={language} onChange={setLanguage} />
             </Section>
 
             <Section label="Scan Type">

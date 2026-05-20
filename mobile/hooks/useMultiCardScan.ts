@@ -7,7 +7,7 @@ import { detectCardRegions, boxesToRegions } from "@/utils/detectCards";
 import { detectCardsWithYolo } from "@/utils/yoloDetector";
 import { assessCardConfidence } from "@/utils/cardConfidence";
 import { useScanStore } from "@/store/scanStore";
-import type { Game, Language } from "@/constants";
+import type { Game } from "@/constants";
 import type { ScanOcrHint, ScanStreamResult } from "@/services/api";
 import type { CardRegion } from "@/utils/detectCards";
 import type { DetectedCard } from "@/types/scan";
@@ -19,18 +19,17 @@ export type { DetectedCard } from "@/types/scan";
 export type { MultiScanResult } from "@/types/scan";
 
 interface UseMultiCardScanReturn {
-  scan: (imageUri: string, game: Game, language: Language, scanMode?: ScanMode) => Promise<boolean>;
+  scan: (imageUri: string, game: Game, scanMode?: ScanMode) => Promise<boolean>;
   isProcessing: boolean;
   progress: string;
   error: string | null;
 }
 
-function mlKitScript(language: Language): TextRecognitionScript {
-  return language === "ja" ? TextRecognitionScript.JAPANESE : TextRecognitionScript.LATIN;
-}
-
-function normalizeNumber(n: string): string {
-  return n.replace(/^0+/, "") || "0";
+// Katakana U+30A0–U+30FF and hiragana U+3041–U+3096 are exclusive to Japanese.
+// EN cards never contain kana — a single match is sufficient to identify the crop as JP.
+const KANA_RE = /[゠-ヿぁ-ゖ]/;
+function detectCropLanguage(text: string): "en" | "ja" {
+  return KANA_RE.test(text) ? "ja" : "en";
 }
 
 function augmentWithNumberRegion(
@@ -67,7 +66,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const scan = useCallback(
-    async (imageUri: string, game: Game, lang: Language, scanMode: ScanMode = "ocr"): Promise<boolean> => {
+    async (imageUri: string, game: Game, scanMode: ScanMode = "ocr"): Promise<boolean> => {
       setIsProcessing(true);
       setError(null);
 
@@ -80,10 +79,10 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
         );
 
-        // 2. OCR full image (needed for augmentation + OCR mode)
+        // 2. OCR full image with JAPANESE script — it returns both Latin and kana,
+        //    so one pass covers EN and JP cards.
         setProgress("Scanning for cards...");
-        const script = mlKitScript(lang);
-        const fullResult = await TextRecognition.recognize(resized.uri, script);
+        const fullResult = await TextRecognition.recognize(resized.uri, TextRecognitionScript.JAPANESE);
         const allBlocks = fullResult.blocks
           .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
           .map((b) => ({ text: b.text, frame: b.frame as any }));
@@ -159,33 +158,35 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
               encoding: FileSystem.EncodingType.Base64,
             });
 
-            // Build OCR hint for this crop (used in ocr + combined modes)
+            // Build OCR hint for this crop (used in ocr + combined modes).
+            // JAPANESE script returns both Latin and kana — one pass handles EN and JP.
             let rawText: string | undefined;
-            if (scanMode !== "image") {
-              try {
-                const cropResult = await TextRecognition.recognize(uri, script);
-                let cropText = cropResult.blocks
-                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                  .map((b) => b.text)
-                  .join("\n");
-                cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
-                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game, lang);
+            let cropLang: "en" | "ja" = "en";
+            try {
+              const cropResult = await TextRecognition.recognize(uri, TextRecognitionScript.JAPANESE);
+              let cropText = cropResult.blocks
+                .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                .map((b) => b.text)
+                .join("\n");
+              cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
+              cropLang = detectCropLanguage(cropText);
+              if (scanMode !== "image") {
+                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game, cropLang);
                 rawText = confidence.isCard ? cropText : undefined;
-              } catch (e) {
-                // One bad crop must not abort the entire scan — fall back to image-only signal.
-                console.warn("[MultiScan] crop OCR failed:", e);
-                rawText = undefined;
               }
+            } catch (e) {
+              // One bad crop must not abort the entire scan — fall back to image-only signal.
+              console.warn("[MultiScan] crop OCR failed:", e);
             }
 
-            return { cropB64, rawText };
+            return { cropB64, rawText, cropLang };
           }),
         );
 
         const crops: string[] = cropResults.map((r) => r.cropB64);
         const ocrHints: ScanOcrHint[] = cropResults.map((r) => ({
           raw_text: r.rawText,
-          language: lang,
+          language: r.cropLang,
           game,
         }));
 
@@ -213,7 +214,8 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           let kanaName: string | undefined;
           let setTotal: number | undefined;
           let cardNumber: string | undefined;
-          if (lang === "ja" && rawText) {
+          const cropLang = ocrHints[item.crop_index]?.language ?? "en";
+          if (cropLang === "ja" && rawText) {
             const kanaMatch = rawText.match(/[゠-ヿー]+/g);
             if (kanaMatch) kanaName = kanaMatch.reduce((a, b) => (a.length >= b.length ? a : b), "");
             const numMatch = rawText.match(/(\d+)\/(\d+)/);

@@ -80,8 +80,8 @@ async def batch_prices(req: BatchPricesRequest, db: AsyncSession = Depends(get_d
             ja_card_number = req.ja_card_numbers.get(card_id) if req.ja_card_numbers else None
             price_dict = await _matcher.get_prices(
                 card, req.scan_type,
-                language_override=req.language,
-                ja_card_number=ja_card_number if req.language == "ja" else None,
+                language_override=card.language,
+                ja_card_number=ja_card_number if card.language == "ja" else None,
             )
         except Exception as e:
             logger.exception("Batch price fetch failed for card %d", card_id)

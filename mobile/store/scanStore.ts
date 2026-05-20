@@ -1,11 +1,10 @@
 import { create } from "zustand";
-import type { Game, Language, ScanType } from "@/constants";
+import type { Game, ScanType } from "@/constants";
 import type { CardOut } from "@/services/api";
 import type { BatchPriceCard, DetectedCard, MultiScanResult } from "@/types/scan";
 
 interface ScanState {
   game: Game;
-  language: Language;
   scanType: ScanType;
   psaCertInput: string;
 
@@ -19,7 +18,6 @@ interface ScanState {
   batchPriceCards: BatchPriceCard[];
 
   setGame: (game: Game) => void;
-  setLanguage: (language: Language) => void;
   setScanType: (scanType: ScanType) => void;
   setPsaCertInput: (cert: string) => void;
   setMultiScanResult: (result: MultiScanResult | null) => void;
@@ -36,7 +34,6 @@ interface ScanState {
 
 export const useScanStore = create<ScanState>((set) => ({
   game: "pokemon",
-  language: "en",
   scanType: "raw",
   psaCertInput: "",
   multiScanResult: null,
@@ -46,7 +43,6 @@ export const useScanStore = create<ScanState>((set) => ({
   batchPriceCards: [],
 
   setGame: (game) => set({ game }),
-  setLanguage: (language) => set({ language }),
   setScanType: (scanType) => set({ scanType }),
   setPsaCertInput: (psaCertInput) => set({ psaCertInput }),
   setMultiScanResult: (multiScanResult) => set({ multiScanResult, multiScanLoading: false }),

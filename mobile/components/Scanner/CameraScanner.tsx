@@ -3,15 +3,12 @@ import { StyleSheet, View, TouchableOpacity, Text, ActivityIndicator, Alert } fr
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "@/constants";
-import type { Language } from "@/constants";
-
 interface Props {
-  language: Language;
   onCapture: (uri: string) => void;
   isProcessing: boolean;
 }
 
-export function CameraScanner({ language, onCapture, isProcessing }: Props) {
+export function CameraScanner({ onCapture, isProcessing }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -51,9 +48,7 @@ export function CameraScanner({ language, onCapture, isProcessing }: Props) {
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
       <View style={styles.footer}>
-        <Text style={styles.hint}>
-          {language === "ja" ? "カードを撮影する" : "Capture all cards in frame"}
-        </Text>
+        <Text style={styles.hint}>Capture all cards in frame</Text>
         <TouchableOpacity
           style={[styles.shutterBtn, isProcessing && styles.shutterDisabled]}
           onPress={handleCapture}

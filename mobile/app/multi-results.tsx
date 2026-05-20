@@ -20,7 +20,6 @@ export default function MultiResultsScreen() {
     multiScanLoading,
     multiScanError,
     multiScanTotalRegions,
-    language,
     setBatchPriceCards,
   } = useScanStore();
 
@@ -42,12 +41,12 @@ export default function MultiResultsScreen() {
         pathname: "/card/[id]",
         params: {
           id: String(card.id),
-          language,
-          ...(dc?.cardNumber && { card_number: dc.cardNumber }),
+          language: card.language,
+          ...(card.language === "ja" && dc?.cardNumber && { card_number: dc.cardNumber }),
         },
       });
     },
-    [router, language],
+    [router],
   );
 
   const handleSwapSelect = useCallback((dc: DetectedCard, card: CardOut) => {
@@ -104,7 +103,6 @@ export default function MultiResultsScreen() {
       <ResultRow
         dc={dc}
         index={index}
-        language={language}
         isChecked={checkedIndices.has(dc.regionIndex)}
         selected={getSelected(dc)}
         onToggle={toggleCheck}
@@ -112,7 +110,7 @@ export default function MultiResultsScreen() {
         onSwap={handleOpenSwap}
       />
     ),
-    [language, checkedIndices, getSelected, toggleCheck, handleViewCard, handleOpenSwap],
+    [checkedIndices, getSelected, toggleCheck, handleViewCard, handleOpenSwap],
   );
 
   // Loading state — navigated here before scan completed, no cards yet
@@ -252,7 +250,6 @@ export default function MultiResultsScreen() {
 interface ResultRowProps {
   dc: DetectedCard;
   index: number;
-  language: string;
   isChecked: boolean;
   selected: CardOut | undefined;
   onToggle: (regionIndex: number) => void;
@@ -261,10 +258,10 @@ interface ResultRowProps {
 }
 
 const ResultRow = React.memo(function ResultRow({
-  dc, index, language, isChecked, selected, onToggle, onView, onSwap,
+  dc, index, isChecked, selected, onToggle, onView, onSwap,
 }: ResultRowProps) {
   const displayCardNumber =
-    language === "ja" && dc.cardNumber
+    selected?.language === "ja" && dc.cardNumber
       ? dc.setTotal ? `${dc.cardNumber}/${dc.setTotal}` : dc.cardNumber
       : selected?.card_number;
   const hasAlternates = dc.searchResult.candidates.length > 1;

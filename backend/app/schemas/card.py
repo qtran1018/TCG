@@ -107,7 +107,6 @@ class DetectResult(BaseModel):
 class BatchPricesRequest(BaseModel):
     card_ids: list[int]
     scan_type: str = "raw"
-    language: str | None = None
     ja_card_numbers: dict[int, str] | None = None  # card_id → OCR-read JP card number
 
 

@@ -27,7 +27,7 @@ const openUrl = (url: string) => {
 
 export default function BatchPricesScreen() {
   const router = useRouter();
-  const { batchPriceCards, scanType, language } = useScanStore();
+  const { batchPriceCards, scanType } = useScanStore();
   const [entries, setEntries] = useState<CardPriceEntry[]>(
     batchPriceCards.map(({ card, jaCardNumber }) => ({
       card, jaCardNumber, data: null, loading: true, error: false,
@@ -52,7 +52,6 @@ export default function BatchPricesScreen() {
         items = await api.batchPrices(
           batchPriceCards.map((bpc) => bpc.card.id),
           scanType,
-          language,
           Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
         );
       } catch (e) {
@@ -81,9 +80,9 @@ export default function BatchPricesScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: CardPriceEntry }) => (
-      <CardPriceRow entry={item} scanType={scanType} language={language} />
+      <CardPriceRow entry={item} scanType={scanType} />
     ),
-    [scanType, language],
+    [scanType],
   );
 
   if (batchPriceCards.length === 0) {
@@ -125,11 +124,9 @@ export default function BatchPricesScreen() {
 const CardPriceRow = React.memo(function CardPriceRow({
   entry,
   scanType,
-  language,
 }: {
   entry: CardPriceEntry;
   scanType: string;
-  language: string;
 }) {
   const { card, jaCardNumber, data, loading, error } = entry;
   const price = data?.price;
@@ -153,7 +150,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
         {(data?.card?.set_name ?? card.set_name) && <Text style={styles.cardSet} numberOfLines={1}>{data?.card?.set_name ?? card.set_name}</Text>}
         <View style={styles.badges}>
           {(jaCardNumber ?? card.card_number) && (
-            <Text style={styles.badge}>#{language === "ja" && jaCardNumber ? jaCardNumber : card.card_number}</Text>
+            <Text style={styles.badge}>#{card.language === "ja" && jaCardNumber ? jaCardNumber : card.card_number}</Text>
           )}
           {card.rarity && <Text style={styles.badge}>{card.rarity}</Text>}
         </View>

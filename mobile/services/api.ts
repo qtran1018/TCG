@@ -160,13 +160,11 @@ export const api = {
   async batchPrices(
     cardIds: number[],
     scanType: ScanType,
-    language?: string,
     jaCardNumbers?: Record<number, string>,
   ): Promise<BatchPricesItem[]> {
     const { data } = await client.post<{ items: BatchPricesItem[] }>("/cards/prices", {
       card_ids: cardIds,
       scan_type: scanType,
-      ...(language && { language }),
       ...(jaCardNumbers && Object.keys(jaCardNumbers).length > 0 && { ja_card_numbers: jaCardNumbers }),
     });
     return data.items;
