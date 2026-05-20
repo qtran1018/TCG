@@ -320,7 +320,13 @@ class CardMatcherService:
             return []
 
         # ── Standard name search (ilike) ───────────────────────────────────────
+        # Priority 0: exact name match ("Gastly" == "Gastly")
+        # Priority 1: partial match ("Gastly" in "Sabrina's Gastly")
+        # This prevents partial-match cards from outranking exact-match cards.
+        exact_match = Card.name.ilike(name)
         name_match = Card.name.ilike(f"%{name}%")
+        name_priority = case((exact_match, 0), else_=1).label("name_priority")
+
         if card_number:
             num_match = Card.card_number.ilike(f"%{card_number}%")
             # Name is required; number only re-ranks within name matches. Previously
@@ -328,19 +334,37 @@ class CardMatcherService:
             # (any card whose number contained the digits) outrank actual name
             # matches — e.g. JP Clauncher #3 surfaced Charizard #3 because no EN
             # Clauncher has number 3 and the number-only branch ranked higher.
-            priority = case((num_match, 0), else_=1).label("priority")
+            num_priority = case((num_match, 0), else_=1).label("num_priority")
             stmt = (
-                base.add_columns(priority)
+                base.add_columns(name_priority, num_priority)
                 .where(name_match)
-                .order_by(priority)
+                .order_by(name_priority, num_priority)
                 .limit(10)
             )
             rows = (await db.execute(stmt)).all()
             if rows:
                 return [r[0] for r in rows]
         else:
-            result = await db.execute(base.where(name_match).limit(10))
-            results = list(result.scalars().all())
+            # When no card number is available, boost cards whose set_total matches
+            # the denominator from OCR (e.g. set_total=165 for Pokémon Card 151).
+            # Without this, ORDER BY id returns oldest cards first, burying newer sets.
+            set_total = hints.get("set_total")
+            if set_total:
+                st_match = case((Card.set_total == set_total, 0), else_=1).label("st_priority")
+                stmt = (
+                    base.add_columns(name_priority, st_match)
+                    .where(name_match)
+                    .order_by(name_priority, st_match, Card.id.desc())
+                    .limit(10)
+                )
+                rows = (await db.execute(stmt)).all()
+                if rows:
+                    return [r[0] for r in rows]
+            result = await db.execute(
+                base.where(name_match).add_columns(name_priority)
+                .order_by(name_priority, Card.id.desc()).limit(10)
+            )
+            results = [r[0] for r in result.all()]
             if results:
                 return results
 

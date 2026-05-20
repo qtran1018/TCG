@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
@@ -106,6 +107,9 @@ def _parse_chart_series(series: list) -> list[PricePoint]:
 
 def _slugify(text: str) -> str:
     text = text.lower().strip()
+    # Decompose accented chars (é→e+combining accent) then drop combining marks
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"[&+']", "", text)
     text = re.sub(r"[^a-z0-9\s-]", "", text)
     text = re.sub(r"\s+", "-", text)
