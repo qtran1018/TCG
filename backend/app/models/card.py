@@ -16,6 +16,7 @@ class Card(Base):
     set_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     set_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     card_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    set_total: Mapped[int | None] = mapped_column(Integer, nullable=True)   # JP set size; used for OCR disambiguation
     rarity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url_hi: Mapped[str | None] = mapped_column(Text, nullable=True)

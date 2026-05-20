@@ -232,8 +232,107 @@ async def migrate_embedding_column(conn):
 # Main
 # ---------------------------------------------------------------------------
 
-async def main(dataset_path: Path | None, db_url: str, api_key: str | None, force: bool):
+async def embed_ja_cards(db_url: str, force: bool) -> None:
+    """
+    Embed all language='ja' cards in the DB using their image_url (TCGCollector CDN).
+    Concurrency limited to avoid hammering the CDN.
+    """
     import aiohttp
+
+    CONCURRENCY = 8   # polite to TCGCollector CDN
+
+    conn = await asyncpg.connect(db_url)
+    try:
+        await migrate_embedding_column(conn)
+
+        if force:
+            rows = await conn.fetch(
+                "SELECT id, name, card_number, image_url FROM cards WHERE language='ja' AND image_url IS NOT NULL"
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT id, name, card_number, image_url FROM cards "
+                "WHERE language='ja' AND image_url IS NOT NULL AND embedding IS NULL"
+            )
+
+        logger.info("%d JP cards to embed", len(rows))
+        if not rows:
+            logger.info("Nothing to do — all JP cards already embedded. Use --force to re-embed.")
+            return
+
+        failures: list[dict] = []
+        sem = asyncio.Semaphore(CONCURRENCY)
+
+        async def fetch_one(session, row) -> tuple[int, bytes | None]:
+            async with sem:
+                url = row["image_url"]
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status == 200:
+                            return row["id"], await resp.read()
+                        logger.warning("HTTP %d for card %d: %s", resp.status, row["id"], url)
+                except Exception as e:
+                    logger.warning("Download failed for card %d: %s", row["id"], e)
+                return row["id"], None
+
+        embedded = 0
+        async with aiohttp.ClientSession() as session:
+            for i in range(0, len(rows), BATCH_SIZE):
+                batch_rows = rows[i: i + BATCH_SIZE]
+                results = await asyncio.gather(*[fetch_one(session, r) for r in batch_rows])
+
+                valid: list[tuple[int, bytes]] = [(db_id, img) for db_id, img in results if img]
+                for db_id, _ in results:
+                    if not any(vid == db_id for vid, _ in valid):
+                        row = next(r for r in batch_rows if r["id"] == db_id)
+                        failures.append({"id": db_id, "name": row["name"], "url": row["image_url"]})
+
+                if not valid:
+                    continue
+
+                try:
+                    vecs = embed_batch([img for _, img in valid])
+                    for (db_id, _), vec in zip(valid, vecs):
+                        await conn.execute(
+                            "UPDATE cards SET embedding = $1::vector WHERE id = $2",
+                            str(vec.tolist()), db_id,
+                        )
+                    embedded += len(valid)
+                except Exception as e:
+                    logger.warning("embed_batch failed at i=%d: %s", i, e)
+                    for db_id, _ in valid:
+                        row = next(r for r in batch_rows if r["id"] == db_id)
+                        failures.append({"id": db_id, "name": row["name"], "reason": str(e)})
+
+                if (i // BATCH_SIZE + 1) % 5 == 0 or i + BATCH_SIZE >= len(rows):
+                    logger.info("  Embedded %d / %d (failures so far: %d)",
+                                min(i + BATCH_SIZE, len(rows)), len(rows), len(failures))
+
+        count = await conn.fetchval("SELECT COUNT(*) FROM cards WHERE embedding IS NOT NULL")
+        lists = min(100, max(1, int(count) // 100))
+        logger.info("Rebuilding IVFFlat index (lists=%d, total_embedded=%d)...", lists, count)
+        await conn.execute("DROP INDEX IF EXISTS ix_cards_embedding_ivfflat")
+        await conn.execute(
+            f"CREATE INDEX ix_cards_embedding_ivfflat "
+            f"ON cards USING ivfflat (embedding vector_cosine_ops) WITH (lists = {lists})"
+        )
+        logger.info("Done. embedded=%d  failures=%d", embedded, len(failures))
+        if failures:
+            fail_path = _BACKEND_ROOT / "models" / "jp_embedding_failures.json"
+            with open(fail_path, "w") as f:
+                json.dump(failures, f, indent=2)
+            logger.info("Failure report: %s", fail_path)
+
+    finally:
+        await conn.close()
+
+
+async def main(dataset_path: Path | None, db_url: str, api_key: str | None, force: bool, language: str):
+    import aiohttp
+
+    if language == "ja":
+        await embed_ja_cards(db_url, force)
+        return
 
     logger.info("Fetching all Pokemon cards from pokemontcg.io...")
     all_cards = await fetch_all_ptcg_cards(api_key)
@@ -383,10 +482,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Re-embed cards that already have embeddings",
     )
+    parser.add_argument(
+        "--language",
+        default="en",
+        choices=["en", "ja"],
+        help="Which card language to embed. 'ja' downloads from TCGCollector CDN instead of pokemontcg.io",
+    )
     args = parser.parse_args()
 
     if args.dataset and not args.dataset.exists():
         logger.error("Dataset path not found: %s", args.dataset)
         sys.exit(1)
 
-    asyncio.run(main(args.dataset, args.db_url, args.api_key, args.force))
+    asyncio.run(main(args.dataset, args.db_url, args.api_key, args.force, args.language))
