@@ -12,7 +12,6 @@ import { saleLinkLabel } from "@/utils/saleLink";
 
 interface CardPriceEntry {
   card: CardOut;
-  jaImageUrl?: string;
   jaCardNumber?: string;
   data: CardWithPrice | null;
   loading: boolean;
@@ -30,8 +29,8 @@ export default function BatchPricesScreen() {
   const router = useRouter();
   const { batchPriceCards, scanType, language } = useScanStore();
   const [entries, setEntries] = useState<CardPriceEntry[]>(
-    batchPriceCards.map(({ card, jaImageUrl, jaCardNumber }) => ({
-      card, jaImageUrl, jaCardNumber, data: null, loading: true, error: false,
+    batchPriceCards.map(({ card, jaCardNumber }) => ({
+      card, jaCardNumber, data: null, loading: true, error: false,
     })),
   );
 
@@ -70,9 +69,6 @@ export default function BatchPricesScreen() {
           }
           return {
             ...entry,
-            // Backend resolves JP image per card (incl. swapped); prefer it over the
-            // OCR-derived jaImageUrl that only applies to the original top candidate.
-            jaImageUrl: item.ja_image_url ?? entry.jaImageUrl,
             data: { card: item.card ?? entry.card, price: item.price },
             loading: false,
           };
@@ -135,7 +131,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
   scanType: string;
   language: string;
 }) {
-  const { card, jaImageUrl, jaCardNumber, data, loading, error } = entry;
+  const { card, jaCardNumber, data, loading, error } = entry;
   const price = data?.price;
   const rawPrice = scanType === "psa" ? price?.price_graded_10 : price?.price_loose;
   const lastSale = price?.recent_sales?.[0];
@@ -143,8 +139,8 @@ const CardPriceRow = React.memo(function CardPriceRow({
   return (
     <View style={styles.row}>
       <View style={styles.cardImageWrap}>
-        {(jaImageUrl ?? data?.card?.image_url ?? card.image_url) ? (
-          <Image source={{ uri: jaImageUrl ?? data?.card?.image_url ?? card.image_url! }} style={styles.cardImage} resizeMode="contain" />
+        {(data?.card?.image_url ?? card.image_url) ? (
+          <Image source={{ uri: data?.card?.image_url ?? card.image_url! }} style={styles.cardImage} resizeMode="contain" />
         ) : (
           <View style={[styles.cardImage, styles.imagePlaceholder]}>
             <Text style={styles.placeholderText}>?</Text>

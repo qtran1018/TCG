@@ -42,28 +42,11 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 - On-device YOLO detection (`mobile/utils/yoloDetector.ts`) is scaffolded but disabled — `detectCardsWithYolo` always returns null until `card_detector.tflite` is present. TFLite model export was attempted but not completed; falls back to backend `/detect`.
 - Image AI mode similarity scores for some cards (e.g. Lotad) are around 0.43 — below the `_SIM_FLOOR = 0.50` cutoff, so they return no image candidates. Combined/OCR mode reliably identifies these cards. Image AI works best for visually distinctive cards.
 
-### Japanese card swap propagation (JAPANESE ONLY — does not affect English flow)
+### Japanese card swap propagation — RESOLVED (v11, 2026-05-20)
 
-**Fixed (detail page)**: When a user swapped a candidate in `multi-results`, `handleViewCard` forwarded the *original* OCR-derived params (`kana_name`, `card_number`, `set_total`) to the card detail route. The backend's `find_ja_image` then used the original OCR data to look up the JP image, returning the same (wrong) image as before the swap — e.g. swapping "Shiny Doduo" → "Doduo" still showed the Shiny Doduo JP art on the detail page.
+All swap candidates now show the correct JP art because JP cards are first-class DB records (`language='ja'`). Each candidate's `card.image_url` IS the correct JP art from TCGCollector — no overlay lookup, no name matching, no EN/JP number translation needed.
 
-Resolved by detecting swap in `handleViewCard` (`isSwapped = card.id !== dc.searchResult.candidates[0]?.id`) and suppressing the OCR params when swapped. The backend then falls through to `find_ja_image_by_name_en(swapped_card.name, ...)` with no number filter, which returns a JP entry that matches the swapped card's English name.
-
-**English isolation guaranteed**: `kanaName`, `setTotal`, `cardNumber` on `DetectedCard` are populated *only* inside `if (lang === "ja")` in `useMultiCardScan.ts`. For English scans these fields are always `undefined`, so guards in `handleViewCard` short-circuit to "skip" regardless of swap state. The change is a strict no-op for `language === "en"`.
-
-**Swap modal JP images — investigated and root-caused**: Attempted to show the correct JP image for every swap candidate in the modal by passing each EN candidate's `card_number` to `find_ja_image_by_name_en`. This appeared to work initially but produced a regression: all swap candidates showed the same image (e.g. "Shiny Doduo" for every Doduo variant).
-
-Root cause: **EN card numbers and JP card numbers are completely different numbering systems.** EN sets combine and reorder multiple JP sets alphabetically. Example: EN "BREAKthrough" Doduo #115 → JP "Collection Y" Doduo #46 — no relationship. The only EN sets where numbers match JP are a handful of 1:1 releases (e.g. "Shining Legends", "Pokémon Card 151"). When `c.card_number` (EN) doesn't match any JP entry, `find_ja_image_by_name_en` was falling through to `candidates[0]` — the newest-scraped JP entry for that name, which happened to be Shiny Doduo.
-
-Added `strict=True` parameter to `find_ja_image_by_name_en`: when `card_number` is provided but no match exists, return `None` instead of the name-only fallback. Swap candidates without a confirmed JP entry now show EN art rather than wrong JP art.
-
-**Fundamental limitation**: The EN DB (pokemontcg.io) and TCGCollector JP data have no shared key — no card_id, no set code, no card number links them. The only intersection is the Pokémon name. Reliably showing JP art for swap candidates is not possible with the current EN-card-backed architecture. See next steps below for the full solution.
-
-**Relevant files:**
-- `mobile/app/multi-results.tsx` — `handleViewCard` (suppresses OCR params on swap)
-- `mobile/app/card/[id].tsx` — `displayCardNumber` falls back to `card.card_number` when route params absent
-- `backend/app/api/v1/cards.py` — `get_card`: `find_ja_image(kana_name, ...)` → `find_ja_image_by_name_en(card.name, ...)` fallback chain; batch prices uses `card.card_number` as fallback for JP lookup with `strict=True`
-- `backend/app/api/v1/scan.py` — per-candidate JP lookup with `strict=True, card_number=c.card_number`
-- `backend/app/services/ja_image_lookup.py` — `strict` param: skips name-only fallback when set_total/card_number provided but unmatched
+**Root cause (historical)**: EN and JP card numbers are completely different numbering systems. EN sets combine and reorder multiple JP sets alphabetically (EN "BREAKthrough" Doduo #115 ≠ JP "Collection Y" Doduo #46). The old overlay approach tried to map EN card numbers to JP TCGCollector entries and fell back to the first-by-name JP entry when unmatched — always returning "Shiny Doduo" (the newest JP Doduo in scrape order) for all Doduo variants. Fixed by loading JP cards as independent DB records.
 
 ## Completed Features (Multi-card)
 - Camera mode: capture full image → OCR → detect card regions → crop each → re-OCR → confidence check → batch search backend → results UI
@@ -296,67 +279,59 @@ All of the following are correctly extracted and searched:
 - Detect individual card bounding boxes, crop, OCR, price each one
 - UI to review all detected cards at once
 
-### 4. Japanese card support — first-class JP records (IN PROGRESS)
+### 4. Japanese card support — first-class JP records ✅ COMPLETE (2026-05-20)
 
-#### Current state (EN-backed architecture)
-JP scanning currently works by identifying cards against the EN DB and overlaying JP images from TCGCollector JSON. This works for OCR but has fundamental limitations:
+JP and EN cards are fully independent entities. No overlay lookups, no shared card IDs.
 
-- **Swap candidates always show EN art or wrong JP art** — EN and JP card numbers use completely different numbering systems (EN sets combine and reorder multiple JP sets). There is no shared key between the EN DB and TCGCollector JP data. Passing `c.card_number` (EN) to `find_ja_image_by_name_en` hits wrong entries or returns `None` (strict mode).
-- **Image AI cannot find JP cards** — pgvector only has EN card embeddings; JP scans in Image AI mode return EN candidates.
-- **JP-exclusive cards unidentifiable** — promos and JP-only sets have no EN DB record.
-- **PriceCharting set slug guessed from EN set name** — `pokemon-japanese-{en_set_slug}` sometimes hits the wrong PriceCharting page.
+#### What works now
+- ✅ JP OCR: ML Kit Japanese script, kana→EN translation, searches `language='ja'` DB records directly
+- ✅ JP image AI: pgvector searches `language='ja'` embeddings — 27,255 JP cards embedded
+- ✅ Correct JP art for all candidates including swaps — `card.image_url` IS the JP art from TCGCollector
+- ✅ JP-exclusive cards identifiable (promos, JP-only sets all in DB)
+- ✅ JP card numbers are correct (from TCGCollector, not derived from EN numbering)
+- ✅ PriceCharting URL uses JP set_name slug from the card's own DB record
 
-#### Target architecture: JP cards as first-class DB records
+#### TCGCollector data
+- **27,255 JP cards** across 426 sets, all eras 1996–present
+- Stored in `backend/app/data/tcgcollector_ja.json` and loaded into `cards` table as `language='ja'`
+- Each card: `name_en`, `set_name`, `card_number`, `card_number_raw`, `set_total`, `image_url`, `external_id=tcgcollector-{card_id}`
+- Data verified complete: no genuine gaps found after investigating TCGCollector's 27,300 count (45-card delta was false positives — word-order set name variant + one bad `set_total` field, both fixed)
 
-EN and JP are treated as completely separate entities. The only intersection is the Pokémon name, used solely as the PriceCharting search key.
+#### Adding new sets (e.g. after a new JP release)
 
-**Data source**: `backend/app/data/tcgcollector_ja.json` already has everything needed:
-- `name_en` — English name for OCR search and PriceCharting query
-- `set_name` — JP set name (e.g. "Triplet Beat", "Shiny Treasure ex")
-- `card_number` / `card_number_raw` — JP card number
-- `set_total` — JP set size (for disambiguation)
-- `image_url` — JP card art from TCGCollector (already correct, no overlay needed)
-- `card_id` — TCGCollector ID (stored as `external_id`)
+**Step 1 — Pull new cards from TCGCollector** (scrapes newest first, stops when hitting already-known cards):
+```
+py -3 scripts/scrape_tcgcollector.py --newest-first
+```
+Typical run: 1–3 pages scraped, stops automatically. Updates `backend/app/data/tcgcollector_ja.json` in-place.
 
-**What changes:**
+**Step 2 — Load new cards into DB** (upsert — existing cards untouched):
+```
+docker exec tcg_backend bash -c "cd /app && python /scripts/load_jp_cards.py"
+```
 
-1. **Load JP cards into `cards` table** (`language='ja'`) via `scripts/load_jp_cards.py`. Each TCGCollector entry becomes a DB row. `image_url` is the JP art directly — no overlay lookup needed.
+**Step 3 — Embed new cards** (skips already-embedded cards):
+```
+docker exec tcg_backend bash -c "cd /app && python /scripts/build_embeddings.py --language ja"
+```
+Rebuilds IVFFlat index automatically after embedding. Monitor: `docker exec tcg_backend tail -f /tmp/embed_ja.log`
 
-2. **CLIP embed JP card images** (~27k). Run `build_embeddings.py` scoped to `language='ja'` cards. Downloads images from TCGCollector CDN, applies art-region crop, generates 512-dim vectors. Note: this is **inference only** using the already-trained fine-tuned CLIP weights (`clip_finetuned.pt`) — not re-training.
+**Step 4 — Restart backend:**
+```
+docker restart tcg_backend
+```
 
-3. **Search filters by language**. OCR search and pgvector search both add `WHERE language='ja'` when scanning JP. Candidates are JP records → correct JP images, JP card numbers, JP set names — no overlay needed.
+**Finding a specific set's TCGCollector set ID** (needed if scraping a single set to fill gaps):
+Run `py -3 scripts/_find_set_id.py` (create ad-hoc) using Playwright to browse `https://www.tcgcollector.com/sets/jp?releaseDateOrder=oldToNew`. Set URLs follow `/sets/{id}/set-slug`. Then scrape that set:
+```
+py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/cards/jp?sets[]={id}&displayAs=image&sortBy=cardNumber"
+```
 
-4. **PriceCharting URL** derived from the JP card's own `set_name` slug. Same `build_game_url(game, language='ja')` path, but now using the actual JP set name rather than guessing from an EN card.
-
-5. **Remove JP image overlay code entirely**: `ScanResultItem.ja_image_urls`, all `find_ja_image_by_name_en` calls in `scan.py` and `cards.py`, `BatchPriceCard.jaImageUrl`, `DetectedCard.jaImageUrls`, `ja_image_lookup.py` service — all deleted. `card.image_url` is just the correct image.
-
-**Existing OCR infrastructure stays**: kana→EN translation (`kana_to_english()`) still used to search `name_en` on JP card records. `_find_kana_name` in `card_matcher.py` still extracts the kana name. `_search_db` changes to filter `language='ja'` instead of `language='en'` for JP scans.
-
-**PriceCharting coverage**: queried by `name_en + JP card number + "japanese"`. The JP card number from the record is accurate. PriceCharting set slug is derived from the JP `set_name` — may still miss some JP sets where PriceCharting uses a different slug than TCGCollector's name.
-
-**Implementation steps** (in order):
-1. Write `scripts/load_jp_cards.py` — upsert TCGCollector entries into `cards` table as `language='ja'` rows
-2. Run the script to populate JP cards
-3. Extend `build_embeddings.py` with `--language ja` flag; run to embed JP cards
-4. Update `card_matcher.py` `_search_db` to filter by language
-5. Update `scan.py` pgvector search to filter by language
-6. Update `cards.py` batch prices to use JP `set_name` for PriceCharting URL
-7. Delete `ja_image_lookup.py`, remove all `ja_image_urls`/`jaImageUrl` fields from schemas, API, mobile types
-8. Remove `jaImageUrls` from `DetectedCard`, `ScanStreamResult`, `BatchPricesItem`
-
-#### What currently works (EN-backed)
-- ✅ Japanese OCR: ML Kit Japanese script, kana→EN translation
-- ✅ Kana→English name mapping: `backend/app/data/pokemon_kana_to_en.json` (1028 entries, all gens)
-- ✅ Card number + set total extraction (same digit/slash format as EN cards)
-- ✅ PriceCharting URL uses `pokemon-japanese-{set_slug}` via `language_override='ja'`
-- ✅ Price cache key includes language to avoid EN/JA collision
-- ✅ JP image shown for top OCR candidate (kana + set_total + card_number lookup)
-- ⚠️ Swap candidates: EN art shown (strict mode) — correct but not JP-localized
-- ❌ Image AI for JP cards: not functional (no JP embeddings)
-- ❌ JP-exclusive cards: unidentifiable
-
-**Re-scraping TCGCollector** (to refresh JP card data before loading to DB):
-`py -3 scripts/scrape_tcgcollector.py --output-dir backend/app/data` (resumable with `--start-page N`). Stops automatically when page returns 0 cards or >50% duplicate card IDs. After re-scraping, restart backend to reload data.
+#### OCR infrastructure (unchanged)
+- kana→EN translation (`kana_to_english()`) still used to search `name_en` on JP records
+- `_find_kana_name` in `card_matcher.py` extracts kana name from OCR text
+- `_search_db` filters `Card.language == language` — EN and JP searches fully independent
+- `_dedupe_and_rank` uses `c.set_total` directly for JP cards (DB field) instead of `set_printed_totals.json`
 
 ### 5. PSA graded card recognition via camera
 - Target: Japanese card shops that cover cert numbers with price stickers
@@ -376,18 +351,19 @@ EN and JP are treated as completely separate entities. The only intersection is 
 - `mobile/components/Card/PriceChart.tsx` — trend graph
 - `backend/app/services/card_detector.py` — OpenCV card outline detection (`detect_card_rectangles`)
 - `backend/app/services/card_embedder.py` — CLIP ViT-B/32 embedding (fine-tuned weights loaded from `backend/models/clip_finetuned.pt` if present)
-- `backend/app/services/ja_image_lookup.py` — Japanese card image lookup: TCGCollector primary (27,255 cards), pokemon-card.com fallback (SV era); keyed by English name + set_total + card_number
-- `backend/app/api/v1/scan.py` — `POST /api/v1/scan` unified endpoint: batch CLIP embed + parallel pgvector + parallel OCR + NDJSON stream
+- `backend/app/api/v1/scan.py` — `POST /api/v1/scan` unified endpoint: batch CLIP embed + parallel pgvector + parallel OCR + NDJSON stream; vector search filters by language
 - `backend/app/api/v1/detect.py` — `POST /api/v1/detect` endpoint
-- `backend/app/data/tcgcollector_ja.json` — 27,255 JP card entries scraped from TCGCollector.com (all eras 1996–present)
+- `backend/app/data/tcgcollector_ja.json` — 27,255 JP card entries scraped from TCGCollector.com (all eras 1996–present); source of truth for JP card data
 - `backend/app/scrapers/pricecharting.py` — PriceCharting scraper
 - `backend/app/services/card_matcher.py` — search orchestration, ranking, price caching
 - `backend/app/data/pokemon_kana_to_en.json` — kana→English name dict (1028 entries)
 - `backend/app/data/pokemon_names_ja.json` — full list with ndex + english + kana
 - `backend/app/data/pokemon_names.py` — `kana_to_english()` loader
 - `backend/app/data/set_printed_totals.json` — 172 sets mapped to `printedTotal` (fetched from pokemontcg.io `/v2/sets`); used by `_dedupe_and_rank` to disambiguate cards sharing a name/number across sets
-- `backend/models/embedding_failures.json` — current embedding state: 20,187 embedded, 50 unembeddable (McDonald's promos), 0 failures
-- `scripts/build_embeddings.py` — offline pipeline: pokemontcg.io fetch → local image match → CLIP embed → pgvector store
+- `backend/models/embedding_failures.json` — EN embedding state: 20,187 embedded, 50 unembeddable (McDonald's promos CDN 404), 0 failures
+- `scripts/build_embeddings.py` — embedding pipeline: EN mode fetches from pokemontcg.io/local dataset; JP mode (`--language ja`) downloads from TCGCollector CDN with rate limiting (concurrency=8); rebuilds IVFFlat index after completion
+- `scripts/load_jp_cards.py` — upserts TCGCollector JP cards into `cards` table as `language='ja'` rows; safe to re-run (upsert by `external_id`)
+- `scripts/scrape_tcgcollector.py` — scrapes TCGCollector JP card image grid; supports `--newest-first` for delta updates (stops when hitting known cards), `--base-url` for set-specific scraping
 - `scripts/coco_to_yolo.py` — converts Roboflow COCO export to YOLO bbox format with train/val split
 - `scripts/merge_yolo_datasets.py` — merges multiple YOLO datasets (handles standard bbox, OBB, polygon), remaps all classes to single class 0 `card`
 - `scripts/retry_failures.py` — retries failed card embeddings by downloading from CDN directly
@@ -481,11 +457,15 @@ A chronological record of major technical decisions, for portfolio and reference
 | 10 | 0.0081 | 1.00e-07 | 82 min | 2026-05-18 18:14 UTC |
 | **Best** | **0.0077** | — | — | **Epoch 7 — saved to `backend/models/clip_finetuned.pt`** |
 
-### v11 — JP cards as first-class DB records (planned — 2026-05-20)
-- Investigated showing correct JP art for swap candidates in the swap modal
-- Root-caused why name + EN card_number matching failed: EN and JP use completely different numbering systems. EN sets combine and reorder multiple JP sets alphabetically. EN "BREAKthrough" Doduo #115 → JP "Collection Y" Doduo #46 — no relationship. Only a handful of 1:1 EN/JP releases (e.g. "Shining Legends", "Pokémon Card 151") share card numbers.
-- Added `strict=True` to `find_ja_image_by_name_en`: returns `None` when card_number is provided but unmatched, instead of falling back to first-by-name (which was causing all swap candidates to show "Shiny Doduo" — the newest JP Doduo in the TCGCollector scrape order)
-- Decided to rearchitect: load all 27,255 TCGCollector JP cards as `language='ja'` rows in the `cards` table, embed them with fine-tuned CLIP, filter searches by language. EN and JP become fully independent — no overlay lookups, no shared card IDs, the only intersection is the Pokémon name used for PriceCharting queries.
+### v11 — JP cards as first-class DB records ✅ (2026-05-20)
+- Root-caused swap image bug: all swap candidates showing the same JP art (Shiny Doduo). EN and JP card numbers are completely different numbering systems — EN sets combine and reorder multiple JP sets alphabetically. No shared key exists between pokemontcg.io EN records and TCGCollector JP records.
+- Rearchitected JP support: 27,255 TCGCollector JP cards loaded as `language='ja'` rows in the `cards` table via `scripts/load_jp_cards.py`. `image_url` IS the JP art — no overlay needed.
+- Embedded all 27,255 JP cards with fine-tuned CLIP (inference only, not retraining). IVFFlat index rebuilt covering 47,442 total embeddings (20,187 EN + 27,255 JP). Zero failures.
+- OCR search and pgvector search both filter by `Card.language == language` — EN and JP searches are fully independent.
+- Removed all JP image overlay code: `ja_image_lookup.py` (now unused), `ja_image_urls`/`jaImageUrl` fields removed from `scan.py`, `cards.py`, `schemas/card.py`, `mobile/services/api.ts`, `mobile/types/scan.ts`, `batch-prices.tsx`, `card/[id].tsx`, `multi-results.tsx`.
+- `kana_name`, `set_total` route params removed from card detail navigation — JP card's own `card.card_number` and `card.image_url` are now authoritative.
+- `set_total` column added to `cards` table for JP OCR disambiguation; `_dedupe_and_rank` uses it directly for `language='ja'` cards instead of the EN `set_printed_totals.json` lookup.
+- Vector search cache key includes language: `f"{sha256(img_bytes)}:{language}"` to keep EN/JP caches separate.
 
 ### v10 — Project reorganization and dead code removal (2026-05-18)
 - Moved `background-textures/` → `assets/backgrounds/`; updated `docker-compose.yml` volume mount accordingly

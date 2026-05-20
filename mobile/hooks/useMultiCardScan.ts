@@ -223,15 +223,6 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             }
           }
 
-          // Convert ja_image_urls map keys from string → number for lookup by candidate id
-          let jaImageUrls: Record<number, string> | undefined;
-          if (item.ja_image_urls && Object.keys(item.ja_image_urls).length > 0) {
-            jaImageUrls = {};
-            for (const [k, v] of Object.entries(item.ja_image_urls)) {
-              jaImageUrls[Number(k)] = v;
-            }
-          }
-
           const card: DetectedCard = {
             regionIndex: cropData[item.crop_index]?.regionIndex ?? item.crop_index,
             ocrText: rawText,
@@ -243,7 +234,6 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             kanaName,
             setTotal,
             cardNumber,
-            jaImageUrls,
           };
 
           appendMultiScanCard(card);

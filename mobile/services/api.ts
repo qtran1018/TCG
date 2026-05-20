@@ -58,14 +58,12 @@ export interface PriceOut {
 export interface CardWithPrice {
   card: CardOut;
   price?: PriceOut;
-  ja_image_url?: string;
 }
 
 export interface BatchPricesItem {
   card_id: number;
   card?: CardOut;
   price?: PriceOut;
-  ja_image_url?: string | null;
   error?: string | null;
 }
 
@@ -100,7 +98,6 @@ export interface ScanStreamResult {
   match_source: "ocr" | "image" | "both" | "none";
   partial?: boolean;
   partial_reason?: string | null;
-  ja_image_urls?: Record<string, string>;
 }
 
 export interface ScanOcrHint {
@@ -125,16 +122,12 @@ export const api = {
     cardId: number,
     scanType: ScanType,
     language?: string,
-    kanaName?: string,
-    setTotal?: number,
     cardNumber?: string,
   ): Promise<CardWithPrice> {
     const { data } = await client.get<CardWithPrice>(`/cards/${cardId}`, {
       params: {
         scan_type: scanType,
         ...(language && { language }),
-        ...(kanaName && { kana_name: kanaName }),
-        ...(setTotal && { set_total: setTotal }),
         ...(cardNumber && { card_number: cardNumber }),
       },
     });

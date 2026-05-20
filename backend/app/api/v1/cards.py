@@ -17,7 +17,6 @@ from app.schemas.card import (
     ScanHistoryCreate,
 )
 from app.services import matcher as _matcher
-from app.services.ja_image_lookup import find_ja_image, find_ja_image_by_name_en
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -28,8 +27,6 @@ async def get_card(
     card_id: int,
     scan_type: str = "raw",
     language: str | None = None,
-    kana_name: str | None = None,
-    set_total: int | None = None,
     card_number: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -56,17 +53,7 @@ async def get_card(
             fetched_at=datetime.utcnow(),
         )
 
-    # For Japanese scans, look up the Japanese card image.
-    # Prefer kana-based lookup (more precise); fall back to English name from DB
-    # so that navigating from history (no kana available) still shows JP art.
-    ja_image_url: str | None = None
-    if language == "ja":
-        if kana_name:
-            ja_image_url = find_ja_image(kana_name, set_total, card_number)
-        if not ja_image_url:
-            ja_image_url = find_ja_image_by_name_en(card.name, set_total, card_number)
-
-    return CardWithPrice(card=CardOut.model_validate(card), price=price_out, ja_image_url=ja_image_url)
+    return CardWithPrice(card=CardOut.model_validate(card), price=price_out)
 
 
 @router.post("/prices", response_model=BatchPricesResponse)
@@ -106,23 +93,10 @@ async def batch_prices(req: BatchPricesRequest, db: AsyncSession = Depends(get_d
         price_out = (
             PriceOut(**price_dict, fetched_at=datetime.utcnow()) if price_dict else None
         )
-        # JP image overlay: DB stores English cards only, so for ja scans we need to
-        # resolve the JP art per card. ja_card_number from OCR (if present) narrows
-        # to the right variant; for swapped cards no number was sent → name fallback.
-        ja_image_url: str | None = None
-        if req.language == "ja":
-            # Prefer OCR-derived ja_card_number when present; otherwise fall back to
-            # the card's own DB card_number so swapped variants (no OCR number sent)
-            # still disambiguate instead of all hitting the first-by-name JP entry.
-            number_for_lookup = ja_card_number or card.card_number
-            ja_image_url = find_ja_image_by_name_en(
-                card.name, None, number_for_lookup, strict=True,
-            )
         return BatchPricesItem(
             card_id=card_id,
             card=CardOut.model_validate(card),
             price=price_out,
-            ja_image_url=ja_image_url,
         )
 
     items = await asyncio.gather(*[fetch_one(cid) for cid in card_ids])

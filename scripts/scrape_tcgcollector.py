@@ -30,9 +30,18 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-BASE_URL = (
+BASE_URL_OLD_TO_NEW = (
     "https://www.tcgcollector.com/cards/jp"
     "?releaseDateOrder=oldToNew&displayAs=image&sortBy=pokedexNumber"
+)
+BASE_URL_NEW_TO_OLD = (
+    "https://www.tcgcollector.com/cards/jp"
+    "?releaseDateOrder=newToOld&displayAs=image&sortBy=releaseDate"
+)
+# Set-specific URL template — replace {set_id} with the TCGCollector set ID
+BASE_URL_SET = (
+    "https://www.tcgcollector.com/cards/jp"
+    "?displayAs=image&sortBy=cardNumber&sets[]={set_id}"
 )
 
 LOAD_TIMEOUT = 45_000  # ms to wait for page content
@@ -198,16 +207,28 @@ async def parse_image_page(page: Page) -> list[dict]:
     return cards
 
 
-async def run(output_dir: str, start_page: int):
+async def run(output_dir: str, start_page: int, newest_first: bool = False, base_url: str | None = None):
     output_path = Path(output_dir) / "tcgcollector_ja.json"
 
-    # Load existing data for resume
+    if base_url:
+        mode_label = "custom URL: " + base_url
+    elif newest_first:
+        base_url = BASE_URL_NEW_TO_OLD
+        mode_label = "delta (newest-first)"
+    else:
+        base_url = BASE_URL_OLD_TO_NEW
+        mode_label = "full (oldest-first)"
+    log.info("Scrape mode: %s", mode_label)
+
+    # Load existing data for resume / delta
     all_cards: list[dict] = []
     if output_path.exists():
         try:
             with open(output_path, encoding="utf-8") as f:
                 all_cards = json.load(f)
-            if start_page > 1:
+            if newest_first:
+                log.info("Delta mode: loaded %d existing entries — will stop when hitting known cards.", len(all_cards))
+            elif start_page > 1:
                 log.info("Resuming: loaded %d existing entries from %s", len(all_cards), output_path)
             else:
                 log.info("Found existing file with %d entries — will append. Use --start-page to resume.", len(all_cards))
@@ -244,7 +265,7 @@ async def run(output_dir: str, start_page: int):
         page = await context.new_page()
 
         # Navigate to starting page
-        url = BASE_URL if start_page == 1 else BASE_URL + f"&page={start_page}"
+        url = base_url if start_page == 1 else base_url + f"&page={start_page}"
         log.info("Navigating to page %d: %s", start_page, url)
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
 
@@ -318,13 +339,21 @@ async def run(output_dir: str, start_page: int):
                     log.info("Page %d returned 0 cards — reached end.", current_page)
                     break
 
-                # Stop if >50% of this page's card_ids are already in our set (loop detected)
+                # Stop if >50% of this page's card_ids are already in our set.
+                # In delta mode (newest-first) this means we've caught up to previously
+                # scraped content. In full mode this means TCGCollector has looped.
                 known_ids = {c["card_id"] for c in all_cards[:-len(cards)] if c.get("card_id")}
                 new_ids = [c["card_id"] for c in cards if c.get("card_id")]
                 if new_ids and sum(1 for cid in new_ids if cid in known_ids) / len(new_ids) > 0.5:
-                    log.info("Page %d: >50%% duplicate card IDs — TCGCollector looped. Stopping.", current_page)
-                    # Remove the looped entries we just added
+                    if newest_first:
+                        log.info("Page %d: >50%% already known — caught up to existing data. Stopping.", current_page)
+                    else:
+                        log.info("Page %d: >50%% duplicate card IDs — TCGCollector looped. Stopping.", current_page)
+                    # Remove the duplicates we just appended
+                    new_only = [c for c in cards if c.get("card_id") not in known_ids]
                     del all_cards[-len(cards):]
+                    all_cards.extend(new_only)
+                    log.info("Kept %d new cards from that page.", len(new_only))
                     break
             else:
                 log.error("Giving up on page %d", current_page)
@@ -338,7 +367,7 @@ async def run(output_dir: str, start_page: int):
 
             # Navigate to next page — always by URL (pagination widget shows too few links)
             next_page_num = current_page + 1
-            next_url = BASE_URL + f"&page={next_page_num}"
+            next_url = base_url + f"&page={next_page_num}"
             await human_pause()
             await page.goto(next_url, wait_until="domcontentloaded", timeout=60_000)
             current_page = next_page_num
@@ -364,8 +393,18 @@ def main():
         "--start-page", type=int, default=1,
         help="Page number to start from (use to resume interrupted scrape)"
     )
+    parser.add_argument(
+        "--newest-first", action="store_true",
+        help="Delta mode: scrape newest cards first, stop when hitting already-known cards. "
+             "Use this for incremental updates after new sets are released."
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Custom TCGCollector base URL (without &page=N). Use to scrape a specific set. "
+             "Example: pass a set-filtered URL from TCGCollector to scrape only that set."
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.output_dir, args.start_page))
+    asyncio.run(run(args.output_dir, args.start_page, newest_first=args.newest_first, base_url=args.base_url))
 
 
 if __name__ == "__main__":

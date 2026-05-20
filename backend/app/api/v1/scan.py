@@ -17,7 +17,6 @@ from app.schemas.card import CardOutLite
 from app.services.cache import search_cache
 from app.services import matcher as _matcher
 from app.services.card_embedder import compute_phash, embed_batch
-from app.services.ja_image_lookup import find_ja_image_by_name_en
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 logger = logging.getLogger(__name__)
@@ -52,11 +51,6 @@ class ScanResultItem(BaseModel):
     match_source: str  # "ocr" | "image" | "both" | "none"
     partial: bool = False
     partial_reason: str | None = None  # "image_failed" | "ocr_failed" — both = "image_failed,ocr_failed"
-    # Per-candidate JP image overlay (ja scans only). Keyed by candidate.id as string.
-    # The DB only stores English cards, so when the user swaps to another candidate the
-    # backend must already know that candidate's JP image — looking it up per candidate
-    # up front lets the swap modal and downstream screens render the right JP art.
-    ja_image_urls: dict[str, str] = {}
 
 
 class _ImageSearchCache(BaseModel):
@@ -131,6 +125,7 @@ async def _vector_search(
     embedding,
     query_phash: str | None,
     img_bytes: bytes,
+    language: str = "en",
 ) -> tuple[list[CardOutLite], float, str]:
     """pgvector nearest-neighbor search + phash re-ranking. Returns (candidates, best_sim, query_used)."""
     embedding_list = embedding.tolist()
@@ -143,7 +138,7 @@ async def _vector_search(
             Card.phash, Card.pricecharting_id, Card.pricecharting_url,
             Card.created_at, distance_col,
         )
-        .where(Card.embedding.isnot(None))
+        .where(Card.embedding.isnot(None), Card.language == language)
         .order_by(distance_col)
         .limit(10)
     )
@@ -179,9 +174,9 @@ async def _vector_search(
     else:
         query_used = "image:no_match"
 
-    # Cache with structured sim score — no more regex parsing.
+    # Cache key includes language so EN and JP scans on the same image return separate results.
     cache_item = _ImageSearchCache(candidates=candidates, best_sim=best_sim, query_used=query_used)
-    key = hashlib.sha256(img_bytes).hexdigest()
+    key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
     await search_cache.set("embedding", key, ttl=_IMAGE_CACHE_TTL, value=cache_item.model_dump(mode="json"))
     return candidates, best_sim, query_used
 
@@ -189,15 +184,15 @@ async def _vector_search(
 async def _image_search_one(
     idx: int,
     img_bytes: bytes | None,
+    language: str = "en",
 ) -> tuple[list[CardOutLite], float, str]:
-    """Per-crop image search. Caches by SHA-256 of crop bytes."""
+    """Per-crop image search. Caches by SHA-256 of crop bytes + language."""
     if img_bytes is None:
         return [], 0.0, "image:no_match"
 
-    key = hashlib.sha256(img_bytes).hexdigest()
+    key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
     cached = await search_cache.get("embedding", key)
     if cached is not None:
-        # Backwards-compat: old cache entries used BatchSearchItem layout (no best_sim).
         if "best_sim" in cached:
             item = _ImageSearchCache(**cached)
             return item.candidates, item.best_sim, item.query_used
@@ -213,15 +208,17 @@ async def _image_search_one(
         asyncio.to_thread(lambda: embed_batch([img_bytes])[0]),
         asyncio.to_thread(compute_phash, img_bytes),
     )
-    return await _vector_search(embedding, query_phash, img_bytes)
+    return await _vector_search(embedding, query_phash, img_bytes, language)
 
 
 async def _batch_image_search(
     imgs: list[bytes | None],
+    language: str = "en",
 ) -> dict[int, tuple[list[CardOutLite], float, str]]:
     """
     Embed all uncached crops in one CLIP forward pass, then run pgvector searches in parallel.
     For cached crops, return immediately. Returns {crop_index: (candidates, best_sim, query_used)}.
+    Language is included in the cache key so EN and JP scans stay separate.
     """
     results: dict[int, tuple[list[CardOutLite], float, str]] = {}
     to_embed: list[tuple[int, bytes]] = []
@@ -229,14 +226,13 @@ async def _batch_image_search(
     for i, img_bytes in enumerate(imgs):
         if img_bytes is None:
             continue
-        key = hashlib.sha256(img_bytes).hexdigest()
+        key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
         cached = await search_cache.get("embedding", key)
         if cached is not None:
             if "best_sim" in cached:
                 item = _ImageSearchCache(**cached)
                 results[i] = (item.candidates, item.best_sim, item.query_used)
             else:
-                # Legacy cache layout fallback.
                 m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
                 results[i] = (
                     [CardOutLite(**c) for c in cached.get("candidates", [])],
@@ -254,7 +250,7 @@ async def _batch_image_search(
         )
 
         async def search_one(idx: int, img_bytes: bytes, embedding, qhash: str | None):
-            return idx, await _vector_search(embedding, qhash, img_bytes)
+            return idx, await _vector_search(embedding, qhash, img_bytes, language)
 
         vector_results = await asyncio.gather(*[
             search_one(idx, img_bytes, emb, qh)
@@ -372,7 +368,8 @@ async def scan(req: ScanRequest):
         return [], ""
 
     async def per_crop(i: int) -> ScanResultItem:
-        image_task = _image_search_one(i, imgs[i]) if do_image else _empty_image(i)
+        lang = hints[i].language if hints[i].language in VALID_LANGUAGES else "en"
+        image_task = _image_search_one(i, imgs[i], lang) if do_image else _empty_image(i)
         ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
         # return_exceptions=True so a failure in one branch doesn't zero out the
         # other — surface degraded mode via partial flag instead.
@@ -385,21 +382,10 @@ async def scan(req: ScanRequest):
         if ocr_failed:
             logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
             ocr_res = ([], "")
-        result = _build_result(
+        return _build_result(
             i, req.scan_mode, image_res, ocr_res,
             image_failed=image_failed, ocr_failed=ocr_failed,
         )
-        if hints[i].language == "ja" and result.candidates:
-            # Pass each candidate's own card_number so name-collision variants
-            # (e.g. multiple Charizard printings) resolve to their own JP entry
-            # instead of all sharing the first-by-name match.
-            ja_map: dict[str, str] = {}
-            for c in result.candidates:
-                url = find_ja_image_by_name_en(c.name, None, c.card_number, strict=True)
-                if url:
-                    ja_map[str(c.id)] = url
-            result.ja_image_urls = ja_map
-        return result
 
     async def generate():
         # Kick off all crops in parallel; yield each result as it completes.

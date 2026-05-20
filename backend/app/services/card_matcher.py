@@ -275,8 +275,20 @@ class CardMatcherService:
                 logger.debug("Non-numeric set_total from OCR: %r — skipping printed_total ranking", set_total)
 
         def rank(c: Card) -> tuple:
-            # Primary: printed_total match (0 = matches, 1 = no match / unknown)
-            set_match = 0 if (c.set_code and c.set_code in matching_set_codes) else 1
+            # Primary: set_total match.
+            # EN cards: compare against set_printed_totals.json (keyed by set_code).
+            # JP cards: compare directly against card.set_total stored on the record.
+            if set_total:
+                try:
+                    total_int = int(set_total)
+                    if c.language == "ja":
+                        set_match = 0 if c.set_total == total_int else 1
+                    else:
+                        set_match = 0 if (c.set_code and c.set_code in matching_set_codes) else 1
+                except ValueError:
+                    set_match = 1
+            else:
+                set_match = 1
             # Secondary: exact card number match, then prefix, then rest
             if card_num:
                 num = (c.card_number or "").lstrip("0").split("/")[0]
@@ -297,46 +309,17 @@ class CardMatcherService:
     async def _search_db(self, hints: dict, game: str, language: str, db: AsyncSession) -> list[Card]:
         name = hints.get("probable_name", "")
         card_number = hints.get("card_number", "")
-        kana_name = hints.get("kana_name", "")  # raw kana from OCR, only set for JP scans
 
-        # Japanese Pokemon: kana names are translated to English and all cards are stored as "en".
-        # Querying language="ja" always misses → falls through to slow external API calls.
-        db_language = "en" if (game == "pokemon" and language == "ja") else language
-        base = select(Card).where(Card.game == game, Card.language == db_language)
+        # JP Pokemon scans now search language='ja' records directly.
+        # JP cards store the English name in `name` (from TCGCollector name_en),
+        # so kana→EN translation from card_matcher still produces the right search term.
+        base = select(Card).where(Card.game == game, Card.language == language)
 
         # Number-only search (without a name) is disabled — too many false matches across sets.
         if not name:
             return []
 
-        # ── JP fast path: exact kana match on name_ja ──────────────────────────
-        # For Japanese scans where name_ja is populated (~85-90% of base Pokémon),
-        # this skips the kana→EN translation and matches directly against the stored
-        # katakana. Only applied when language="ja" and raw kana is available.
-        # Falls through to the EN name search below if nothing is found (gym leader
-        # cards, trainer cards, variants not yet in name_ja).
-        if language == "ja" and game == "pokemon" and kana_name:
-            kana_match = Card.name_ja == kana_name
-            if card_number:
-                num_match = Card.card_number.ilike(f"%{card_number}%")
-                priority = case((num_match, 0), else_=1).label("priority")
-                stmt = (
-                    base.add_columns(priority)
-                    .where(kana_match)
-                    .order_by(priority)
-                    .limit(10)
-                )
-                rows = (await db.execute(stmt)).all()
-                if rows:
-                    logger.debug("JP kana exact match (%s): %d results", kana_name, len(rows))
-                    return [r[0] for r in rows]
-            else:
-                result = await db.execute(base.where(kana_match).limit(10))
-                results = list(result.scalars().all())
-                if results:
-                    logger.debug("JP kana exact match (%s): %d results", kana_name, len(results))
-                    return results
-
-        # ── Standard EN name search (ilike) ────────────────────────────────────
+        # ── Standard name search (ilike) ───────────────────────────────────────
         name_match = Card.name.ilike(f"%{name}%")
         if card_number:
             num_match = Card.card_number.ilike(f"%{card_number}%")

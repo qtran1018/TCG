@@ -11,8 +11,8 @@ import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 
 export default function CardDetailScreen() {
-  const { id, psaGrade, language: routeLanguage, kana_name, set_total, card_number } = useLocalSearchParams<{
-    id: string; psaGrade?: string; language?: string; kana_name?: string; set_total?: string; card_number?: string;
+  const { id, psaGrade, language: routeLanguage, card_number } = useLocalSearchParams<{
+    id: string; psaGrade?: string; language?: string; card_number?: string;
   }>();
   const { scanType } = useScanStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
@@ -27,8 +27,6 @@ export default function CardDetailScreen() {
         Number(id),
         scanType,
         routeLanguage,
-        kana_name,
-        set_total ? parseInt(set_total, 10) : undefined,
         card_number,
       )
       .then(setData)
@@ -53,16 +51,11 @@ export default function CardDetailScreen() {
     );
   }
 
-  const { card, price, ja_image_url } = data;
+  const { card, price } = data;
   const pcUrl = price?.pricecharting_url ?? card.pricecharting_url;
   const displayName = card.language === "ja" && card.name_ja ? card.name_ja : card.name;
-  const displayImageUrl = ja_image_url ?? card.image_url_hi ?? card.image_url;
-  // For Japanese scans the DB record holds the English card number; use the
-  // OCR'd number from route params instead so the JP number is shown.
-  const displayCardNumber =
-    routeLanguage === "ja" && card_number
-      ? set_total ? `${card_number}/${set_total}` : card_number
-      : card.card_number;
+  const displayImageUrl = card.image_url_hi ?? card.image_url;
+  const displayCardNumber = card.card_number;
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>

@@ -38,23 +38,12 @@ export default function MultiResultsScreen() {
 
   const handleViewCard = useCallback(
     (card: CardOut, dc?: DetectedCard) => {
-      // On swap, the original OCR's kana/number describe the *original* top candidate,
-      // not the swapped one — forwarding them makes the backend's JP image lookup return
-      // the same (wrong) image as before. Suppress them so the lookup falls through to
-      // `find_ja_image_by_name_en(swapped_card.name, ...)` and the detail page's card
-      // number falls back to the swapped card's English DB number.
-      // English scans are unaffected: kanaName/setTotal/cardNumber are only ever set
-      // when language === "ja" (see useMultiCardScan.ts), so these guards stay false
-      // for EN regardless of isSwapped.
-      const isSwapped = !!dc && card.id !== dc.searchResult.candidates[0]?.id;
       router.push({
         pathname: "/card/[id]",
         params: {
           id: String(card.id),
           language,
-          ...(!isSwapped && dc?.kanaName && { kana_name: dc.kanaName }),
-          ...(!isSwapped && dc?.setTotal && { set_total: String(dc.setTotal) }),
-          ...(!isSwapped && dc?.cardNumber && { card_number: dc.cardNumber }),
+          ...(dc?.cardNumber && { card_number: dc.cardNumber }),
         },
       });
     },
@@ -89,14 +78,10 @@ export default function MultiResultsScreen() {
       .flatMap((dc) => {
         const card = getSelected(dc);
         if (!card) return [];
-        const isOriginalTop = card.id === dc.searchResult.candidates[0]?.id;
         return [{
           card,
-          // Use per-candidate JP image so swapped cards still show JP art on first paint.
-          // Backend batch_prices also returns ja_image_url per card; that supersedes once loaded.
-          jaImageUrl: dc.jaImageUrls?.[card.id],
-          // Only the original top candidate carries the OCR-read JP card number.
-          jaCardNumber: isOriginalTop ? dc.cardNumber : undefined,
+          // OCR-read JP card number for PriceCharting disambiguation (ja scans only).
+          jaCardNumber: dc.cardNumber,
         }];
       });
     if (batch.length === 0) return;
@@ -230,13 +215,7 @@ export default function MultiResultsScreen() {
           <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom + 8, 16) }]}>
             <Text style={styles.modalTitle}>Select correct card</Text>
             <ScrollView style={styles.modalList}>
-              {swapTarget?.searchResult.candidates.map((c) => {
-                // For ja scans, prefer the per-candidate JP image over the English DB art.
-                const displayImage =
-                  language === "ja"
-                    ? swapTarget.jaImageUrls?.[c.id] ?? c.image_url
-                    : c.image_url;
-                return (
+              {swapTarget?.searchResult.candidates.map((c) => (
                 <TouchableOpacity
                   key={c.id}
                   style={[
@@ -245,8 +224,8 @@ export default function MultiResultsScreen() {
                   ]}
                   onPress={() => handleSwapSelect(swapTarget, c)}
                 >
-                  {displayImage ? (
-                    <Image source={{ uri: displayImage }} style={styles.modalImage} resizeMode="contain" />
+                  {c.image_url ? (
+                    <Image source={{ uri: c.image_url }} style={styles.modalImage} resizeMode="contain" />
                   ) : (
                     <View style={[styles.modalImage, styles.imagePlaceholder]}>
                       <Text style={styles.placeholderText}>?</Text>
@@ -258,8 +237,7 @@ export default function MultiResultsScreen() {
                     {c.card_number && <Text style={styles.badge}>#{c.card_number}</Text>}
                   </View>
                 </TouchableOpacity>
-                );
-              })}
+              ))}
             </ScrollView>
             <TouchableOpacity style={styles.modalClose} onPress={() => setSwapTarget(null)}>
               <Text style={styles.modalCloseText}>Cancel</Text>
@@ -318,18 +296,13 @@ const ResultRow = React.memo(function ResultRow({
         <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
       </View>
       <View style={styles.cardRow}>
-        {(() => {
-          // ja scans: prefer per-candidate JP art (works post-swap); else fall back to EN.
-          const jaUrl = language === "ja" && selected ? dc.jaImageUrls?.[selected.id] : undefined;
-          const displayUrl = jaUrl ?? selected?.image_url;
-          return displayUrl ? (
-            <Image source={{ uri: displayUrl }} style={styles.image} resizeMode="contain" />
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Text style={styles.placeholderText}>?</Text>
-            </View>
-          );
-        })()}
+        {selected?.image_url ? (
+          <Image source={{ uri: selected.image_url }} style={styles.image} resizeMode="contain" />
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Text style={styles.placeholderText}>?</Text>
+          </View>
+        )}
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={2}>{selected?.name ?? "Unknown"}</Text>
           {selected?.set_name && (

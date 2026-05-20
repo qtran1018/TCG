@@ -68,7 +68,6 @@ class PriceOut(BaseModel):
 class CardWithPrice(BaseModel):
     card: CardOut
     price: PriceOut | None = None
-    ja_image_url: str | None = None
 
 
 class PSACertRequest(BaseModel):
@@ -116,7 +115,6 @@ class BatchPricesItem(BaseModel):
     card_id: int
     card: CardOut | None = None
     price: PriceOut | None = None
-    ja_image_url: str | None = None
     error: str | None = None
 
 
