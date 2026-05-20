@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, Image,
   ActivityIndicator, TouchableOpacity, Linking,
@@ -12,16 +12,27 @@ import { saleLinkLabel } from "@/utils/saleLink";
 
 interface CardPriceEntry {
   card: CardOut;
+  jaImageUrl?: string;
+  jaCardNumber?: string;
   data: CardWithPrice | null;
   loading: boolean;
   error: boolean;
 }
 
+const keyExtractor = (item: CardPriceEntry) => String(item.card.id);
+
+
+const openUrl = (url: string) => {
+  Linking.openURL(url).catch((e) => console.warn("[batch-prices] openURL failed:", url, e));
+};
+
 export default function BatchPricesScreen() {
   const router = useRouter();
   const { batchPriceCards, scanType, language } = useScanStore();
   const [entries, setEntries] = useState<CardPriceEntry[]>(
-    batchPriceCards.map((card) => ({ card, data: null, loading: true, error: false })),
+    batchPriceCards.map(({ card, jaImageUrl, jaCardNumber }) => ({
+      card, jaImageUrl, jaCardNumber, data: null, loading: true, error: false,
+    })),
   );
 
   useEffect(() => {
@@ -29,25 +40,55 @@ export default function BatchPricesScreen() {
 
     let cancelled = false;
     (async () => {
-      const settled = await Promise.allSettled(
-        batchPriceCards.map((card) => api.getCard(card.id, scanType, language)),
-      );
+      // Single POST /cards/prices request replaces N independent /cards/{id}
+      // calls. Backend resolves cache hits in parallel and serializes misses
+      // through its own rate limiter.
+      let items: Awaited<ReturnType<typeof api.batchPrices>> = [];
+      try {
+        const jaCardNumbers = Object.fromEntries(
+          batchPriceCards
+            .filter((bpc) => bpc.jaCardNumber)
+            .map((bpc) => [bpc.card.id, bpc.jaCardNumber!]),
+        );
+        items = await api.batchPrices(
+          batchPriceCards.map((bpc) => bpc.card.id),
+          scanType,
+          language,
+          Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
+        );
+      } catch (e) {
+        console.warn("[batch-prices] batch fetch failed:", e);
+      }
       if (cancelled) return;
-      // Single setState — replaces N independent updates that re-rendered the
-      // FlatList for every individual price resolution.
+
+      const byId = new Map(items.map((it) => [it.card_id, it]));
       setEntries((prev) =>
-        prev.map((entry, i) => {
-          const res = settled[i];
-          if (res.status === "fulfilled") {
-            return { ...entry, data: res.value, loading: false };
+        prev.map((entry) => {
+          const item = byId.get(entry.card.id);
+          if (!item || item.error) {
+            return { ...entry, loading: false, error: true };
           }
-          return { ...entry, loading: false, error: true };
+          return {
+            ...entry,
+            // Backend resolves JP image per card (incl. swapped); prefer it over the
+            // OCR-derived jaImageUrl that only applies to the original top candidate.
+            jaImageUrl: item.ja_image_url ?? entry.jaImageUrl,
+            data: { card: item.card ?? entry.card, price: item.price },
+            loading: false,
+          };
         }),
       );
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: CardPriceEntry }) => (
+      <CardPriceRow entry={item} scanType={scanType} language={language} />
+    ),
+    [scanType, language],
+  );
 
   if (batchPriceCards.length === 0) {
     return (
@@ -76,29 +117,34 @@ export default function BatchPricesScreen() {
 
       <FlatList
         data={entries}
-        keyExtractor={(item) => String(item.card.id)}
+        keyExtractor={keyExtractor}
         contentContainerStyle={styles.list}
-        renderItem={({ item: entry }) => <CardPriceRow entry={entry} scanType={scanType} />}
+        renderItem={renderItem}
+        extraData={scanType}
       />
     </SafeAreaView>
   );
 }
 
-function CardPriceRow({ entry, scanType }: { entry: CardPriceEntry; scanType: string }) {
-  const { card, data, loading, error } = entry;
+const CardPriceRow = React.memo(function CardPriceRow({
+  entry,
+  scanType,
+  language,
+}: {
+  entry: CardPriceEntry;
+  scanType: string;
+  language: string;
+}) {
+  const { card, jaImageUrl, jaCardNumber, data, loading, error } = entry;
   const price = data?.price;
   const rawPrice = scanType === "psa" ? price?.price_graded_10 : price?.price_loose;
   const lastSale = price?.recent_sales?.[0];
 
-  const openUrl = (url: string) => {
-    Linking.openURL(url).catch(() => {});
-  };
-
   return (
     <View style={styles.row}>
       <View style={styles.cardImageWrap}>
-        {card.image_url ? (
-          <Image source={{ uri: card.image_url }} style={styles.cardImage} resizeMode="contain" />
+        {(jaImageUrl ?? data?.card?.image_url ?? card.image_url) ? (
+          <Image source={{ uri: jaImageUrl ?? data?.card?.image_url ?? card.image_url! }} style={styles.cardImage} resizeMode="contain" />
         ) : (
           <View style={[styles.cardImage, styles.imagePlaceholder]}>
             <Text style={styles.placeholderText}>?</Text>
@@ -107,10 +153,12 @@ function CardPriceRow({ entry, scanType }: { entry: CardPriceEntry; scanType: st
       </View>
 
       <View style={styles.cardInfo}>
-        <Text style={styles.cardName} numberOfLines={2}>{card.name}</Text>
-        {card.set_name && <Text style={styles.cardSet} numberOfLines={1}>{card.set_name}</Text>}
+        <Text style={styles.cardName} numberOfLines={2}>{data?.card?.name ?? card.name}</Text>
+        {(data?.card?.set_name ?? card.set_name) && <Text style={styles.cardSet} numberOfLines={1}>{data?.card?.set_name ?? card.set_name}</Text>}
         <View style={styles.badges}>
-          {card.card_number && <Text style={styles.badge}>#{card.card_number}</Text>}
+          {(jaCardNumber ?? card.card_number) && (
+            <Text style={styles.badge}>#{language === "ja" && jaCardNumber ? jaCardNumber : card.card_number}</Text>
+          )}
           {card.rarity && <Text style={styles.badge}>{card.rarity}</Text>}
         </View>
 
@@ -151,7 +199,7 @@ function CardPriceRow({ entry, scanType }: { entry: CardPriceEntry; scanType: st
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },

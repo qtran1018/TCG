@@ -53,31 +53,6 @@ class PokemonTCGApiScraper:
             return name_part
         return name_part
 
-    async def search_by_number(self, number: str, page_size: int = 10) -> list[PokemonCard]:
-        """Search by card number alone (no set code) — useful when name OCR is unreliable."""
-        q = f'number:"{number}"'
-        params = {"q": q, "pageSize": page_size, "select": "id,name,set,number,rarity,images,supertype,subtypes"}
-        try:
-            resp = await self._client.get("/cards", params=params)
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-            return [self._map(c) for c in data]
-        except httpx.HTTPError as e:
-            logger.error("Pokemon TCG API error: %s", e)
-            return []
-
-    async def get_by_number(self, set_code: str, number: str) -> PokemonCard | None:
-        q = f'set.id:"{set_code}" number:"{number}"'
-        params = {"q": q, "pageSize": 1}
-        try:
-            resp = await self._client.get("/cards", params=params)
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-            return self._map(data[0]) if data else None
-        except httpx.HTTPError as e:
-            logger.error("Pokemon TCG API error: %s", e)
-            return None
-
     async def get_all_for_seed(self, page: int = 1, page_size: int = 250) -> tuple[list[PokemonCard], bool]:
         params = {"pageSize": page_size, "page": page, "select": "id,name,set,number,rarity,images,supertype,subtypes"}
         for attempt in range(3):

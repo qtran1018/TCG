@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -22,16 +23,21 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+const PAGE_SIZE = 50;
+
 export default function HistoryScreen() {
   const router = useRouter();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getHistory(50, 0);
+      const data = await api.getHistory(PAGE_SIZE);
       setEntries(data);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (e) {
       console.warn("[history] load failed:", e);
     } finally {
@@ -39,6 +45,21 @@ export default function HistoryScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || entries.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const last = entries[entries.length - 1];
+      const data = await api.getHistory(PAGE_SIZE, 0, last.id);
+      setEntries((prev) => [...prev, ...data]);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (e) {
+      console.warn("[history] loadMore failed:", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, entries]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -88,6 +109,13 @@ export default function HistoryScreen() {
           </View>
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          loadingMore ? (
+            <ActivityIndicator size="small" color={COLORS.accent} style={styles.footer} />
+          ) : null
+        }
       />
     </SafeAreaView>
   );
@@ -113,6 +141,7 @@ const styles = StyleSheet.create({
   price: { color: COLORS.success, fontSize: 16, fontWeight: "700" },
   priceLabel: { color: COLORS.textMuted, fontSize: 10 },
   separator: { height: 8 },
+  footer: { paddingVertical: 16 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   emptyText: { color: COLORS.text, fontSize: 18, fontWeight: "700" },
   emptyHint: { color: COLORS.textMuted, fontSize: 14 },

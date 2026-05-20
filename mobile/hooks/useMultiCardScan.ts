@@ -169,7 +169,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
                   .map((b) => b.text)
                   .join("\n");
                 cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
-                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game);
+                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game, lang);
                 rawText = confidence.isCard ? cropText : undefined;
               } catch (e) {
                 // One bad crop must not abort the entire scan — fall back to image-only signal.
@@ -198,7 +198,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         const controller = new AbortController();
         abortRef.current = controller;
 
-        await api.scanStream(crops, ocrHints, scanMode, (item: ScanStreamResult) => {
+        const streamOutcome = await api.scanStream(crops, ocrHints, scanMode, (item: ScanStreamResult) => {
           if (item.candidates.length === 0) return;
 
           // Deduplicate by top candidate ID
@@ -223,6 +223,15 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             }
           }
 
+          // Convert ja_image_urls map keys from string → number for lookup by candidate id
+          let jaImageUrls: Record<number, string> | undefined;
+          if (item.ja_image_urls && Object.keys(item.ja_image_urls).length > 0) {
+            jaImageUrls = {};
+            for (const [k, v] of Object.entries(item.ja_image_urls)) {
+              jaImageUrls[Number(k)] = v;
+            }
+          }
+
           const card: DetectedCard = {
             regionIndex: cropData[item.crop_index]?.regionIndex ?? item.crop_index,
             ocrText: rawText,
@@ -234,12 +243,20 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             kanaName,
             setTotal,
             cardNumber,
+            jaImageUrls,
           };
 
           appendMultiScanCard(card);
         }, controller.signal);
 
         setMultiScanLoading(false);
+
+        // Aborted (user backed out or new scan started) — don't surface an
+        // error and don't claim success; the caller is responsible for new state.
+        if (streamOutcome?.aborted) {
+          console.log("[MultiScan] Stream aborted by caller");
+          return false;
+        }
 
         // Check if anything was found
         const store = useScanStore.getState();

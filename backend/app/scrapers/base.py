@@ -62,18 +62,34 @@ class BaseScraper:
             extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
         )
 
+    # Total scrape budget per call. Mobile-facing endpoints use axios with a
+    # 30s default timeout — letting the backend exceed that leaves the client
+    # to time out while we keep grinding on a request whose result has nowhere
+    # to go. Cap below the client deadline to leave room for response framing.
+    FETCH_TOTAL_TIMEOUT = 28.0
+
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=4, max=30),
+        # 2 attempts (not 3) with capped backoff. Combined with the wait_for
+        # below the absolute worst case stays under FETCH_TOTAL_TIMEOUT.
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=2, min=2, max=6),
         retry=retry_if_exception_type(Exception),
         reraise=True,
     )
     async def fetch_page(self, url: str, domain: str, rate_seconds: float | None = None) -> str:
+        return await asyncio.wait_for(
+            self._fetch_page_inner(url, domain, rate_seconds),
+            timeout=self.FETCH_TOTAL_TIMEOUT,
+        )
+
+    async def _fetch_page_inner(self, url: str, domain: str, rate_seconds: float | None) -> str:
         await rate_limit(domain, rate_seconds or settings.pricecharting_rate_limit_seconds)
         ctx = await self.new_context()
         try:
             page: Page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            # Playwright goto timeout reduced from 30s — anything slower would
+            # blow the per-attempt budget anyway.
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
             await page.wait_for_timeout(random.randint(800, 1500))
             content = await page.content()
             await page.close()

@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card
 from app.scrapers.pricecharting import PricechartingScraper
@@ -159,6 +159,7 @@ def extract_card_hints(ocr_text: str, game: str, language: str) -> dict:
         if language == "ja":
             kana = _find_kana_name(lines)
             if kana:
+                hints["kana_name"] = kana  # raw kana for name_ja exact match
                 english = kana_to_english(kana)
                 if english:
                     hints["probable_name"] = english
@@ -228,7 +229,16 @@ class CardMatcherService:
 
         # Skip external API for Japanese: pokemontcg.io has no Japanese card data.
         # _search_db already searches the English cards with the kana→EN translated name.
-        if name_for_api and len(db_cards) < 3 and language != "ja":
+        #
+        # Also call the external API when the DB has results but none match the OCR'd
+        # card number — e.g. DB has Abra 036 ×3 but OCR says 63, meaning Abra 063
+        # was never fetched and won't appear as a swap candidate without an API call.
+        card_num_hint = hints.get("card_number", "")
+        db_has_num_match = any(
+            card_num_hint and card_num_hint in (c.card_number or "")
+            for c in db_cards
+        ) if card_num_hint else True
+        if name_for_api and (len(db_cards) < 3 or not db_has_num_match) and language != "ja":
             api_cards = await self._search_external(name_for_api, game, language, db, hints)
             existing_ids = {c.id for c in db_cards}
             for ac in api_cards:
@@ -262,7 +272,7 @@ class CardMatcherService:
                     code for code, pt in _SET_PRINTED_TOTALS.items() if pt == total_int
                 }
             except ValueError:
-                pass
+                logger.debug("Non-numeric set_total from OCR: %r — skipping printed_total ranking", set_total)
 
         def rank(c: Card) -> tuple:
             # Primary: printed_total match (0 = matches, 1 = no match / unknown)
@@ -287,49 +297,77 @@ class CardMatcherService:
     async def _search_db(self, hints: dict, game: str, language: str, db: AsyncSession) -> list[Card]:
         name = hints.get("probable_name", "")
         card_number = hints.get("card_number", "")
-        set_total = hints.get("set_total", "")
+        kana_name = hints.get("kana_name", "")  # raw kana from OCR, only set for JP scans
 
         # Japanese Pokemon: kana names are translated to English and all cards are stored as "en".
         # Querying language="ja" always misses → falls through to slow external API calls.
         db_language = "en" if (game == "pokemon" and language == "ja") else language
-        stmt = select(Card).where(Card.game == game, Card.language == db_language)
+        base = select(Card).where(Card.game == game, Card.language == db_language)
 
-        if name and card_number:
-            # Prefer name + card number match first
-            exact = await db.execute(
-                stmt.where(
-                    Card.name.ilike(f"%{name}%"),
-                    Card.card_number.ilike(f"%{card_number}%"),
-                ).limit(10)
-            )
-            results = list(exact.scalars().all())
-            if results:
-                return results
+        # Number-only search (without a name) is disabled — too many false matches across sets.
+        if not name:
+            return []
 
-        if name and card_number:
-            result = await db.execute(
-                stmt.where(Card.card_number.ilike(f"%{card_number}%")).limit(10)
-            )
-            results = list(result.scalars().all())
-            if results:
-                return results
+        # ── JP fast path: exact kana match on name_ja ──────────────────────────
+        # For Japanese scans where name_ja is populated (~85-90% of base Pokémon),
+        # this skips the kana→EN translation and matches directly against the stored
+        # katakana. Only applied when language="ja" and raw kana is available.
+        # Falls through to the EN name search below if nothing is found (gym leader
+        # cards, trainer cards, variants not yet in name_ja).
+        if language == "ja" and game == "pokemon" and kana_name:
+            kana_match = Card.name_ja == kana_name
+            if card_number:
+                num_match = Card.card_number.ilike(f"%{card_number}%")
+                priority = case((num_match, 0), else_=1).label("priority")
+                stmt = (
+                    base.add_columns(priority)
+                    .where(kana_match)
+                    .order_by(priority)
+                    .limit(10)
+                )
+                rows = (await db.execute(stmt)).all()
+                if rows:
+                    logger.debug("JP kana exact match (%s): %d results", kana_name, len(rows))
+                    return [r[0] for r in rows]
+            else:
+                result = await db.execute(base.where(kana_match).limit(10))
+                results = list(result.scalars().all())
+                if results:
+                    logger.debug("JP kana exact match (%s): %d results", kana_name, len(results))
+                    return results
 
-        if name:
-            result = await db.execute(
-                stmt.where(Card.name.ilike(f"%{name}%")).limit(10)
-            )
-            results = list(result.scalars().all())
-            if results:
-                return results
-            # Fuzzy fallback for OCR misreads (e.g. "Lotacl" → Lotad, "Sulcune" → Suicune)
-            fuzzy = await db.execute(
-                stmt.where(func.similarity(Card.name, name) > 0.35)
-                .order_by(func.similarity(Card.name, name).desc())
+        # ── Standard EN name search (ilike) ────────────────────────────────────
+        name_match = Card.name.ilike(f"%{name}%")
+        if card_number:
+            num_match = Card.card_number.ilike(f"%{card_number}%")
+            # Name is required; number only re-ranks within name matches. Previously
+            # this used `WHERE name_match OR num_match` which let unrelated cards
+            # (any card whose number contained the digits) outrank actual name
+            # matches — e.g. JP Clauncher #3 surfaced Charizard #3 because no EN
+            # Clauncher has number 3 and the number-only branch ranked higher.
+            priority = case((num_match, 0), else_=1).label("priority")
+            stmt = (
+                base.add_columns(priority)
+                .where(name_match)
+                .order_by(priority)
                 .limit(10)
             )
-            return list(fuzzy.scalars().all())
+            rows = (await db.execute(stmt)).all()
+            if rows:
+                return [r[0] for r in rows]
+        else:
+            result = await db.execute(base.where(name_match).limit(10))
+            results = list(result.scalars().all())
+            if results:
+                return results
 
-        return []
+        # Fuzzy fallback for OCR misreads (e.g. "Lotacl" → Lotad, "Sulcune" → Suicune).
+        fuzzy = await db.execute(
+            base.where(func.similarity(Card.name, name) > 0.35)
+            .order_by(func.similarity(Card.name, name).desc())
+            .limit(10)
+        )
+        return list(fuzzy.scalars().all())
 
     async def _search_external(self, query: str, game: str, language: str, db: AsyncSession, hints: dict | None = None) -> list[Card]:
         cards: list[Card] = []
@@ -395,17 +433,29 @@ class CardMatcherService:
         await db.flush()
         return card
 
-    def _build_pc_url(self, card: Card, language_override: str | None) -> str | None:
+    def _build_pc_url(
+        self,
+        card: Card,
+        language_override: str | None,
+        ja_card_number: str | None = None,
+    ) -> str | None:
         """Build PriceCharting URL for the given card and language.
 
         Never modifies the card object — duplicate rows in DB could trigger
         unique constraint violations if we write back. For language_override="ja",
         always rebuild with Japanese prefix since the stored URL (if any) is for
         the English version.
+
+        ja_card_number: the OCR-read card number from the physical Japanese card
+        (e.g. "56"). The English DB record may have a different number ("57"),
+        so the Japanese URL must use the OCR number to reach the correct PC page.
         """
-        if language_override == "ja" and card.set_name and card.card_number:
+        if language_override == "ja" and card.set_name:
+            number = ja_card_number or card.card_number
+            if not number:
+                return None
             return self.pc_scraper.build_game_url(
-                card.name, card.set_name, card.card_number, card.game, "ja"
+                card.name, card.set_name, number, card.game, "ja"
             )
         pc_url = card.pricecharting_url
         if pc_url is None and card.set_name and card.card_number:
@@ -450,11 +500,19 @@ class CardMatcherService:
             ],
         }
 
-    async def get_prices(self, card: Card, scan_type: str, language_override: str | None = None) -> dict | None:
+    _NEGATIVE_TTL = 3600  # 1h — PriceCharting 404s rarely change, but keep short enough to recover from temporary scrape failures
+
+    async def get_prices(
+        self,
+        card: Card,
+        scan_type: str,
+        language_override: str | None = None,
+        ja_card_number: str | None = None,
+    ) -> dict | None:
         if not card.name:
             return None
 
-        pc_url = self._build_pc_url(card, language_override)
+        pc_url = self._build_pc_url(card, language_override, ja_card_number)
         if not pc_url:
             return None
 
@@ -462,10 +520,35 @@ class CardMatcherService:
         pc_id, cache_key = self._price_cache_key(pc_url, scan_type, price_language)
 
         cached = await price_cache.get(cache_key)
-        if cached:
+        if cached is not None:
+            if isinstance(cached, dict) and cached.get("__not_found__"):
+                return None
             return cached
 
         prices = await self.pc_scraper.get_prices(pc_url)
+        if self._is_empty_prices(prices):
+            # Negative result — card not listed on PriceCharting (404 or empty page).
+            # Cache so we don't repeatedly hammer the scraper for the same miss.
+            logger.info("PriceCharting returned no data for %s — caching negative result", pc_url)
+            await price_cache.set(cache_key, ttl=self._NEGATIVE_TTL, value={"__not_found__": True})
+            return None
+
         price_dict = self._serialize_prices(prices, pc_id, pc_url, scan_type)
         await price_cache.set(cache_key, ttl=settings.scrape_cache_ttl_prices, value=price_dict)
         return price_dict
+
+    @staticmethod
+    def _is_empty_prices(prices) -> bool:
+        """True when the scraper found none of the price signals we expect — i.e. the
+        page is a 404 / not-catalogued placeholder rather than a real product page."""
+        return (
+            prices.loose is None
+            and prices.cib is None
+            and prices.graded_7 is None
+            and prices.graded_8 is None
+            and prices.graded_9 is None
+            and prices.graded_10 is None
+            and not prices.recent_sales
+            and not prices.price_history_ungraded
+            and not prices.price_history_graded
+        )

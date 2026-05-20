@@ -1,19 +1,20 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   Image, Modal, ScrollView, ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 import type { CardOut } from "@/services/api";
-import type { DetectedCard } from "@/types/scan";
+import type { BatchPriceCard, DetectedCard } from "@/types/scan";
 
 const CHECKMARK = "✓";
 
 export default function MultiResultsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     multiScanResult,
     multiScanLoading,
@@ -37,14 +38,23 @@ export default function MultiResultsScreen() {
 
   const handleViewCard = useCallback(
     (card: CardOut, dc?: DetectedCard) => {
+      // On swap, the original OCR's kana/number describe the *original* top candidate,
+      // not the swapped one — forwarding them makes the backend's JP image lookup return
+      // the same (wrong) image as before. Suppress them so the lookup falls through to
+      // `find_ja_image_by_name_en(swapped_card.name, ...)` and the detail page's card
+      // number falls back to the swapped card's English DB number.
+      // English scans are unaffected: kanaName/setTotal/cardNumber are only ever set
+      // when language === "ja" (see useMultiCardScan.ts), so these guards stay false
+      // for EN regardless of isSwapped.
+      const isSwapped = !!dc && card.id !== dc.searchResult.candidates[0]?.id;
       router.push({
         pathname: "/card/[id]",
         params: {
           id: String(card.id),
           language,
-          ...(dc?.kanaName && { kana_name: dc.kanaName }),
-          ...(dc?.setTotal && { set_total: String(dc.setTotal) }),
-          ...(dc?.cardNumber && { card_number: dc.cardNumber }),
+          ...(!isSwapped && dc?.kanaName && { kana_name: dc.kanaName }),
+          ...(!isSwapped && dc?.setTotal && { set_total: String(dc.setTotal) }),
+          ...(!isSwapped && dc?.cardNumber && { card_number: dc.cardNumber }),
         },
       });
     },
@@ -74,16 +84,51 @@ export default function MultiResultsScreen() {
   }, [cards]);
 
   const handleGetPrices = useCallback(() => {
-    const selected = cards
+    const batch: BatchPriceCard[] = cards
       .filter((dc) => checkedIndices.has(dc.regionIndex))
-      .map((dc) => getSelected(dc))
-      .filter((c): c is CardOut => !!c);
-    if (selected.length === 0) return;
-    setBatchPriceCards(selected);
+      .flatMap((dc) => {
+        const card = getSelected(dc);
+        if (!card) return [];
+        const isOriginalTop = card.id === dc.searchResult.candidates[0]?.id;
+        return [{
+          card,
+          // Use per-candidate JP image so swapped cards still show JP art on first paint.
+          // Backend batch_prices also returns ja_image_url per card; that supersedes once loaded.
+          jaImageUrl: dc.jaImageUrls?.[card.id],
+          // Only the original top candidate carries the OCR-read JP card number.
+          jaCardNumber: isOriginalTop ? dc.cardNumber : undefined,
+        }];
+      });
+    if (batch.length === 0) return;
+    setBatchPriceCards(batch);
     router.push({ pathname: "/batch-prices" });
   }, [cards, checkedIndices, getSelected, setBatchPriceCards, router]);
 
   const handleOpenSwap = useCallback((dc: DetectedCard) => setSwapTarget(dc), []);
+
+  // extraData must change whenever selections or checkedIndices change so FlatList
+  // forces CellRenderer re-renders. Without this, VirtualizedList skips updating
+  // visible cells because the `cards` array reference is stable after the scan.
+  const flatListExtraData = useMemo(
+    () => ({ selections, checkedIndices }),
+    [selections, checkedIndices],
+  );
+
+  const renderItem = useCallback(
+    ({ item: dc, index }: { item: DetectedCard; index: number }) => (
+      <ResultRow
+        dc={dc}
+        index={index}
+        language={language}
+        isChecked={checkedIndices.has(dc.regionIndex)}
+        selected={getSelected(dc)}
+        onToggle={toggleCheck}
+        onView={handleViewCard}
+        onSwap={handleOpenSwap}
+      />
+    ),
+    [language, checkedIndices, getSelected, toggleCheck, handleViewCard, handleOpenSwap],
+  );
 
   // Loading state — navigated here before scan completed, no cards yet
   if (multiScanLoading && cards.length === 0) {
@@ -162,17 +207,8 @@ export default function MultiResultsScreen() {
         data={cards}
         keyExtractor={(item) => String(item.regionIndex)}
         contentContainerStyle={styles.list}
-        renderItem={({ item: dc, index }) => (
-          <ResultRow
-            dc={dc}
-            index={index}
-            isChecked={checkedIndices.has(dc.regionIndex)}
-            selected={getSelected(dc)}
-            onToggle={toggleCheck}
-            onView={handleViewCard}
-            onSwap={handleOpenSwap}
-          />
-        )}
+        renderItem={renderItem}
+        extraData={flatListExtraData}
         ListFooterComponent={
           multiScanLoading ? (
             <View style={styles.loadingFooter}>
@@ -191,10 +227,16 @@ export default function MultiResultsScreen() {
         onRequestClose={() => setSwapTarget(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom + 8, 16) }]}>
             <Text style={styles.modalTitle}>Select correct card</Text>
             <ScrollView style={styles.modalList}>
-              {swapTarget?.searchResult.candidates.map((c) => (
+              {swapTarget?.searchResult.candidates.map((c) => {
+                // For ja scans, prefer the per-candidate JP image over the English DB art.
+                const displayImage =
+                  language === "ja"
+                    ? swapTarget.jaImageUrls?.[c.id] ?? c.image_url
+                    : c.image_url;
+                return (
                 <TouchableOpacity
                   key={c.id}
                   style={[
@@ -203,8 +245,8 @@ export default function MultiResultsScreen() {
                   ]}
                   onPress={() => handleSwapSelect(swapTarget, c)}
                 >
-                  {c.image_url ? (
-                    <Image source={{ uri: c.image_url }} style={styles.modalImage} resizeMode="contain" />
+                  {displayImage ? (
+                    <Image source={{ uri: displayImage }} style={styles.modalImage} resizeMode="contain" />
                   ) : (
                     <View style={[styles.modalImage, styles.imagePlaceholder]}>
                       <Text style={styles.placeholderText}>?</Text>
@@ -216,7 +258,8 @@ export default function MultiResultsScreen() {
                     {c.card_number && <Text style={styles.badge}>#{c.card_number}</Text>}
                   </View>
                 </TouchableOpacity>
-              ))}
+                );
+              })}
             </ScrollView>
             <TouchableOpacity style={styles.modalClose} onPress={() => setSwapTarget(null)}>
               <Text style={styles.modalCloseText}>Cancel</Text>
@@ -231,6 +274,7 @@ export default function MultiResultsScreen() {
 interface ResultRowProps {
   dc: DetectedCard;
   index: number;
+  language: string;
   isChecked: boolean;
   selected: CardOut | undefined;
   onToggle: (regionIndex: number) => void;
@@ -239,8 +283,12 @@ interface ResultRowProps {
 }
 
 const ResultRow = React.memo(function ResultRow({
-  dc, index, isChecked, selected, onToggle, onView, onSwap,
+  dc, index, language, isChecked, selected, onToggle, onView, onSwap,
 }: ResultRowProps) {
+  const displayCardNumber =
+    language === "ja" && dc.cardNumber
+      ? dc.setTotal ? `${dc.cardNumber}/${dc.setTotal}` : dc.cardNumber
+      : selected?.card_number;
   const hasAlternates = dc.searchResult.candidates.length > 1;
   return (
     <TouchableOpacity
@@ -270,21 +318,26 @@ const ResultRow = React.memo(function ResultRow({
         <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
       </View>
       <View style={styles.cardRow}>
-        {selected?.image_url ? (
-          <Image source={{ uri: selected.image_url }} style={styles.image} resizeMode="contain" />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Text style={styles.placeholderText}>?</Text>
-          </View>
-        )}
+        {(() => {
+          // ja scans: prefer per-candidate JP art (works post-swap); else fall back to EN.
+          const jaUrl = language === "ja" && selected ? dc.jaImageUrls?.[selected.id] : undefined;
+          const displayUrl = jaUrl ?? selected?.image_url;
+          return displayUrl ? (
+            <Image source={{ uri: displayUrl }} style={styles.image} resizeMode="contain" />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Text style={styles.placeholderText}>?</Text>
+            </View>
+          );
+        })()}
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={2}>{selected?.name ?? "Unknown"}</Text>
           {selected?.set_name && (
             <Text style={styles.setName} numberOfLines={1}>{selected.set_name}</Text>
           )}
           <View style={styles.badges}>
-            {selected?.card_number && (
-              <Text style={styles.badge}>#{selected.card_number}</Text>
+            {displayCardNumber && (
+              <Text style={styles.badge}>#{displayCardNumber}</Text>
             )}
             {selected?.rarity && (
               <Text style={styles.badge}>{selected.rarity}</Text>
@@ -396,7 +449,7 @@ const styles = StyleSheet.create({
   modalSheet: {
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 16, maxHeight: "75%",
+    paddingTop: 16, paddingHorizontal: 16, maxHeight: "75%",
   },
   modalTitle: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginBottom: 12 },
   modalList: { flexGrow: 1, flexShrink: 1 },

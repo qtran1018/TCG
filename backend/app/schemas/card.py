@@ -105,6 +105,25 @@ class DetectResult(BaseModel):
     image_height: int
 
 
+class BatchPricesRequest(BaseModel):
+    card_ids: list[int]
+    scan_type: str = "raw"
+    language: str | None = None
+    ja_card_numbers: dict[int, str] | None = None  # card_id → OCR-read JP card number
+
+
+class BatchPricesItem(BaseModel):
+    card_id: int
+    card: CardOut | None = None
+    price: PriceOut | None = None
+    ja_image_url: str | None = None
+    error: str | None = None
+
+
+class BatchPricesResponse(BaseModel):
+    items: list[BatchPricesItem]
+
+
 class ScanHistoryCreate(BaseModel):
     card_id: int | None = None
     game: str = "pokemon"

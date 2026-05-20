@@ -224,13 +224,29 @@ class PricechartingScraper(BaseScraper):
                 cells = row.find_all("td")
                 if len(cells) < 4:
                     continue
-                anchor = cells[2].find("a", href=True)
-                ebay_url = anchor["href"] if anchor else None
+                # Prefer a direct marketplace URL (eBay, TCGPlayer, Mercari, Yahoo) anywhere
+                # in the row; if none exist, fall back to whatever link sits in the title
+                # cell. PriceCharting Japanese pages often only have PC-internal offer
+                # links — those redirect to the actual marketplace listing when opened,
+                # so keeping them is more useful than dropping the link entirely.
+                sale_url = None
+                for cell in cells:
+                    for anchor in cell.find_all("a", href=True):
+                        normalized = _normalize_url(anchor["href"])
+                        if any(d in normalized for d in ("ebay.", "tcgplayer.", "mercari.", "yahoo.")):
+                            sale_url = normalized
+                            break
+                    if sale_url:
+                        break
+                if not sale_url:
+                    fallback = cells[2].find("a", href=True)
+                    if fallback:
+                        sale_url = _normalize_url(fallback["href"])
                 all_rows.append((
                     cells[0].get_text(strip=True),
                     cells[2].get_text(strip=True),
                     _parse_price_cell(cells[3]),
-                    ebay_url,
+                    sale_url,
                 ))
         for date, title, price, url in all_rows[:recent_sales_limit]:
             prices.recent_sales.append(SaleRecord(date=date, title=title, price=price, url=url))

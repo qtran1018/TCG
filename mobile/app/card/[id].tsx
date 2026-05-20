@@ -56,8 +56,13 @@ export default function CardDetailScreen() {
   const { card, price, ja_image_url } = data;
   const pcUrl = price?.pricecharting_url ?? card.pricecharting_url;
   const displayName = card.language === "ja" && card.name_ja ? card.name_ja : card.name;
-  // Prefer Japanese card image for Japanese scans; fall back to English art
   const displayImageUrl = ja_image_url ?? card.image_url_hi ?? card.image_url;
+  // For Japanese scans the DB record holds the English card number; use the
+  // OCR'd number from route params instead so the JP number is shown.
+  const displayCardNumber =
+    routeLanguage === "ja" && card_number
+      ? set_total ? `${card_number}/${set_total}` : card_number
+      : card.card_number;
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
@@ -81,7 +86,7 @@ export default function CardDetailScreen() {
 
         <View style={styles.metaGrid}>
           <MetaItem label="Set" value={card.set_name} />
-          <MetaItem label="Number" value={card.card_number} />
+          <MetaItem label="Number" value={displayCardNumber} />
           <MetaItem label="Rarity" value={card.rarity} />
           <MetaItem label="Game" value={card.game === "pokemon" ? "Pokémon" : "One Piece"} />
           {card.name_ja && card.language === "en" && (

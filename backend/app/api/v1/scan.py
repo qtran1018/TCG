@@ -17,6 +17,7 @@ from app.schemas.card import CardOutLite
 from app.services.cache import search_cache
 from app.services import matcher as _matcher
 from app.services.card_embedder import compute_phash, embed_batch
+from app.services.ja_image_lookup import find_ja_image_by_name_en
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 logger = logging.getLogger(__name__)
@@ -49,6 +50,13 @@ class ScanResultItem(BaseModel):
     candidates: list[CardOutLite]
     query_used: str
     match_source: str  # "ocr" | "image" | "both" | "none"
+    partial: bool = False
+    partial_reason: str | None = None  # "image_failed" | "ocr_failed" — both = "image_failed,ocr_failed"
+    # Per-candidate JP image overlay (ja scans only). Keyed by candidate.id as string.
+    # The DB only stores English cards, so when the user swaps to another candidate the
+    # backend must already know that candidate's JP image — looking it up per candidate
+    # up front lets the swap modal and downstream screens render the right JP art.
+    ja_image_urls: dict[str, str] = {}
 
 
 class _ImageSearchCache(BaseModel):
@@ -284,9 +292,19 @@ def _build_result(
     scan_mode: str,
     image: tuple[list[CardOutLite], float, str],
     ocr: tuple[list[CardOutLite], str],
+    image_failed: bool = False,
+    ocr_failed: bool = False,
 ) -> ScanResultItem:
     image_candidates, image_sim, image_query = image
     ocr_candidates, ocr_query = ocr
+
+    reasons: list[str] = []
+    if image_failed and scan_mode in ("image", "combined"):
+        reasons.append("image_failed")
+    if ocr_failed and scan_mode in ("ocr", "combined"):
+        reasons.append("ocr_failed")
+    partial = bool(reasons)
+    partial_reason = ",".join(reasons) if reasons else None
 
     if scan_mode == "ocr":
         return ScanResultItem(
@@ -294,6 +312,8 @@ def _build_result(
             candidates=ocr_candidates,
             query_used=ocr_query or "unknown",
             match_source="ocr" if ocr_candidates else "none",
+            partial=partial,
+            partial_reason=partial_reason,
         )
     if scan_mode == "image":
         return ScanResultItem(
@@ -301,6 +321,8 @@ def _build_result(
             candidates=image_candidates,
             query_used=image_query,
             match_source="image" if image_sim >= _SIM_THRESHOLD else ("image:low" if image_candidates else "none"),
+            partial=partial,
+            partial_reason=partial_reason,
         )
     merged, source = _rrf_merge(image_candidates, ocr_candidates, ocr_query, image_sim, scan_mode)
     return ScanResultItem(
@@ -308,6 +330,8 @@ def _build_result(
         candidates=merged,
         query_used=ocr_query if ocr_candidates else image_query,
         match_source=source,
+        partial=partial,
+        partial_reason=partial_reason,
     )
 
 
@@ -350,12 +374,32 @@ async def scan(req: ScanRequest):
     async def per_crop(i: int) -> ScanResultItem:
         image_task = _image_search_one(i, imgs[i]) if do_image else _empty_image(i)
         ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
-        try:
-            image, ocr = await asyncio.gather(image_task, ocr_task)
-        except Exception:
-            logger.exception("Per-crop search failed for crop %d", i)
-            image, ocr = ([], 0.0, "image:no_match"), ([], "")
-        return _build_result(i, req.scan_mode, image, ocr)
+        # return_exceptions=True so a failure in one branch doesn't zero out the
+        # other — surface degraded mode via partial flag instead.
+        image_res, ocr_res = await asyncio.gather(image_task, ocr_task, return_exceptions=True)
+        image_failed = isinstance(image_res, BaseException)
+        ocr_failed = isinstance(ocr_res, BaseException)
+        if image_failed:
+            logger.exception("Image search failed for crop %d", i, exc_info=image_res)
+            image_res = ([], 0.0, "image:no_match")
+        if ocr_failed:
+            logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
+            ocr_res = ([], "")
+        result = _build_result(
+            i, req.scan_mode, image_res, ocr_res,
+            image_failed=image_failed, ocr_failed=ocr_failed,
+        )
+        if hints[i].language == "ja" and result.candidates:
+            # Pass each candidate's own card_number so name-collision variants
+            # (e.g. multiple Charizard printings) resolve to their own JP entry
+            # instead of all sharing the first-by-name match.
+            ja_map: dict[str, str] = {}
+            for c in result.candidates:
+                url = find_ja_image_by_name_en(c.name, None, c.card_number, strict=True)
+                if url:
+                    ja_map[str(c.id)] = url
+            result.ja_image_urls = ja_map
+        return result
 
     async def generate():
         # Kick off all crops in parallel; yield each result as it completes.

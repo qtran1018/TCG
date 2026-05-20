@@ -1,3 +1,5 @@
+import base64
+import gzip
 import json
 import logging
 from typing import Any
@@ -6,6 +8,13 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Values larger than this are gzip-compressed before storing. Price entries
+# with full sales tables + 24-month history series typically run 4–10 KB —
+# compression shrinks them to ~25–35%. Below the threshold the overhead isn't
+# worth it.
+_COMPRESS_THRESHOLD_BYTES = 2048
+_COMPRESS_PREFIX = "gz:"  # marker so reads can detect compressed payloads
 
 _redis: aioredis.Redis | None = None
 
@@ -30,6 +39,13 @@ class CacheService:
         raw = await r.get(self._key(*key_parts))
         if raw is None:
             return None
+        if isinstance(raw, str) and raw.startswith(_COMPRESS_PREFIX):
+            try:
+                decoded = base64.b64decode(raw[len(_COMPRESS_PREFIX):])
+                raw = gzip.decompress(decoded).decode("utf-8")
+            except Exception:
+                logger.warning("Failed to decompress cached value at %s", ":".join(key_parts), exc_info=True)
+                return None
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -38,7 +54,11 @@ class CacheService:
     async def set(self, *key_parts_and_value, ttl: int, value: Any) -> None:
         r = await get_redis()
         key = self._key(*key_parts_and_value)
-        await r.set(key, json.dumps(value), ex=ttl)
+        payload = json.dumps(value)
+        if len(payload) > _COMPRESS_THRESHOLD_BYTES:
+            compressed = gzip.compress(payload.encode("utf-8"))
+            payload = _COMPRESS_PREFIX + base64.b64encode(compressed).decode("ascii")
+        await r.set(key, payload, ex=ttl)
 
     async def delete(self, *key_parts: str) -> None:
         r = await get_redis()

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Game, Language, ScanType } from "@/constants";
 import type { CardOut } from "@/services/api";
-import type { DetectedCard, MultiScanResult } from "@/types/scan";
+import type { BatchPriceCard, DetectedCard, MultiScanResult } from "@/types/scan";
 
 interface ScanState {
   game: Game;
@@ -15,15 +15,15 @@ interface ScanState {
   multiScanTotalRegions: number;
   multiScanError: string | null;
 
-  // Cards selected for batch price lookup
-  batchPriceCards: CardOut[];
+  // Cards selected for batch price lookup (with optional JP metadata)
+  batchPriceCards: BatchPriceCard[];
 
   setGame: (game: Game) => void;
   setLanguage: (language: Language) => void;
   setScanType: (scanType: ScanType) => void;
   setPsaCertInput: (cert: string) => void;
   setMultiScanResult: (result: MultiScanResult | null) => void;
-  setBatchPriceCards: (cards: CardOut[]) => void;
+  setBatchPriceCards: (cards: BatchPriceCard[]) => void;
 
   // Progressive multi-scan actions
   clearMultiScan: () => void;

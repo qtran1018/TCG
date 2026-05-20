@@ -52,7 +52,7 @@ export function PriceDisplay({ price, scanType }: Props) {
               <View style={styles.salePriceWrap}>
                 <Text style={styles.salePrice}>{sale.price != null ? `$${sale.price.toFixed(2)}` : "N/A"}</Text>
                 {sale.url && (
-                  <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch(() => {})}>
+                  <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch((e) => console.warn("[price-display] openURL failed:", sale.url, e))}>
                     <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
                   </TouchableOpacity>
                 )}

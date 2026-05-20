@@ -186,6 +186,62 @@ def find_ja_image(
     return None
 
 
+def find_ja_image_by_name_en(
+    name_en: str,
+    set_total: int | None = None,
+    card_number: str | None = None,
+    strict: bool = False,
+) -> str | None:
+    """
+    Like find_ja_image but takes an English name directly (skips kana translation).
+    Used when kana_name is unavailable (e.g. navigating from history).
+
+    strict=True: if set_total/card_number are provided but no entry matches,
+    return None instead of falling back to first-by-name. Use for swap-candidate
+    lookups where the wrong art is worse than the EN art.
+    """
+    _ensure_loaded()
+    if not name_en:
+        return None
+
+    name_key = name_en.lower().strip()
+
+    if _tcg_by_name:
+        candidates = _tcg_by_name.get(name_key, [])
+        if candidates:
+            if set_total and card_number:
+                cn_norm = str(int(card_number)) if card_number.isdigit() else card_number
+                exact = [
+                    c for c in candidates
+                    if c.get("set_total") == set_total and c.get("card_number") == cn_norm
+                ]
+                if exact:
+                    return exact[0]["image_url"]
+
+            if set_total:
+                by_total = [c for c in candidates if c.get("set_total") == set_total]
+                if by_total:
+                    if card_number:
+                        cn_norm = str(int(card_number)) if card_number.isdigit() else card_number
+                        by_num = [c for c in by_total if c.get("card_number") == cn_norm]
+                        if by_num:
+                            return by_num[0]["image_url"]
+                    return by_total[0]["image_url"]
+
+            if card_number:
+                cn_norm = str(int(card_number)) if card_number.isdigit() else card_number
+                by_num = [c for c in candidates if c.get("card_number") == cn_norm]
+                if by_num:
+                    return by_num[0]["image_url"]
+
+            if strict and (set_total or card_number):
+                return None
+
+            return candidates[0]["image_url"]
+
+    return None
+
+
 def find_all_ja_images(kana_name: str) -> list[str]:
     """Return all known Japanese image URLs for a kana name, newest set first."""
     _ensure_loaded()

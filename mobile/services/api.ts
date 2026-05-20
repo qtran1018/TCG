@@ -61,6 +61,14 @@ export interface CardWithPrice {
   ja_image_url?: string;
 }
 
+export interface BatchPricesItem {
+  card_id: number;
+  card?: CardOut;
+  price?: PriceOut;
+  ja_image_url?: string | null;
+  error?: string | null;
+}
+
 export interface PSACertResult {
   cert_number: string;
   grade?: string;
@@ -90,6 +98,9 @@ export interface ScanStreamResult {
   candidates: CardOut[];
   query_used: string;
   match_source: "ocr" | "image" | "both" | "none";
+  partial?: boolean;
+  partial_reason?: string | null;
+  ja_image_urls?: Record<string, string>;
 }
 
 export interface ScanOcrHint {
@@ -153,6 +164,21 @@ export const api = {
     return data;
   },
 
+  async batchPrices(
+    cardIds: number[],
+    scanType: ScanType,
+    language?: string,
+    jaCardNumbers?: Record<number, string>,
+  ): Promise<BatchPricesItem[]> {
+    const { data } = await client.post<{ items: BatchPricesItem[] }>("/cards/prices", {
+      card_ids: cardIds,
+      scan_type: scanType,
+      ...(language && { language }),
+      ...(jaCardNumbers && Object.keys(jaCardNumbers).length > 0 && { ja_card_numbers: jaCardNumbers }),
+    });
+    return data.items;
+  },
+
   async detectCards(imageBase64: string, maxCards = 10): Promise<DetectResult> {
     const { data } = await client.post<DetectResult>("/detect", {
       image_base64: imageBase64,
@@ -161,9 +187,12 @@ export const api = {
     return data;
   },
 
-  async getHistory(limit = 50, offset = 0): Promise<HistoryEntry[]> {
+  async getHistory(limit = 50, offset = 0, beforeId?: number): Promise<HistoryEntry[]> {
     const { data } = await client.get<HistoryEntry[]>("/cards/history/list", {
-      params: { limit, offset },
+      params: {
+        limit,
+        ...(beforeId != null ? { before_id: beforeId } : { offset }),
+      },
     });
     return data;
   },
@@ -181,7 +210,7 @@ export const api = {
     scanMode: string,
     onResult: (item: ScanStreamResult) => void,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<{ aborted: boolean }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE_URL}/scan`);
@@ -217,12 +246,14 @@ export const api = {
         if (lineBuffer.trim()) {
           try { onResult(JSON.parse(lineBuffer) as ScanStreamResult); } catch { /* ignore */ }
         }
-        resolve();
+        resolve({ aborted: false });
       };
 
       xhr.onerror = () => reject(new Error("Scan stream request failed"));
       xhr.ontimeout = () => reject(new Error("Scan stream timed out"));
-      xhr.onabort = () => resolve(); // treat abort as clean finish
+      // Resolve with aborted=true so callers can distinguish "user/unmount
+      // cancelled" from "stream finished normally".
+      xhr.onabort = () => resolve({ aborted: true });
 
       xhr.send(JSON.stringify({
         crops,

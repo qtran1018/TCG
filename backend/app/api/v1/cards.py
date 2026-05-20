@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,9 +6,18 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.card import Card, ScanHistory
-from app.schemas.card import CardOut, CardWithPrice, PriceOut, HistoryEntry, ScanHistoryCreate
+from app.schemas.card import (
+    BatchPricesItem,
+    BatchPricesRequest,
+    BatchPricesResponse,
+    CardOut,
+    CardWithPrice,
+    HistoryEntry,
+    PriceOut,
+    ScanHistoryCreate,
+)
 from app.services import matcher as _matcher
-from app.services.ja_image_lookup import find_ja_image
+from app.services.ja_image_lookup import find_ja_image, find_ja_image_by_name_en
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -30,7 +40,13 @@ async def get_card(
 
     # Fetch fresh price (cached internally). Pass scan language to override card.language
     # for price URL building — e.g. Japanese scan of an English-stored card.
-    price_dict = await _matcher.get_prices(card, scan_type, language_override=language)
+    # ja_card_number is the OCR-read number from the physical card; the English DB
+    # record may carry a different number so the JP PriceCharting URL needs the OCR value.
+    price_dict = await _matcher.get_prices(
+        card, scan_type,
+        language_override=language,
+        ja_card_number=card_number if language == "ja" else None,
+    )
     await db.commit()
 
     price_out = None
@@ -40,12 +56,78 @@ async def get_card(
             fetched_at=datetime.utcnow(),
         )
 
-    # For Japanese scans, look up the Japanese card image
+    # For Japanese scans, look up the Japanese card image.
+    # Prefer kana-based lookup (more precise); fall back to English name from DB
+    # so that navigating from history (no kana available) still shows JP art.
     ja_image_url: str | None = None
-    if language == "ja" and kana_name:
-        ja_image_url = find_ja_image(kana_name, set_total, card_number)
+    if language == "ja":
+        if kana_name:
+            ja_image_url = find_ja_image(kana_name, set_total, card_number)
+        if not ja_image_url:
+            ja_image_url = find_ja_image_by_name_en(card.name, set_total, card_number)
 
     return CardWithPrice(card=CardOut.model_validate(card), price=price_out, ja_image_url=ja_image_url)
+
+
+@router.post("/prices", response_model=BatchPricesResponse)
+async def batch_prices(req: BatchPricesRequest, db: AsyncSession = Depends(get_db)):
+    """Fetch prices for multiple cards in one call.
+
+    Cache hits resolve immediately in parallel; cache misses serialize through
+    the scraper's rate limiter (3s/domain), so worst-case latency is
+    `(misses) * rate_limit + slowest_scrape`. Mobile saves the N HTTP
+    round-trips of calling /cards/{id} one at a time.
+    """
+    card_ids = list(dict.fromkeys(req.card_ids))[:25]  # de-dupe, cap
+    if not card_ids:
+        return BatchPricesResponse(items=[])
+
+    result = await db.execute(select(Card).where(Card.id.in_(card_ids)))
+    cards_by_id: dict[int, Card] = {c.id: c for c in result.scalars().all()}
+
+    async def fetch_one(card_id: int) -> BatchPricesItem:
+        card = cards_by_id.get(card_id)
+        if not card:
+            return BatchPricesItem(card_id=card_id, error="not_found")
+        try:
+            ja_card_number = req.ja_card_numbers.get(card_id) if req.ja_card_numbers else None
+            price_dict = await _matcher.get_prices(
+                card, req.scan_type,
+                language_override=req.language,
+                ja_card_number=ja_card_number if req.language == "ja" else None,
+            )
+        except Exception as e:
+            logger.exception("Batch price fetch failed for card %d", card_id)
+            return BatchPricesItem(
+                card_id=card_id,
+                card=CardOut.model_validate(card),
+                error=type(e).__name__,
+            )
+        price_out = (
+            PriceOut(**price_dict, fetched_at=datetime.utcnow()) if price_dict else None
+        )
+        # JP image overlay: DB stores English cards only, so for ja scans we need to
+        # resolve the JP art per card. ja_card_number from OCR (if present) narrows
+        # to the right variant; for swapped cards no number was sent → name fallback.
+        ja_image_url: str | None = None
+        if req.language == "ja":
+            # Prefer OCR-derived ja_card_number when present; otherwise fall back to
+            # the card's own DB card_number so swapped variants (no OCR number sent)
+            # still disambiguate instead of all hitting the first-by-name JP entry.
+            number_for_lookup = ja_card_number or card.card_number
+            ja_image_url = find_ja_image_by_name_en(
+                card.name, None, number_for_lookup, strict=True,
+            )
+        return BatchPricesItem(
+            card_id=card_id,
+            card=CardOut.model_validate(card),
+            price=price_out,
+            ja_image_url=ja_image_url,
+        )
+
+    items = await asyncio.gather(*[fetch_one(cid) for cid in card_ids])
+    await db.commit()
+    return BatchPricesResponse(items=list(items))
 
 
 @router.post("/history", status_code=201)
@@ -63,12 +145,20 @@ async def save_history(
 async def get_history(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    before_id: int | None = Query(default=None, description="Keyset cursor: return rows with id < before_id"),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(ScanHistory)
-        .order_by(desc(ScanHistory.scanned_at))
-        .offset(offset)
-        .limit(limit)
-    )
+    """List scan history.
+
+    Supports two pagination modes:
+    - Keyset (preferred): pass `before_id`=last seen id; rows ordered by id DESC.
+      Stable under concurrent inserts; O(log n) per page via PK index.
+    - Offset (legacy): omit `before_id`; uses offset/limit on `scanned_at`.
+    """
+    stmt = select(ScanHistory)
+    if before_id is not None:
+        stmt = stmt.where(ScanHistory.id < before_id).order_by(desc(ScanHistory.id)).limit(limit)
+    else:
+        stmt = stmt.order_by(desc(ScanHistory.scanned_at)).offset(offset).limit(limit)
+    result = await db.execute(stmt)
     return [HistoryEntry.model_validate(r) for r in result.scalars().all()]

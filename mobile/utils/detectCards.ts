@@ -182,6 +182,11 @@ export function detectCardRegions(
 
   let bestRegions: CardRegion[] = [];
 
+  // Early-exit threshold: once a pass finds at least this many card-shaped
+  // regions, additional passes are unlikely to do better and the per-pass
+  // O(n²) clustering is the dominant cost.
+  const EARLY_EXIT_REGIONS = 3;
+
   for (const threshold of thresholds) {
     const clusters = clusterBlocks(blocks, threshold);
     const regions: CardRegion[] = [];
@@ -195,6 +200,8 @@ export function detectCardRegions(
     if (regions.length > bestRegions.length) {
       bestRegions = regions;
     }
+
+    if (bestRegions.length >= EARLY_EXIT_REGIONS) break;
   }
 
   if (bestRegions.length > 0) {
