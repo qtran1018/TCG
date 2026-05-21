@@ -25,10 +25,10 @@ interface UseMultiCardScanReturn {
   error: string | null;
 }
 
-// Require 2+ consecutive kana characters to avoid false positives from OCR noise
-// on EN cards (e.g. a single stray kana misread from adjacent JP card bleed or decorative symbols).
-// All real JP Pokémon names are ≥3 kana; requiring 2 consecutive is safe.
-const KANA_RE = /[゠-ヿぁ-ゖ]{2,}/;
+// Require 3+ consecutive kana. Applied to the name-region sub-crop (top 18%) which is
+// clean enough that false positives are rare. The {3,} minimum also guards against
+// single stray kana. All real JP Pokémon names are ≥3 kana (shortest: アブラ = Abra = 3).
+const KANA_RE = /[゠-ヿぁ-ゖ]{3,}/;
 function detectCropLanguage(text: string): "en" | "ja" {
   return KANA_RE.test(text) ? "ja" : "en";
 }
@@ -124,7 +124,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             const base64 = await FileSystem.readAsStringAsync(resized.uri, {
               encoding: FileSystem.EncodingType.Base64,
             });
-            const detected = await api.detectCards(base64, 10);
+            const detected = await api.detectCards(base64, 20);
             if (detected.boxes.length > 0) {
               regions = boxesToRegions(detected.boxes);
               setProgress(`Found ${regions.length} card outline${regions.length !== 1 ? "s" : ""}...`);
@@ -148,7 +148,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
 
         // 4. Crop each detected region
         setProgress(`Found ${regions.length} region${regions.length !== 1 ? "s" : ""}, reading each...`);
-        const regionCount = Math.min(regions.length, 10);
+        const regionCount = Math.min(regions.length, 20);
         const cropData: Array<{
           regionIndex: number;
           uri: string;
@@ -200,39 +200,41 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
                 .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
                 .map((b) => b.text)
                 .join("\n");
-              cropLang = detectCropLanguage(fullCropText);
+
+              // Language detection: ALWAYS use the name-region sub-crop (top 18%, 5–95% width).
+              // Full crop text is too noisy — type symbols, energy icons, flavor text, and
+              // attack text produce kana misreads on EN cards even at the {3,} threshold.
+              // Name region contains only card name + HP, which is clean enough to be reliable.
+              let nameText = "";
+              try {
+                const nameH = Math.max(1, Math.round(cropH * 0.18));
+                const nameW = Math.max(1, Math.round(cropW * 0.90));
+                const nameOriginX = Math.round(cropW * 0.05);
+                const nameCropImg = await ImageManipulator.manipulateAsync(
+                  uri,
+                  [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
+                  { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+                );
+                const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
+                nameText = nameResult.blocks
+                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                  .map((b) => b.text)
+                  .join("\n");
+              } catch (e) {
+                console.warn("[MultiScan] name region OCR failed, falling back to full crop for language detection:", e);
+              }
+              // Prefer name region for language; fall back to full crop if name region empty.
+              cropLang = nameText ? detectCropLanguage(nameText) : detectCropLanguage(fullCropText);
 
               if (scanMode !== "image") {
                 const confidence = assessCardConfidence(fullCropText, cropResult.blocks.length, game, cropLang);
                 if (confidence.isCard) {
-                  // Name region sub-crop: top 18% of the card image, 5–95% width.
-                  // This eliminates attack text, flavor text, and adjacent card bleed
-                  // from the name extraction input while keeping the card name + HP line.
-                  try {
-                    const nameH = Math.max(1, Math.round(cropH * 0.18));
-                    const nameW = Math.max(1, Math.round(cropW * 0.90));
-                    const nameOriginX = Math.round(cropW * 0.05);
-                    const nameCropImg = await ImageManipulator.manipulateAsync(
-                      uri,
-                      [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
-                      { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-                    );
-                    const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
-                    const nameText = nameResult.blocks
-                      .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                      .map((b) => b.text)
-                      .join("\n");
-                    // Detect language from name region — kana more reliably present here.
-                    if (nameText) cropLang = detectCropLanguage(nameText);
-                    // Append card number from bottom corners of full-image blocks.
-                    const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
-                    rawText = numberText && /\d/.test(numberText)
-                      ? `${nameText}\n${numberText}`
-                      : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
-                  } catch (e) {
-                    console.warn("[MultiScan] name region OCR failed, falling back to full crop:", e);
-                    rawText = augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
-                  }
+                  // nameText already computed above — reuse it for rawText.
+                  // Append card number from bottom corners of full-image blocks.
+                  const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
+                  rawText = numberText && /\d/.test(numberText)
+                    ? `${nameText}\n${numberText}`
+                    : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
                 }
               }
             } catch (e) {

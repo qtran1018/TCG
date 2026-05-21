@@ -88,7 +88,7 @@ class PSACertResult(BaseModel):
 
 class DetectRequest(BaseModel):
     image_base64: str
-    max_cards: int = 10
+    max_cards: int = 20
 
 
 class BoundingBox(BaseModel):

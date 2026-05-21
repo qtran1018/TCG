@@ -116,16 +116,27 @@ def _slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
+# JP sets where TCGCollector uses the JP marketing name but PriceCharting uses a
+# different name (often the EN equivalent). Values are pre-slugified PC set slugs
+# because _slugify strips '&' which PriceCharting keeps in URLs.
+# Keyed on the TCGCollector set_name as stored in the DB.
+_JP_PC_SET_SLUG: dict[str, str] = {
+    "Pokémon Card 151": "scarlet-&-violet-151",
+}
+
+
 class PricechartingScraper(BaseScraper):
 
     def build_game_url(self, name: str, set_name: str, card_number: str, game: str = "pokemon", language: str = "en") -> str:
         num = card_number.split("/")[0].lstrip("0") or "0"
         name_slug = _slugify(name)
-        set_slug = _slugify(set_name)
         if game == "pokemon":
             if language == "ja":
+                set_slug = _JP_PC_SET_SLUG.get(set_name) or _slugify(set_name)
                 return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}-{num}"
+            set_slug = _slugify(set_name)
             return f"https://www.pricecharting.com/game/pokemon-{set_slug}/{name_slug}-{num}"
+        set_slug = _slugify(set_name)
         return f"https://www.pricecharting.com/game/{set_slug}/{name_slug}-{num}"
 
     async def search(self, query: str, max_results: int = 10) -> list[PCSearchResult]:
@@ -245,7 +256,12 @@ class PricechartingScraper(BaseScraper):
                 if not sale_url:
                     fallback = cells[2].find("a", href=True)
                     if fallback:
-                        sale_url = _normalize_url(fallback["href"])
+                        candidate = _normalize_url(fallback["href"])
+                        # /console/ paths are set-listing pages, not individual sale links.
+                        # A redirect to the console page means PriceCharting has no listing
+                        # for this card — don't surface it as a clickable sale URL.
+                        if "/console/" not in candidate:
+                            sale_url = candidate
                 all_rows.append((
                     cells[0].get_text(strip=True),
                     cells[2].get_text(strip=True),
@@ -254,5 +270,11 @@ class PricechartingScraper(BaseScraper):
                 ))
         for date, title, price, url in all_rows[:recent_sales_limit]:
             prices.recent_sales.append(SaleRecord(date=date, title=title, price=price, url=url))
+
+        # If the page returned sale rows but none have any URL and there is no loose price,
+        # the page is almost certainly a PriceCharting disambiguation/search page, not a
+        # real card page. Discard the bogus rows so _is_empty_prices fires correctly.
+        if prices.loose is None and prices.recent_sales and not any(s.url for s in prices.recent_sales):
+            prices.recent_sales = []
 
         return prices

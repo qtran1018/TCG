@@ -25,7 +25,6 @@ export function PriceDisplay({ price, scanType }: Props) {
         ]
       : [
           { label: "Market (Raw)", value: price.price_loose, highlight: true },
-          { label: "Complete", value: price.price_cib },
         ];
 
   return (

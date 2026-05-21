@@ -45,7 +45,7 @@ def _get_yolo_model():
 
 def detect_card_rectangles(
     image_base64: str,
-    max_cards: int = 10,
+    max_cards: int = 20,
 ) -> tuple[list[dict], int, int]:
     """
     Returns (boxes, image_width, image_height).

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, Image,
   ActivityIndicator, TouchableOpacity, Linking,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PriceDisplay } from "@/components/Card/PriceDisplay";
 import { api, CardWithPrice } from "@/services/api";
@@ -17,22 +17,22 @@ export default function CardDetailScreen() {
   const { scanType } = useScanStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadCard = useCallback((refresh = false) => {
     if (!id) return;
-    setIsLoading(true);
+    if (refresh) setIsRefreshing(true);
+    else setIsLoading(true);
+    setError(null);
     api
-      .getCard(
-        Number(id),
-        scanType,
-        routeLanguage,
-        card_number,
-      )
+      .getCard(Number(id), scanType, routeLanguage, card_number)
       .then(setData)
       .catch((e) => setError(e?.message ?? "Failed to load card"))
-      .finally(() => setIsLoading(false));
-  }, [id, scanType]);
+      .finally(() => { setIsLoading(false); setIsRefreshing(false); });
+  }, [id, scanType, routeLanguage, card_number]);
+
+  useEffect(() => { loadCard(); }, [loadCard]);
 
   if (isLoading) {
     return (
@@ -47,6 +47,9 @@ export default function CardDetailScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error ?? "Card not found"}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => loadCard()}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -88,10 +91,32 @@ export default function CardDetailScreen() {
         </View>
 
         {price ? (
-          <PriceDisplay price={price} scanType={scanType} />
+          <>
+            <PriceDisplay price={price} scanType={scanType} />
+            <TouchableOpacity
+              style={styles.reloadBtn}
+              onPress={() => loadCard(true)}
+              disabled={isRefreshing}
+            >
+              {isRefreshing
+                ? <ActivityIndicator size="small" color={COLORS.accent} />
+                : <Text style={styles.reloadText}>↻ Refresh price</Text>
+              }
+            </TouchableOpacity>
+          </>
         ) : (
           <View style={styles.noPriceBox}>
-            <Text style={styles.noPriceText}>No pricing data available yet.</Text>
+            <Text style={styles.noPriceText}>No pricing data available.</Text>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => loadCard(true)}
+              disabled={isRefreshing}
+            >
+              {isRefreshing
+                ? <ActivityIndicator size="small" color={COLORS.accent} />
+                : <Text style={styles.retryText}>Retry</Text>
+              }
+            </TouchableOpacity>
           </View>
         )}
 
@@ -157,8 +182,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: COLORS.border,
+    gap: 12,
   },
   noPriceText: { color: COLORS.textMuted, fontSize: 14 },
+  reloadBtn: { alignItems: "center", paddingVertical: 8 },
+  reloadText: { color: COLORS.accent, fontSize: 13, fontWeight: "600" },
+  retryBtn: {
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   pcLink: { alignItems: "center", paddingVertical: 12 },
   pcLinkText: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
 });

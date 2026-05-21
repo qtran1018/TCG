@@ -212,7 +212,18 @@ async def _image_search_one(
         asyncio.to_thread(lambda: embed_batch([img_bytes])[0]),
         asyncio.to_thread(compute_phash, img_bytes),
     )
-    return await _vector_search(embedding, query_phash, img_bytes, language)
+    candidates, best_sim, query_used = await _vector_search(embedding, query_phash, img_bytes, language)
+
+    # If JP image search is below confident threshold, also try EN — mirrors the OCR
+    # JP→EN fallback and recovers EN cards that triggered kana language detection on mobile
+    # (e.g. water-type symbol misread as 2 kana, flipping cropLang to 'ja').
+    if language == "ja" and best_sim < _SIM_THRESHOLD:
+        en_candidates, en_sim, en_query = await _vector_search(embedding, query_phash, img_bytes, "en")
+        if en_sim > best_sim:
+            logger.info("Image search: JP sim=%.3f < threshold, EN sim=%.3f — using EN result", best_sim, en_sim)
+            return en_candidates, en_sim, en_query
+
+    return candidates, best_sim, query_used
 
 
 async def _batch_image_search(
@@ -364,8 +375,8 @@ async def scan(req: ScanRequest):
     completion order (not crop order) so fast cards appear in the UI without
     waiting for slow ones.
     """
-    crops = req.crops[:10]
-    hints = list(req.ocr_hints[:10])
+    crops = req.crops[:20]
+    hints = list(req.ocr_hints[:20])
     while len(hints) < len(crops):
         hints.append(OcrHint())
 
