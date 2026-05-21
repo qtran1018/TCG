@@ -22,7 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    db_url = os.environ["DATABASE_URL"].replace("+asyncpg", "")
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        db_url = db_url.replace("+asyncpg", "")
+    else:
+        # Fall back to the same POSTGRES_* vars the app uses.
+        db_url = (
+            f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}"
+            f"@{os.environ['POSTGRES_HOST']}:{os.environ['POSTGRES_PORT']}/{os.environ['POSTGRES_DB']}"
+        )
     conn = await asyncpg.connect(db_url)
     try:
         await conn.execute("DROP INDEX IF EXISTS ix_cards_embedding_ivfflat")
