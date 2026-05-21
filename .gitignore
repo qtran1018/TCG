@@ -35,6 +35,9 @@ backend/models/*.pkl
 backend/models/*.onnx
 backend/models/embedding_failures.json
 
+# Backup model weights (kept locally, not in git — too large)
+backend/models/*_backup.pt
+
 # YOLO training run output (weights, plots, metrics)
 runs/
 
