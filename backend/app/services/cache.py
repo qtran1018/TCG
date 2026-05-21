@@ -37,6 +37,17 @@ class CacheService:
     async def get(self, *key_parts: str) -> Any | None:
         r = await get_redis()
         raw = await r.get(self._key(*key_parts))
+        return self._decode(raw, key_parts)
+
+    async def mget(self, key_parts_list: list[tuple[str, ...]]) -> list[Any | None]:
+        """Batch fetch — one Redis round-trip instead of N. Order is preserved."""
+        if not key_parts_list:
+            return []
+        r = await get_redis()
+        raws = await r.mget([self._key(*parts) for parts in key_parts_list])
+        return [self._decode(raw, parts) for raw, parts in zip(raws, key_parts_list)]
+
+    def _decode(self, raw, key_parts: tuple[str, ...]) -> Any | None:
         if raw is None:
             return None
         if isinstance(raw, str) and raw.startswith(_COMPRESS_PREFIX):

@@ -106,6 +106,13 @@ export interface ScanOcrHint {
   game: string;
 }
 
+export interface ExchangeRate {
+  base: string;
+  quote: string;
+  rate: number;
+  date: string;
+}
+
 export interface HistoryEntry {
   id: number;
   game: string;
@@ -185,6 +192,11 @@ export const api = {
         ...(beforeId != null ? { before_id: beforeId } : { offset }),
       },
     });
+    return data;
+  },
+
+  async getExchangeRate(): Promise<ExchangeRate> {
+    const { data } = await client.get<ExchangeRate>("/currency/rates");
     return data;
   },
 

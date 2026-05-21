@@ -3,30 +3,30 @@ import { View, Text, StyleSheet, Dimensions } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { COLORS } from "@/constants";
 import type { PricePoint } from "@/services/api";
+import type { Currency } from "@/store/currencyStore";
+import { convertPriceHistory, chartYLabel } from "@/utils/currency";
 
 interface Props {
   history: PricePoint[];
   label: string;
+  currency?: Currency;
+  jpyRate?: number | null;
 }
 
 const CHART_WIDTH = Dimensions.get("window").width - 48;
 
-export function PriceChart({ history, label }: Props) {
-  // Show at most 24 most-recent points; keep every Nth label to avoid crowding
+export function PriceChart({ history, label, currency = "USD", jpyRate = null }: Props) {
   const chart = useMemo(() => {
     if (!history || history.length < 2) return null;
-    const points = history.slice(-24);
+    const points = convertPriceHistory(history.slice(-24), currency, jpyRate);
     const labelStep = Math.ceil(points.length / 6);
     const labels = points.map((p, i) => (i % labelStep === 0 ? p.date.slice(0, 7) : ""));
     const prices = points.map((p) => p.price);
     const maxPrice = Math.max(...prices);
-    const decimalPlaces = maxPrice < 1 ? 2 : maxPrice < 10 ? 1 : 0;
-    const formatYLabel = (v: string) => {
-      const n = Number(v);
-      return maxPrice < 1 ? `$${n.toFixed(2)}` : maxPrice < 10 ? `$${n.toFixed(1)}` : `$${n.toFixed(0)}`;
-    };
+    const decimalPlaces = currency === "JPY" ? 0 : maxPrice < 1 ? 2 : maxPrice < 10 ? 1 : 0;
+    const formatYLabel = chartYLabel(currency, maxPrice);
     return { labels, prices, decimalPlaces, formatYLabel };
-  }, [history]);
+  }, [history, currency, jpyRate]);
 
   if (!chart) return null;
   const { labels, prices, decimalPlaces, formatYLabel } = chart;

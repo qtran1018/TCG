@@ -1,21 +1,20 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ActivityIndicator } from "react-native";
 import { COLORS } from "@/constants";
 import type { PriceOut } from "@/services/api";
 import { PriceChart } from "./PriceChart";
 import { saleLinkLabel } from "@/utils/saleLink";
+import { useCurrencyStore } from "@/store/currencyStore";
+import { fmtPrice } from "@/utils/currency";
 
 interface Props {
   price: PriceOut;
   scanType: "raw" | "psa";
 }
 
-function fmt(val: number | undefined): string {
-  if (val == null) return "N/A";
-  return `$${val.toFixed(2)}`;
-}
-
 export function PriceDisplay({ price, scanType }: Props) {
+  const { currency, jpyRate, fetching, setCurrency } = useCurrencyStore();
+
   const rows =
     scanType === "psa"
       ? [
@@ -31,14 +30,37 @@ export function PriceDisplay({ price, scanType }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Pricing</Text>
+      <View style={styles.headingRow}>
+        <Text style={styles.heading}>Pricing</Text>
+        <View style={styles.toggle}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, currency === "USD" && styles.toggleBtnActive]}
+            onPress={() => setCurrency("USD")}
+          >
+            <Text style={[styles.toggleText, currency === "USD" && styles.toggleTextActive]}>USD</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, currency === "JPY" && styles.toggleBtnActive]}
+            onPress={() => setCurrency("JPY")}
+          >
+            {fetching && currency !== "JPY" ? (
+              <ActivityIndicator size={10} color={COLORS.textMuted} />
+            ) : (
+              <Text style={[styles.toggleText, currency === "JPY" && styles.toggleTextActive]}>JPY</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {rows.map((row) => (
         <View key={row.label} style={styles.row}>
           <Text style={styles.label}>{row.label}</Text>
-          <Text style={[styles.value, row.highlight && styles.highlight]}>{fmt(row.value)}</Text>
+          <Text style={[styles.value, row.highlight && styles.highlight]}>
+            {fmtPrice(row.value, currency, jpyRate)}
+          </Text>
         </View>
       ))}
-      <Text style={styles.source}>Source: PriceCharting</Text>
+      <Text style={styles.source}>Source: PriceCharting · {currency === "JPY" ? `1 USD = ¥${jpyRate?.toFixed(0) ?? "…"}` : "USD"}</Text>
 
       {price.recent_sales && price.recent_sales.length > 0 && (
         <View style={styles.salesSection}>
@@ -50,7 +72,7 @@ export function PriceDisplay({ price, scanType }: Props) {
                 <Text style={styles.saleTitle} numberOfLines={1}>{sale.title}</Text>
               </View>
               <View style={styles.salePriceWrap}>
-                <Text style={styles.salePrice}>{sale.price != null ? `$${sale.price.toFixed(2)}` : "N/A"}</Text>
+                <Text style={styles.salePrice}>{fmtPrice(sale.price, currency, jpyRate)}</Text>
                 {sale.url && (
                   <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch((e) => console.warn("[price-display] openURL failed:", sale.url, e))}>
                     <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
@@ -63,8 +85,8 @@ export function PriceDisplay({ price, scanType }: Props) {
       )}
 
       {scanType === "psa"
-        ? <PriceChart history={price.price_history_graded ?? []} label="Graded Price Trend" />
-        : <PriceChart history={price.price_history_ungraded ?? []} label="Ungraded Price Trend" />
+        ? <PriceChart history={price.price_history_graded ?? []} label="Graded Price Trend" currency={currency} jpyRate={jpyRate} />
+        : <PriceChart history={price.price_history_ungraded ?? []} label="Ungraded Price Trend" currency={currency} jpyRate={jpyRate} />
       }
     </View>
   );
@@ -79,11 +101,42 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  headingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   heading: {
     color: COLORS.text,
     fontSize: 16,
     fontWeight: "700",
-    marginBottom: 12,
+  },
+  toggle: {
+    flexDirection: "row",
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: "hidden",
+  },
+  toggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toggleBtnActive: {
+    backgroundColor: COLORS.accent,
+  },
+  toggleText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  toggleTextActive: {
+    color: "#fff",
   },
   row: {
     flexDirection: "row",

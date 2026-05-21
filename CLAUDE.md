@@ -2,6 +2,201 @@
 
 A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales data from [PriceCharting](https://www.pricecharting.com).
 
+---
+
+## Open Tasks
+
+### Priority 1 — Recognition improvements
+
+#### JP trainer card name extraction
+
+JP trainer cards pass confidence scoring (via `JA_KEYWORD_RE`) but return 0 candidates — `_find_kana_name` finds no Pokémon name on trainer cards and no `_find_jp_trainer_name` exists yet.
+
+**File:** `backend/app/services/card_matcher.py`
+
+- Add `_find_jp_trainer_name(lines)` that searches for the card name near JP type keywords (グッズ, サポート, スタジアム, ポケモンのどうぐ)
+- Mirror the EN `_find_trainer_name` logic but for kana/kanji lines
+
+#### CLIP similarity threshold tuning
+
+`_SIM_THRESHOLD = 0.65` and `_SIM_FLOOR = 0.50` were set before the fine-tuned CLIP model. Now that the YOLO v2 model produces tighter crops (mAP50-95: 0.964 vs 0.904), real scan similarity scores may have shifted.
+
+**File:** `backend/app/api/v1/scan.py`
+
+- Run combined mode scans and check logged `image:X.XX` similarity scores in backend logs
+- Consider raising `_SIM_FLOOR` if scores are consistently higher with tighter crops
+- Consider raising `_IMAGE_MIN_SIM_WITH_OCR` if image-only false positives are observed
+
+#### Card sleeve detection (future YOLO retraining)
+
+Training data has no sleeved cards. Most collectors use penny sleeves or deck sleeves, which add a clear/matte border and change card edge appearance.
+
+When retraining next:
+- Add real photos of sleeved cards to `yolo_merged` (label as `card`)
+- Or generate synthetic sleeved cards: add semi-transparent border overlay in `generate_synthetic_yolo.py`
+
+---
+
+### Priority 2 — YOLO on-device (TFLite)
+
+Eliminates the `/detect` network round-trip (200–800ms on Wi-Fi, often 1–3s on mobile data). Biggest UX win for users on cellular connections. Stub is in place in `mobile/utils/yoloDetector.ts` returning null; `detectCardsWithYolo()` is already called first in the pipeline before the backend fallback.
+
+| Metric | Backend `/detect` (mobile data) | On-device TFLite |
+| --- | --- | --- |
+| Round-trip latency | 1000–3000ms | 50–200ms |
+| Works offline | No | Yes (detection only — OCR/CLIP still need backend) |
+| Backend load per scan | 1 detect call | 0 |
+| Data uploaded | Full 2400px image (~500KB–2MB) | Only cropped card regions |
+
+**Step 1 — Export TFLite model (backend, one-time)**
+
+Previous export failed with `No module named 'onnxscript'`. Export chain: PyTorch → ONNX → TF SavedModel → TFLite.
+
+```bash
+# Inside tcg_backend container:
+pip install onnxscript onnx2tf onnxslim sng4onnx tensorflow
+python -c "from ultralytics import YOLO; YOLO('/app/backend/models/card_detector.pt').export(format='tflite', imgsz=640, int8=False)"
+```
+
+Produces `card_detector_saved_model/card_detector_float32.tflite` (~12MB). Copy to `mobile/assets/models/card_detector.tflite`.
+
+Optional int8 quantization (~12MB → ~3MB, small accuracy hit — validate mAP50-95 stays above 0.92):
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('/app/backend/models/card_detector.pt').export(format='tflite', imgsz=640, int8=True, data='/tmp/yolo_v2_merged/data.yaml')"
+```
+
+**Step 2 — Mobile integration (`mobile/utils/yoloDetector.ts`)**
+
+`react-native-fast-tflite ^3.0.1` is already in `mobile/package.json`. Replace the null-return stub:
+
+1. Load model on first call (cache in module-level variable to avoid reloading):
+   ```ts
+   import { loadTensorflowModel } from 'react-native-fast-tflite';
+   const model = await loadTensorflowModel(require('../assets/models/card_detector.tflite'));
+   ```
+   Try GPU delegate first (`{ delegate: 'android-gpu' }` on Android, `'core-ml'` on iOS), fall back to CPU.
+
+2. Preprocess: letterbox resize to 640×640 (pad with gray 114,114,114), decode JPEG → Float32Array, normalize 0–1. Save (scale, padX, padY) to un-letterbox boxes later.
+
+3. Run inference — output shape `[1, 5, 8400]` (cx, cy, w, h, confidence per anchor).
+
+4. Post-process: filter `confidence > 0.25`, convert (cx,cy,w,h) → (x1,y1,x2,y2), NMS at IoU threshold 0.45, un-letterbox to original image pixel coordinates.
+
+5. Return `{ regions: [...] }` matching the `boxesToRegions` contract in `detectCards.ts`.
+
+**Step 3 — Bundle the model**
+
+Add to `metro.config.js`: `config.resolver.assetExts.push('tflite')`
+
+**Step 4 — Validate**
+
+Compare detected box count + coordinates between backend `/detect` and on-device for the same test photos. Boxes should match within ~5px — larger drift indicates a preprocessing bug (letterbox math, normalization, NHWC vs NCHW).
+
+**Step 5 — Graceful fallback** (pipeline already structured in `useMultiCardScan.ts`)
+
+1. On-device TFLite → use boxes if returned
+2. Backend `/detect` if TFLite fails or returns 0 boxes
+3. `detectCardRegions` (OCR clustering) if backend also fails
+
+**Alternatives if TFLite export keeps failing:**
+- `onnxruntime-react-native` — runs ONNX intermediate directly, skips TF SavedModel step, same accuracy
+- Native NCNN/MNN — fastest mobile YOLO runtime, but requires writing native Android/iOS modules
+
+**Risks:** GPU delegate availability varies by Android device; iOS needs Core ML re-export for hardware acceleration; model file updates require a full app rebuild and store release.
+
+---
+
+### Future — Image AI improvements
+
+**Real photo fine-tuning** (if CLIP similarity remains unreliable after threshold tuning):
+- CLIP via `open-clip-torch` is MIT licensed — safe for commercial release
+- Collect thousands of real labeled card photos spanning hundreds of sets (holo/special cards included)
+- Fine-tune with InfoNCE contrastive loss; re-embed all cards
+- Note: 300 photos of ~200–300 cards would overfit badly — minimum useful scale is thousands of images
+
+**DINOv2 / DINOv3 (research benchmarking only — non-commercial licenses):**
+- Dense patch-level matching; better suited to card identity than CLIP's global embedding
+- DINOv2: CC BY-NC 4.0; DINOv3: custom Meta access-gated — neither can be shipped in a released app
+- Evaluate locally against CLIP if CLIP continues to struggle
+
+| Model | License | App release |
+| --- | --- | --- |
+| CLIP (open-clip-torch) | MIT | Yes |
+| DINOv2 | CC BY-NC 4.0 | No |
+| DINOv3 | Custom (access-gated) | No |
+| YOLO11n (ultralytics) | AGPL-3.0 | Yes (with attribution) |
+
+---
+
+### Future — Background price refresh worker
+
+Not worth implementing until there are concurrent users — benefit is zero for single-user use. Implement when the same popular cards are being requested by multiple users within the same 24h window and cache-miss latency becomes noticeable (~10–20 active users).
+
+**How it works with Redis:**
+
+- Redis is unchanged — same 24h TTL keys, same cache-check logic in the price endpoint
+- Worker runs nightly (~2am) inside the existing `worker` container, pre-refreshes any hot-set key with less than 2 hours of TTL remaining
+- Users always hit a warm Redis key; the scrape latency (~800–2,500ms) moves from user-facing to an invisible overnight process
+- Total PriceCharting request volume is unchanged — scraping shifts from random user-triggered bursts to a controlled 1 req/s overnight drip
+
+**New table — `price_views` (append-only event log):**
+
+```sql
+CREATE TABLE price_views (
+    card_id   INTEGER NOT NULL REFERENCES cards(id),
+    viewed_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX ix_price_views_card_viewed ON price_views (card_id, viewed_at DESC);
+
+-- Nightly cleanup to keep the table lean (run alongside the worker)
+DELETE FROM price_views WHERE viewed_at < NOW() - INTERVAL '30 days';
+```
+
+**Log user-initiated requests only** — the worker never writes to `price_views`, so its own activity can never keep a card artificially hot:
+
+```python
+# In the prices endpoint, before the Redis check
+await db.execute("INSERT INTO price_views (card_id) VALUES (:id)", {"id": card_id})
+```
+
+**Worker logic:**
+
+```python
+hot_cards = await db.fetch(
+    "SELECT DISTINCT card_id FROM price_views WHERE viewed_at > NOW() - INTERVAL '30 days'"
+)
+for card in hot_cards:
+    ttl = await redis.ttl(price_key(card))
+    if ttl < 7200:  # < 2 hours remaining, or missing (-2)
+        prices = await scraper.get_prices(card.pricecharting_url)
+        await redis.set(price_key(card), prices.json(), ex=86400)
+    await asyncio.sleep(1)  # 1 req/s — polite to PriceCharting
+```
+
+Cards nobody scans for 30 days fall out of the hot set automatically and stop being refreshed.
+
+---
+
+### Future — PSA graded card recognition
+
+- Target: Japanese card shops that cover cert numbers with price stickers
+- Approach: read grade from PSA label + card name → PSA population report to narrow cert candidates
+- May require PSA pop report scraping
+
+---
+
+### Known Limitations (no fix planned)
+
+| Issue | Notes |
+| --- | --- |
+| Older JP sets price 404 on PriceCharting | Pre-2003 JP sets use Pokédex number not set position (e.g. Gastly #92 not #49). Would need a lookup table or scrape-based URL discovery. |
+| JP Abra (kana-heavy cards) not detected | OCR confidence < 3 + image sim < 0.50 floor → 0 candidates. Fundamental limitation — scan separately with better conditions. |
+| Holofoil image AI unreliable | Reflective surfaces produce visual appearances impossible to synthesize. CLIP fine-tuning didn't close this gap. Use OCR or Combined mode. |
+| Items with digits in name (Pokégear 3.0) | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case. |
+
+---
+
 ## Project Structure
 
 - `backend/` — FastAPI server (Python), scrapes PriceCharting and proxies pokemontcg.io
@@ -35,6 +230,7 @@ PriceCharting uses **two different numbering systems** for Japanese cards depend
 - Single-card confidence gate: OCR text scored before hitting backend (card number, HP, keywords, copyright)
 - Backend card number ranking: exact match ranks first (handles zero-padded numbers like "024")
 - Query display format: `Name #N` (e.g. `Suicune #24`) — denominator dropped, `#` prefix added
+- **Currency toggle (USD/JPY)**: `[USD][JPY]` pill toggle in the Pricing heading (individual card) and Batch Prices header; converts all prices, recent sales, and trend chart on the fly; exchange rate fetched from `GET /api/v1/currency/rates` (frankfurter.dev, cached in Redis 24h); JPY displayed as `¥X` whole numbers with locale commas; rate shown inline as `1 USD = ¥X`; state global via `currencyStore` so switching screens preserves the selection
 - **Batch price retrieval**: multi-results screen lets you select cards (tap to check, Select All), then "Get Prices (N)" navigates to `batch-prices.tsx` showing each card's market price + last sold entry
 - **Sale listing links**: recent sales rows on both individual price page and batch-prices page show "eBay →" or "TCGPlayer →" links; tapping opens in app/browser via `Linking.openURL`
 - **All-source sales scraping**: PriceCharting scraper collects from all `hoverable-rows sortable` tables on the page (eBay + TCGPlayer), not just the first one
@@ -72,7 +268,7 @@ All swap candidates now show the correct JP art because JP cards are first-class
 - `POST /api/v1/search/batch` backend endpoint: accepts up to 10 queries, returns candidates per query (legacy; superseded by `/scan`)
 - `detectCardRegions` in `mobile/utils/detectCards.ts`: adaptive threshold clustering + recursive aspect-ratio splitting
 - Frontend dedup: cards with the same top-candidate ID are deduplicated before showing results
-- `POST /api/v1/detect` endpoint: accepts base64 image, returns bounding boxes — YOLO11n (OpenCV fallback if model absent)
+- `POST /api/v1/detect` endpoint: accepts base64 image, returns bounding boxes — YOLO11n only (OpenCV fallback removed in v16; returns empty boxes if model absent so mobile falls back to OCR clustering)
 - **Recognition Mode toggle** (OCR / Image AI / Combined) — scanner screen lets user switch modes; `useMultiCardScan` accepts `scanMode: 'ocr' | 'image' | 'combined'`
 - **Combined mode**: runs OCR and image matching in parallel, merges results with Reciprocal Rank Fusion. OCR gets 2× weight. Image results are gated out when OCR found a confident result and image similarity < 0.83 — weak image signal is worse than no image signal when OCR already has an answer. Shows per-card source badge (Both ✓ / Image AI / OCR) in results UI.
 - **Combined mode RRF detail**: `score = weight/(rank+60)` — OCR weight=2, image weight=1. After merge, candidates matching the OCR card number are promoted to front. Image gate: skipped if OCR found a name and `image_sim < 0.83`.
@@ -218,93 +414,21 @@ Scripts:
 
 - `scripts/coco_to_yolo.py` — converts Roboflow COCO export to YOLO bbox format
 - `scripts/merge_yolo_datasets.py` — merges multiple YOLO datasets (handles standard bbox, OBB, and polygon formats), remaps all classes to single class 0 `card`
+- `scripts/generate_synthetic_yolo.py` — generates synthetic YOLO dataset by compositing card images onto backgrounds with known bounding boxes
 
-## In Progress
+**To retrain next time** (v3):
 
-### On-device YOLO detection (TFLite)
-
-- `mobile/utils/yoloDetector.ts` stub is in place; `detectCardsWithYolo()` is called first in the pipeline
-- Blocked on exporting `card_detector.pt` → `card_detector.tflite` (YOLO11n TFLite export was attempted but not completed)
-- When `.tflite` is available: drop it in `mobile/assets/` (or bundle path), update `yoloDetector.ts` to run inference with `react-native-fast-tflite` or similar, eliminates the `/detect` network round-trip entirely
-- Export command: `from ultralytics import YOLO; YOLO('backend/models/card_detector.pt').export(format='tflite', imgsz=640)`
-
-### YOLO11n synthetic augmentation retraining (v2 — complete ✅, 2026-05-20)
-
-**Goal:** Improve detection for display cases (glass background) and large card spreads (8–20 cards). Current model is strong on desk scans (mAP50=0.992) but training data had no display case photos or groups larger than ~8 cards.
-
-**Approach:** Synthetic compositing — paste card images onto background photos with known bounding boxes. No manual labeling needed. Fine-tune from `card_detector.pt` (not base `yolo11n.pt`) to preserve real-photo learning and avoid catastrophic forgetting.
-
-**Script:** `scripts/generate_synthetic_yolo.py`
-
-**Card count distribution** (weighted toward middle range):
-- 1–3 cards: 10% of images
-- 4–7 cards: 35% of images
-- 8–12 cards: 35% of images
-- 13–17 cards: 15% of images
-- 18–20 cards: 5% of images
-
-**Card image sampling** (stratified from Postgres DB, `ORDER BY RANDOM()`):
-- 45% EN Pokémon (`language='en'`, name excludes Supporter/Item/Trainer/Tool keywords)
-- 40% JP (`language='ja'`)
-- 15% EN Trainer/Item (`language='en'`, name contains type keywords or rarity=uncommon)
-- Only cards with `image_url IS NOT NULL` and `embedding IS NOT NULL` are eligible
-- 800 cards downloaded to `assets/card_images/` (cached — reused on subsequent runs)
-- Rate-limited: 0.15s delay per request to avoid CDN bans (pokemontcg.io + TCGCollector)
-
-**Glass display case simulation:** per-card blue-green tint + brightness reduction (simulates glass color cast, applied to 13% of scenes matching the 2/15 natural ratio of glass backgrounds). Real reflections not synthesized.
-
-**Backgrounds:** 15 images in `assets/backgrounds/` — 2 glass display case photos, 13 other textures (wood, cloth, marble, shelf). `wood shelf with vase.jpg` excluded from glass-fraction selection.
-
-**Dataset cleaning (applied to yolo_merged before v2 training):**
-- Removed 27 set-symbol images (40×40px PNGs labeled as cards — from 3rd party Roboflow export)
-- Removed 103 orphaned label files (corner crops, PSA slab photos deleted manually)
-- Removed all PSA graded card slab images (different visual class; would require separate `slab` label)
-- Final cleaned real dataset: 1,225 train + 304 val images
-- German/multilingual cards kept — YOLO learns card shape, not card text
-- Official clean card art (rotated synthetic) kept — teaches card shape at all orientations
-
-**Merged dataset (yolo_v2_merged):**
-- Real (cleaned yolo_merged): 1,225 train + 304 val
-- Synthetic (synthetic_v1): 1,700 train + 300 val, avg 6.5 cards/scene
-- **Total: 2,823 train (13,798 annotations) + 706 val (3,375 annotations)**
-- Stored at: `C:\Users\Quang\Desktop\TCG Training Data\yolo_v2_merged\`
-
-**Synthetic dataset stored at:** `C:\Users\Quang\Desktop\TCG Training Data\synthetic_v1\`
-Keep permanently — merge with future real data on next retraining to avoid catastrophic forgetting.
-
-**Training results (v2 — completed 2026-05-20, RTX 3080, ~1.5hr):**
-
-| Epoch | Box loss | Cls loss | DFL loss |
-|-------|----------|----------|----------|
-| 1     | 0.5281   | 0.4664   | 0.9653   |
-| 5     | 0.4380   | 0.3693   | 0.9008   |
-| 10    | 0.3893   | 0.3348   | 0.8852   |
-| 15    | 0.3495   | 0.2998   | 0.8702   |
-| 20    | 0.3233   | 0.2776   | 0.8618   |
-| 25    | 0.2598   | 0.2139   | 0.8147   |
-| **30 (final)** | **0.2316** | **0.1915** | **0.8067** |
-
-Final validation (all 30 epochs, loss still declining — no plateau):
-- **mAP50: 0.993** (v1: 0.992)
-- **mAP50-95: 0.964** (v1: 0.904 — +6.6%)
-- **Precision: 0.977** (v1: 0.977)
-- **Recall: 0.980** (v1: 0.985)
-- GPU memory: 2.8G, batch=16, imgsz=640
-
-**Deployed to `backend/models/card_detector.pt`** (v1 backup at `card_detector_v1_backup.pt`).
-
-**To retrain next time:**
 ```
 # 1. Generate new synthetic batch
 py -3 scripts/generate_synthetic_yolo.py --cards assets/card_images/ --backgrounds assets/backgrounds/ --output "C:/Users/Quang/Desktop/TCG Training Data/synthetic_v2" --count 2000 --glass-fraction 0.13
 
-# 2. Merge all datasets
-py -3 scripts/merge_yolo_datasets.py --src "C:/TCG Training Data/yolo_merged" "C:/TCG Training Data/synthetic_v1" "C:/TCG Training Data/synthetic_v2" --dst "C:/TCG Training Data/yolo_v3_merged"
+# 2. Merge all datasets (always include synthetic_v1 to avoid catastrophic forgetting)
+py -3 scripts/merge_yolo_datasets.py --src "C:/Users/Quang/Desktop/TCG Training Data/yolo_merged" "C:/Users/Quang/Desktop/TCG Training Data/synthetic_v1" "C:/Users/Quang/Desktop/TCG Training Data/synthetic_v2" --dst "C:/Users/Quang/Desktop/TCG Training Data/yolo_v3_merged"
 
-# 3. Copy into container, fix data.yaml path, train
+# 3. Copy into container, fix data.yaml path, fine-tune from card_detector.pt (not base yolo11n.pt)
 ```
 
-**Future retraining:** merge `yolo_merged` + `synthetic_v1` + any new `synthetic_v2` → train from updated `card_detector.pt`. Never train on synthetic alone — always include real photos.
+Synthetic datasets stored at `C:\Users\Quang\Desktop\TCG Training Data\` — keep permanently and always include all prior synthetic batches when retraining.
 
 ## OCR Name Extraction (card_matcher.py)
 
@@ -353,147 +477,6 @@ All of the following are correctly extracted and searched:
 - EX / ex, GX (`Charizard-GX`), V, VMAX, VSTAR, VUNION
 - Tag Team (`Pikachu & Zekrom-GX`)
 
-## Next Steps
-
-### 1. Image matching improvement roadmap
-
-**Current state:** CLIP ViT-B/32, 512-dim, art-region crop (y=12%–52%), similarity threshold 0.75, phash re-ranking. Works for visually distinctive cards; unreliable for similar-looking Pokémon.
-
-**Step 1 (now): Assess phash + crop changes**
-
-- Test real scans with tighter crop (`y=12%–52%`), threshold 0.75, and phash Hamming re-ranking
-- Watch for: fewer wrong-card results, any correct cards being missed (threshold too aggressive)
-- phash logs show `hamming=N` per candidate — tune `_PHASH_STRONG` in `scan.py` if needed
-
-**Step 2 (if still unreliable): DINOv2 / DINOv3 (research evaluation only)**
-
-- Both use dense patch-level matching better suited to card identity than CLIP's global embedding
-- **DINOv2** — GitHub: `https://github.com/facebookresearch/dinov2` | License: CC BY-NC 4.0 — non-commercial only, cannot be used in a released app
-- **DINOv3** — GitHub: `https://github.com/facebookresearch/dinov3` | License: Custom Meta access-gated license — non-commercial only, requires access request for weights; fine-tuning is unproven (model is very new)
-- Both can be evaluated locally for research/personal benchmarking against CLIP — do not ship either in a public release
-- Fine-tuning approach (if attempted): same contrastive method as CLIP fine-tuning below
-
-**Step 3a: Synthetic augmentation fine-tuning ✅ COMPLETE — see v9 in Architecture Decision Log**
-
-- Training completed 2026-05-18 (~13 hours, 10 epochs, RTX 3080). Best checkpoint at epoch 7 (loss 0.0077).
-- All 20,187 EN cards re-embedded with fine-tuned weights; IVFFlat index rebuilt.
-- Weights at `backend/models/clip_finetuned.pt`; loaded automatically by `card_embedder.py` at startup.
-
-**Step 3b (if 3a is insufficient): Fine-tune CLIP ViT-B/32 with real photos ✦ Safe for release**
-
-- CLIP via `open-clip-torch` is MIT licensed — fully permissive for commercial release
-- Collect real labeled photos of physical cards (single card per photo, labeled with card ID)
-- SKANIT context: dev said ~50,000 images and 6 months — that's real data at scale across thousands of distinct cards. 300 real photos covering ~200–300 cards would overfit to those cards and generalize poorly to the other 19,700+
-- Realistic minimum for general robustness: thousands of photos spanning hundreds of sets, including holo/special cards
-- Pair each photo with the card's official art from `image_url`; fine-tune with InfoNCE contrastive loss
-- Can combine with synthetic augmentation (3a) — real photos anchor to actual appearance, synthetic provides broad coverage
-- Re-embed all 20k cards after fine-tuning
-
-**On-device inference (SKANIT-style, no backend)**
-
-- CLIP ViT-B/32 at ~170MB fp16 is too large to bundle in a mobile app
-- Would require distilling the fine-tuned CLIP into a compact model: MobileClip or SigLIP-Small (~20–50MB)
-- Distillation adds significant additional work after fine-tuning and requires further accuracy trade-off evaluation
-- Not worth pursuing until fine-tuned CLIP accuracy is validated on the backend first
-
-**License summary for image models:**
-
-| Model                  | License               | App release            |
-| ---------------------- | --------------------- | ---------------------- |
-| CLIP (open-clip-torch) | MIT                   | Yes                    |
-| DINOv2                 | CC BY-NC 4.0          | No                     |
-| DINOv3                 | Custom (access-gated) | No                     |
-| YOLO11n (ultralytics)  | AGPL-3.0              | Yes (with attribution) |
-
-### 2. Multi-card batch recognition ✅ COMPLETE
-
-- YOLO11n detects card bounding boxes; each crop is OCR'd, confidence-gated, and searched via the unified `/scan` streaming endpoint
-- Results displayed in `multi-results.tsx` with swap, select, and batch-price flows
-- See Completed Features (Multi-card) and Completed Features (Unified Scan Endpoint + Streaming) for full detail
-
-### 6. Trainer / Supporter / Item / Tool / Technical Machine card support ✅ COMPLETE (EN only)
-
-EN Trainer/Supporter/Item/Tool cards are now identified. JP trainer name extraction not yet implemented (JP trainer cards pass confidence via `JA_KEYWORD_RE` but return 0 candidates from the backend).
-
-**Known remaining edge cases:**
-- Items with digits in the name (e.g. "Pokégear 3.0") — digit gate in `_find_trainer_name` rejects them
-- JP trainer cards — `_find_kana_name` finds no kana Pokémon name on trainer cards; no `_find_jp_trainer_name` exists yet
-
-### 7. Fixed proportional card region crops for OCR ✅ COMPLETE (2026-05-20)
-
-Name region sub-crop (top 18%, 5–95% width) and tightened card number corners (bottom 8%, left/right separately) are both implemented in `useMultiCardScan.ts`. See Completed Features for detail.
-
-### 4. Japanese card support — first-class JP records ✅ COMPLETE (2026-05-20)
-
-JP and EN cards are fully independent entities. No overlay lookups, no shared card IDs.
-
-#### What works now
-
-- ✅ JP OCR: ML Kit Japanese script, kana→EN translation, searches `language='ja'` DB records directly
-- ✅ JP image AI: pgvector searches `language='ja'` embeddings — 27,255 JP cards embedded
-- ✅ Correct JP art for all candidates including swaps — `card.image_url` IS the JP art from TCGCollector
-- ✅ JP-exclusive cards identifiable (promos, JP-only sets all in DB)
-- ✅ JP card numbers are correct (from TCGCollector, not derived from EN numbering)
-- ✅ PriceCharting URL uses JP set_name slug from the card's own DB record
-
-#### TCGCollector data
-
-- **27,255 JP cards** across 426 sets, all eras 1996–present
-- Stored in `backend/app/data/tcgcollector_ja.json` and loaded into `cards` table as `language='ja'`
-- Each card: `name_en`, `set_name`, `card_number`, `card_number_raw`, `set_total`, `image_url`, `external_id=tcgcollector-{card_id}`
-- Data verified complete: no genuine gaps found after investigating TCGCollector's 27,300 count (45-card delta was false positives — word-order set name variant + one bad `set_total` field, both fixed)
-
-#### Adding new sets (e.g. after a new JP release)
-
-**Step 1 — Pull new cards from TCGCollector** (scrapes newest first, stops when hitting already-known cards):
-
-```
-py -3 scripts/scrape_tcgcollector.py --newest-first
-```
-
-Typical run: 1–3 pages scraped, stops automatically. Updates `backend/app/data/tcgcollector_ja.json` in-place.
-
-**Step 2 — Load new cards into DB** (upsert — existing cards untouched):
-
-```
-docker exec tcg_backend bash -c "cd /app && python /scripts/load_jp_cards.py"
-```
-
-**Step 3 — Embed new cards** (skips already-embedded cards):
-
-```
-docker exec tcg_backend bash -c "cd /app && python /scripts/build_embeddings.py --language ja"
-```
-
-Rebuilds IVFFlat index automatically after embedding. Monitor: `docker exec tcg_backend tail -f /tmp/embed_ja.log`
-
-**Step 4 — Restart backend:**
-
-```
-docker restart tcg_backend
-```
-
-**Finding a specific set's TCGCollector set ID** (needed if scraping a single set to fill gaps):
-Run `py -3 scripts/_find_set_id.py` (create ad-hoc) using Playwright to browse `https://www.tcgcollector.com/sets/jp?releaseDateOrder=oldToNew`. Set URLs follow `/sets/{id}/set-slug`. Then scrape that set:
-
-```
-py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/cards/jp?sets[]={id}&displayAs=image&sortBy=cardNumber"
-```
-
-#### OCR infrastructure (unchanged)
-
-- kana→EN translation (`kana_to_english()`) still used to search `name_en` on JP records
-- `_find_kana_name` in `card_matcher.py` extracts kana name from OCR text
-- `_search_db` filters `Card.language == language` — EN and JP searches fully independent
-- `_dedupe_and_rank` uses `c.set_total` directly for JP cards (DB field) instead of `set_printed_totals.json`
-
-### 5. PSA graded card recognition via camera
-
-- Target: Japanese card shops that cover cert numbers with price stickers
-- Visible information: card name/art, PSA grade label (usually not stickered)
-- Approach: read grade from label + card name → look up PSA population report to narrow cert candidates
-- May require PSA pop report scraping
-
 ## Key Files
 
 - `mobile/hooks/useOCR.ts` — image preprocessing, OCR, zone block filtering (single-card)
@@ -505,7 +488,7 @@ py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/ca
 - `mobile/components/Scanner/ScanOverlay.tsx` — scan frame dimensions (75% W, 88/63 ratio, -40px Y)
 - `mobile/components/UI/ScanModeToggle.tsx` — OCR / Image AI / Combined toggle component
 - `mobile/components/Card/PriceChart.tsx` — trend graph
-- `backend/app/services/card_detector.py` — OpenCV card outline detection (`detect_card_rectangles`)
+- `backend/app/services/card_detector.py` — YOLO11n card detection (`detect_card_rectangles`); no fallback path
 - `backend/app/services/card_embedder.py` — CLIP ViT-B/32 embedding (fine-tuned weights loaded from `backend/models/clip_finetuned.pt` if present)
 - `backend/app/api/v1/scan.py` — `POST /api/v1/scan` unified endpoint: batch CLIP embed + parallel pgvector + parallel OCR + NDJSON stream; vector search filters by language
 - `backend/app/api/v1/detect.py` — `POST /api/v1/detect` endpoint
@@ -645,6 +628,29 @@ A chronological record of major technical decisions, for portfolio and reference
 - `set_total` column added to `cards` table for JP OCR disambiguation; `_dedupe_and_rank` uses it directly for `language='ja'` cards instead of the EN `set_printed_totals.json` lookup.
 - Vector search cache key includes language: `f"{sha256(img_bytes)}:{language}"` to keep EN/JP caches separate.
 
+**Adding new JP sets** (e.g. after a new JP release):
+
+```
+# Step 1 — Pull new cards from TCGCollector (scrapes newest first, stops at already-known cards)
+py -3 scripts/scrape_tcgcollector.py --newest-first
+
+# Step 2 — Load new cards into DB (upsert — existing cards untouched)
+docker exec tcg_backend bash -c "cd /app && python /scripts/load_jp_cards.py"
+
+# Step 3 — Embed new cards (skips already-embedded; rebuilds IVFFlat index after)
+docker exec tcg_backend bash -c "cd /app && python /scripts/build_embeddings.py --language ja"
+# Monitor: docker exec tcg_backend tail -f /tmp/embed_ja.log
+
+# Step 4 — Restart backend
+docker restart tcg_backend
+```
+
+To scrape a specific set: find the TCGCollector set ID by browsing `https://www.tcgcollector.com/sets/jp?releaseDateOrder=oldToNew` (set URLs follow `/sets/{id}/set-slug`), then:
+
+```
+py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/cards/jp?sets[]={id}&displayAs=image&sortBy=cardNumber"
+```
+
 ### v12 — Auto language detection, encoding fixes, search ranking (2026-05-20)
 
 - **Auto per-crop language detection**: removed user-facing language toggle entirely. `TextRecognitionScript.JAPANESE` now used for all OCR (returns both Latin and kana). Kana regex `/[゠-ヿぁ-ゖ]/` determines language per crop — single scan correctly handles mixed EN+JP photos. `language` state removed from `scanStore`; `LanguageToggle.tsx` deleted. `BatchPricesRequest.language` field removed; `batch_prices` endpoint uses `card.language` per record.
@@ -685,3 +691,35 @@ A chronological record of major technical decisions, for portfolio and reference
 | Recall | 0.985 | 0.980 |
 
 - Deployed to `backend/models/card_detector.pt`; v1 backup at `card_detector_v1_backup.pt`.
+
+### v15 — USD/JPY currency toggle (2026-05-21)
+
+- **Use case**: scanning cards at Japanese card shops — user can instantly compare a card's USD market price converted to JPY against the shop sticker price.
+- **Backend**: `GET /api/v1/currency/rates` endpoint (`backend/app/api/v1/currency.py`) fetches USD→JPY rate from frankfurter.dev and caches it in Redis under key `tcg:currency:usd_jpy` with a 24h TTL. Lazy-loaded on first request; no cron job needed — a missed cache hit costs ~150ms which is acceptable for a daily rate. The lazy approach is equivalent to a pre-warming cron at this scale and simpler to operate.
+- **Mobile state**: `mobile/store/currencyStore.ts` (Zustand) holds `currency: "USD"|"JPY"`, `jpyRate`, and `fetchRate()`. Rate is fetched lazily on first JPY switch; store is global so currency preference is shared across all price screens within a session.
+- **Formatting**: `mobile/utils/currency.ts` provides `fmtPrice()` (USD → `$X.XX`, JPY → `¥X` whole number with locale commas), `convertPriceHistory()` (multiplies chart data points), and `chartYLabel()` (JPY-aware y-axis: `¥X` or `¥Xk` for large amounts).
+- **UI**: `[USD][JPY]` pill toggle in `PriceDisplay.tsx` heading row and `batch-prices.tsx` header. All price values, recent sales, last sold, and trend chart update immediately on toggle. Source line shows `1 USD = ¥X` when JPY is active.
+- **Chart**: `PriceChart.tsx` accepts `currency`/`jpyRate` props; history points are converted before rendering; y-axis labels use the currency-aware formatter.
+
+### v16 — Round 2 performance optimizations (2026-05-21)
+
+Codebase pass that landed nine additional perf/correctness improvements after the original `OPTIMIZATION_AUDIT.md` round and the YOLO v2 retrain. OpenCV detection removed entirely.
+
+- **OpenCV detector removed**: YOLO v2 (mAP50-95 0.964) is reliable enough that the OpenCV fallback is dead-on-arrival. `_detect_opencv`, `_try_split_box`, `_nms`, `_iou`, `_containment` and aspect/area thresholds deleted from `backend/app/services/card_detector.py` — file shrank from 249 → 87 lines. If the YOLO `.pt` is ever missing the endpoint returns zero boxes and mobile falls back to OCR clustering.
+- **pgvector IVFFlat probes raised to 10** (`scan.py:_vector_search`): `SET LOCAL ivfflat.probes = 10` before the nearest-neighbor query — default of 1 only scans ~470 vectors across 100 lists, missing cluster-boundary matches. +5–10ms latency, materially higher recall.
+- **Per-language partial IVFFlat indices**: replaced the merged `ix_cards_embedding_ivfflat` with `ix_cards_embedding_ivfflat_en` and `ix_cards_embedding_ivfflat_ja` (`WHERE language = 'en'|'ja'`). Each query now only scans matching-language clusters. New helper `rebuild_ivfflat_indices(conn)` in `scripts/build_embeddings.py`; one-off migration at `scripts/migrate_partial_ivfflat.py` for the existing DB.
+- **CLIP fp16 on CUDA** (`card_embedder.py`): `_model.half()` after `.to(_device)` when CUDA available; input batch cast to `.half()`; output cast back to `.float()` for pgvector compatibility. ~1.8× encode throughput on RTX 3080, ~half VRAM. CPU keeps fp32 (fp16 on CPU is slower).
+- **`torch.inference_mode()`** replaces `torch.no_grad()` in `embed_batch` — slightly faster, no autograd state.
+- **Vector search LIMIT 5** (was 10): `_vector_search` only returns the top 5 anyway; phash re-ranking promotes existing rows, doesn't pull new ones in.
+- **`threading.Lock` around `_load_model`** in `card_embedder.py`: prevents two `asyncio.to_thread` workers from racing the first-call load and double-allocating ~170MB of weights.
+- **YOLO `half=True` on CUDA** (`card_detector.py`): ~1.5× faster YOLO inference on GPU.
+- **Redis `mget` pipelining** (`cache.py`): new `CacheService.mget(key_parts_list)` batches N gets into one Redis round-trip. `_batch_image_search` in `scan.py` uses it for the per-crop cache check — N RTTs → 1.
+- **Mobile: overlap JPEG re-encode with OCR** (`useMultiCardScan.ts`): inside the per-crop `Promise.all`, the JPEG re-encode + base64 read now kicks off concurrently with the full-crop OCR + name-region OCR chain. Saves 200–400ms per crop on real phones.
+
+**Re-running the partial index migration on the existing DB:**
+
+```bash
+docker exec tcg_backend python /scripts/migrate_partial_ivfflat.py
+```
+
+Subsequent `scripts/build_embeddings.py` runs (with or without `--force`) automatically use `rebuild_ivfflat_indices()` to maintain both partial indices.

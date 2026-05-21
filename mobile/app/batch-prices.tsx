@@ -7,8 +7,10 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api, CardOut, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
+import { useCurrencyStore } from "@/store/currencyStore";
 import { COLORS } from "@/constants";
 import { saleLinkLabel } from "@/utils/saleLink";
+import { fmtPrice } from "@/utils/currency";
 
 interface CardPriceEntry {
   card: CardOut;
@@ -28,6 +30,7 @@ const openUrl = (url: string) => {
 export default function BatchPricesScreen() {
   const router = useRouter();
   const { batchPriceCards, scanType } = useScanStore();
+  const { currency, jpyRate, fetching: rateFetching, setCurrency } = useCurrencyStore();
   const [entries, setEntries] = useState<CardPriceEntry[]>(
     batchPriceCards.map(({ card, jaCardNumber }) => ({
       card, jaCardNumber, data: null, loading: true, error: false,
@@ -80,9 +83,9 @@ export default function BatchPricesScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: CardPriceEntry }) => (
-      <CardPriceRow entry={item} scanType={scanType} />
+      <CardPriceRow entry={item} scanType={scanType} currency={currency} jpyRate={jpyRate} />
     ),
-    [scanType],
+    [scanType, currency, jpyRate],
   );
 
   if (batchPriceCards.length === 0) {
@@ -103,10 +106,31 @@ export default function BatchPricesScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Batch Prices</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Batch Prices</Text>
+          <View style={styles.toggle}>
+            <TouchableOpacity
+              style={[styles.toggleBtn, currency === "USD" && styles.toggleBtnActive]}
+              onPress={() => setCurrency("USD")}
+            >
+              <Text style={[styles.toggleText, currency === "USD" && styles.toggleTextActive]}>USD</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleBtn, currency === "JPY" && styles.toggleBtnActive]}
+              onPress={() => setCurrency("JPY")}
+            >
+              {rateFetching && currency !== "JPY" ? (
+                <ActivityIndicator size={10} color={COLORS.textMuted} />
+              ) : (
+                <Text style={[styles.toggleText, currency === "JPY" && styles.toggleTextActive]}>JPY</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
         <Text style={styles.subtitle}>
           {entries.length} card{entries.length !== 1 ? "s" : ""}
           {totalLoading > 0 ? ` · fetching ${totalLoading}...` : ""}
+          {currency === "JPY" && jpyRate != null ? ` · 1 USD = ¥${jpyRate.toFixed(0)}` : ""}
         </Text>
       </View>
 
@@ -124,9 +148,13 @@ export default function BatchPricesScreen() {
 const CardPriceRow = React.memo(function CardPriceRow({
   entry,
   scanType,
+  currency,
+  jpyRate,
 }: {
   entry: CardPriceEntry;
   scanType: string;
+  currency: "USD" | "JPY";
+  jpyRate: number | null;
 }) {
   const { card, jaCardNumber, data, loading, error } = entry;
   const price = data?.price;
@@ -164,7 +192,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>{scanType === "psa" ? "PSA 10" : "Market"}</Text>
               <Text style={styles.priceValue}>
-                {rawPrice != null ? `$${rawPrice.toFixed(2)}` : "N/A"}
+                {fmtPrice(rawPrice, currency, jpyRate)}
               </Text>
             </View>
 
@@ -177,7 +205,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
                 </View>
                 <View style={styles.lastSaleRight}>
                   <Text style={styles.lastSalePrice}>
-                    {lastSale.price != null ? `$${lastSale.price.toFixed(2)}` : "N/A"}
+                    {fmtPrice(lastSale.price, currency, jpyRate)}
                   </Text>
                   {lastSale.url && (
                     <TouchableOpacity onPress={() => openUrl(lastSale.url!)}>
@@ -197,8 +225,27 @@ const CardPriceRow = React.memo(function CardPriceRow({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 4 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   title: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: COLORS.textMuted, fontSize: 13 },
+  toggle: {
+    flexDirection: "row",
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: "hidden",
+  },
+  toggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toggleBtnActive: { backgroundColor: COLORS.accent },
+  toggleText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  toggleTextActive: { color: "#fff" },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
   emptyText: { color: COLORS.textMuted, fontSize: 15 },

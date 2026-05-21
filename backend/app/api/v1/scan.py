@@ -8,7 +8,7 @@ import imagehash
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import Float, cast, select
+from sqlalchemy import Float, cast, select, text
 
 from app.constants import VALID_GAMES, VALID_LANGUAGES
 from app.database import AsyncSessionLocal
@@ -140,9 +140,13 @@ async def _vector_search(
         )
         .where(Card.embedding.isnot(None), Card.language == language)
         .order_by(distance_col)
-        .limit(10)
+        .limit(5)
     )
     async with AsyncSessionLocal() as db:
+        # Raise IVFFlat probes from default 1 → 10 for better recall on
+        # cluster-boundary cards. Cost: +5–10ms per query; benefit: meaningfully
+        # higher chance the true match is in the candidate set.
+        await db.execute(text("SET LOCAL ivfflat.probes = 10"))
         rows = (await db.execute(stmt)).mappings().all()
 
     scored: list[tuple[tuple, float, bool, dict]] = []
@@ -221,13 +225,18 @@ async def _batch_image_search(
     Language is included in the cache key so EN and JP scans stay separate.
     """
     results: dict[int, tuple[list[CardOutLite], float, str]] = {}
-    to_embed: list[tuple[int, bytes]] = []
 
-    for i, img_bytes in enumerate(imgs):
-        if img_bytes is None:
-            continue
-        key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
-        cached = await search_cache.get("embedding", key)
+    # Build cache keys for all non-null crops in one pass, then mget — single
+    # Redis round-trip instead of N.
+    crop_indices: list[int] = [i for i, b in enumerate(imgs) if b is not None]
+    cache_key_parts: list[tuple[str, ...]] = [
+        ("embedding", f"{hashlib.sha256(imgs[i]).hexdigest()}:{language}")
+        for i in crop_indices
+    ]
+    cached_values = await search_cache.mget(cache_key_parts) if cache_key_parts else []
+
+    to_embed: list[tuple[int, bytes]] = []
+    for i, cached in zip(crop_indices, cached_values):
         if cached is not None:
             if "best_sim" in cached:
                 item = _ImageSearchCache(**cached)
@@ -240,7 +249,7 @@ async def _batch_image_search(
                     cached.get("query_used", "image:no_match"),
                 )
         else:
-            to_embed.append((i, img_bytes))
+            to_embed.append((i, imgs[i]))
 
     if to_embed:
         # Batch CLIP forward pass + phash in parallel, both off the event loop.

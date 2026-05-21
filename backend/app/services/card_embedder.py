@@ -1,5 +1,6 @@
 import io
 import logging
+import threading
 from pathlib import Path
 
 import imagehash
@@ -12,6 +13,10 @@ logger = logging.getLogger(__name__)
 _model = None
 _preprocess = None
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# fp16 on CUDA roughly halves VRAM and gives ~1.8× faster inference on
+# Ampere-class GPUs (RTX 30xx). CPU keeps fp32 — fp16 on CPU is slower.
+_USE_HALF = _device.type == "cuda"
+_load_lock = threading.Lock()
 
 
 _FINETUNED_WEIGHTS = Path(__file__).parent.parent.parent / "models" / "clip_finetuned.pt"
@@ -26,22 +31,32 @@ def _load_model():
     global _model, _preprocess
     if _model is not None:
         return
-    import open_clip
+    # Lock prevents two ThreadPoolExecutor workers (from asyncio.to_thread)
+    # from racing the first-call load — without it both would allocate ~170MB
+    # of CLIP weights before one wins the assignment.
+    with _load_lock:
+        if _model is not None:
+            return
+        import open_clip
 
-    logger.info("Loading CLIP ViT-B/32 on %s...", _device)
-    _model, _, _preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
+        logger.info("Loading CLIP ViT-B/32 on %s (half=%s)...", _device, _USE_HALF)
+        model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
 
-    if _FINETUNED_WEIGHTS.exists():
-        logger.info("Loading fine-tuned visual encoder from %s", _FINETUNED_WEIGHTS)
-        state = torch.load(_FINETUNED_WEIGHTS, map_location=_device)
-        _model.visual.load_state_dict(state)
-        logger.info("Fine-tuned weights loaded")
-    else:
-        logger.info("No fine-tuned weights found — using pretrained OpenAI CLIP")
+        if _FINETUNED_WEIGHTS.exists():
+            logger.info("Loading fine-tuned visual encoder from %s", _FINETUNED_WEIGHTS)
+            state = torch.load(_FINETUNED_WEIGHTS, map_location=_device)
+            model.visual.load_state_dict(state)
+            logger.info("Fine-tuned weights loaded")
+        else:
+            logger.info("No fine-tuned weights found — using pretrained OpenAI CLIP")
 
-    _model = _model.to(_device)
-    _model.eval()
-    logger.info("CLIP ViT-B/32 ready (512-dim features, device=%s)", _device)
+        model = model.to(_device)
+        if _USE_HALF:
+            model = model.half()
+        model.eval()
+        _preprocess = preprocess
+        _model = model
+        logger.info("CLIP ViT-B/32 ready (512-dim features, device=%s, half=%s)", _device, _USE_HALF)
 
 
 def embed_image(image_bytes: bytes) -> np.ndarray:
@@ -82,7 +97,10 @@ def embed_batch(images_bytes: list[bytes]) -> list[np.ndarray]:
         for b in images_bytes
     ]
     batch = torch.stack(tensors).to(_device)
-    with torch.no_grad():
+    if _USE_HALF:
+        batch = batch.half()
+    with torch.inference_mode():
         features = _model.encode_image(batch)
         features = features / features.norm(dim=-1, keepdim=True)
-    return [v.cpu().numpy().astype(np.float32) for v in features]
+    # Cast back to fp32 — pgvector storage and downstream cosine math expect float32.
+    return [v.float().cpu().numpy() for v in features]

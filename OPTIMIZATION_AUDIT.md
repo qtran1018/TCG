@@ -28,8 +28,23 @@ _(All previously partial items now resolved — see §1.12 and §5.1 below.)_
 
 | # | Item | Description | Section |
 |---|------|-------------|---------|
-| 2.3 | Move OpenCV detector to separate module | Left as safety-net fallback; keep isolated once YOLO is fully trusted | §2 Correctness |
 | §6 stubs | `pop_higher` field on PSA scraper | Scaffold left unimplemented | §6 Unused Code |
+| R2.10–R2.13 | Cache base64 wrapper, scanStream parse complexity, per-crop DB sessions, dedupe cache | Low-impact cleanups, deferred | Round 2 |
+
+### ✅ Round 2 (2026-05-21) — implemented
+
+| # | Item | Section |
+|---|------|---------|
+| R2.1 | `ivfflat.probes = 10` for better CLIP recall | Round 2 |
+| R2.2 | Per-language partial IVFFlat indices | Round 2 |
+| R2.3 | CLIP fp16 on CUDA | Round 2 |
+| R2.4 | `torch.inference_mode()` + `LIMIT 5` | Round 2 |
+| R2.5 | Redis `mget` pipelining for batch cache lookups | Round 2 |
+| R2.6 | `threading.Lock` around `_load_model` | Round 2 |
+| R2.7 | YOLO `half=True` on CUDA | Round 2 |
+| R2.8 | Vector search `LIMIT 5` (was 10) | Round 2 |
+| R2.9 | Mobile: overlap JPEG re-encode with name-region OCR | Round 2 |
+| 2.3 / 19 | Removed OpenCV detector — YOLO v2 is the only path now | §2 |
 
 ---
 
@@ -453,38 +468,42 @@ Each finding lists:
 
 Reviewed after the original audit was largely implemented and YOLO v2 was confirmed trusted enough to remove the OpenCV fallback (2.3 / 19).
 
+**Implementation status:** R2.1–R2.9 implemented 2026-05-21. R2.10–R2.13 deferred as low-impact cleanups.
+
 ### Round 2 findings — by impact
 
 #### High-impact
 
-##### R2.1 pgvector IVFFlat probe count is at default (1)
+##### ✅ R2.1 pgvector IVFFlat probe count is at default (1)
 - **File**: `backend/app/api/v1/scan.py:124-146` — `_vector_search`
 - **Current**: No `SET ivfflat.probes` before the nearest-neighbor query.
 - **Issue**: With 47K vectors across 100 lists, default probes=1 scans only ~470 vectors → mediocre recall. Real matches sometimes fall outside the probed cluster.
 - **Recommendation**: `await db.execute(text("SET LOCAL ivfflat.probes = 10"))` before the vector query.
 - **Benefit**: Materially better top-K recall (especially for CLIP fine-tuned embeddings near cluster boundaries) at +5–10ms per query.
 
-##### R2.2 Partial IVFFlat indices per language
+##### ✅ R2.2 Partial IVFFlat indices per language
 - **File**: `backend/app/models/card.py` (schema), `scripts/build_embeddings.py` (index build)
 - **Current**: Single IVFFlat index covers all 47,442 rows; every query filters by `Card.language` post-fetch.
 - **Issue**: ~half of probed candidates are discarded by the language filter.
 - **Recommendation**: Two partial indices — `CREATE INDEX ON cards USING ivfflat (embedding vector_cosine_ops) WHERE language='en' WITH (lists=50)` and same for `'ja'`. Drop the merged index.
 - **Benefit**: ~30–40% faster vector search.
 
-##### R2.3 CLIP fp16 on GPU
+##### ✅ R2.3 CLIP fp16 on GPU
 - **File**: `backend/app/services/card_embedder.py:42-44`
 - **Current**: Model loads in fp32 on CUDA.
 - **Issue**: Inference is ~1.8× slower than fp16 on RTX 3080 and uses 2× VRAM.
 - **Recommendation**: After `_model.to(_device)`, if `_device.type == "cuda"`: `_model = _model.half()`. Cast batch input with `.half()`; output `.float().cpu().numpy()` for storage compatibility.
 - **Benefit**: ~1.8× CLIP encode throughput on GPU; freed VRAM.
 
-##### R2.4 `torch.inference_mode()` and `torch.compile`
+##### ⚠️ R2.4 `torch.inference_mode()` and `torch.compile`
+
+**Status:** `inference_mode` applied. `torch.compile` deferred (skip-list optimization pending validation).
 - **File**: `backend/app/services/card_embedder.py:85-87`
 - **Current**: `with torch.no_grad():`
 - **Recommendation**: Swap to `torch.inference_mode()` (no autograd state, slightly faster). Optionally `torch.compile(_model, mode="reduce-overhead")` at load time on PyTorch 2.x.
 - **Benefit**: `inference_mode` is free; `torch.compile` adds ~1.5× after first warmup batch.
 
-##### R2.5 Redis pipelining for batch cache lookups
+##### ✅ R2.5 Redis pipelining for batch cache lookups
 - **File**: `backend/app/api/v1/scan.py:226-243` — `_batch_image_search`
 - **Current**: Loops N crops with sequential `await search_cache.get(...)` calls.
 - **Issue**: N round-trips to Redis (10 crops = 10 RTT). On a remote Redis or under load, this dominates the pre-embed phase.
@@ -493,27 +512,27 @@ Reviewed after the original audit was largely implemented and YOLO v2 was confir
 
 #### Medium-impact
 
-##### R2.6 `_load_model` lacks thread-safety
+##### ✅ R2.6 `_load_model` lacks thread-safety
 - **File**: `backend/app/services/card_embedder.py:25-44`
 - **Current**: Globals `_model`/`_preprocess` set without a lock. Called from `asyncio.to_thread` workers.
 - **Issue**: Multiple worker threads can race the first call after a process restart, attempting to load CLIP twice (~170MB each).
 - **Recommendation**: Module-level `threading.Lock()` around the load block.
 - **Benefit**: Correctness; eliminates a rare-but-real race.
 
-##### R2.7 YOLO inference fp16
+##### ✅ R2.7 YOLO inference fp16
 - **File**: `backend/app/services/card_detector.py:64`
 - **Current**: `model(img, conf=0.25, iou=0.45, verbose=False)` — fp32 inference.
 - **Recommendation**: Add `half=True` when CUDA available.
 - **Benefit**: ~1.5× faster YOLO on GPU, no accuracy regression for this model size.
 
-##### R2.8 Vector search overfetches
+##### ✅ R2.8 Vector search overfetches
 - **File**: `backend/app/api/v1/scan.py:143`
 - **Current**: `LIMIT 10`, returns top 5.
 - **Issue**: phash re-ranking only promotes existing rows; the extra 5 are wasted.
 - **Recommendation**: `LIMIT 5`.
 - **Benefit**: Smaller payloads, fewer scored rows.
 
-##### R2.9 Mobile: overlap JPEG re-encode with name-region OCR
+##### ✅ R2.9 Mobile: overlap JPEG re-encode with name-region OCR
 - **File**: `mobile/hooks/useMultiCardScan.ts:178-242`
 - **Current**: Within a single crop: full-crop OCR → name-region crop+OCR → JPEG re-encode → base64 read, all sequential.
 - **Issue**: JPEG re-encode + base64 only depend on the original crop `uri` and can overlap with name-region OCR.
