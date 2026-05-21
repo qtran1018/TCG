@@ -130,12 +130,14 @@ export const api = {
     scanType: ScanType,
     language?: string,
     cardNumber?: string,
+    forceRefresh?: boolean,
   ): Promise<CardWithPrice> {
     const { data } = await client.get<CardWithPrice>(`/cards/${cardId}`, {
       params: {
         scan_type: scanType,
         ...(language && { language }),
         ...(cardNumber && { card_number: cardNumber }),
+        ...(forceRefresh && { force_refresh: true }),
       },
     });
     return data;

@@ -556,6 +556,7 @@ class CardMatcherService:
         scan_type: str,
         language_override: str | None = None,
         ja_card_number: str | None = None,
+        force_refresh: bool = False,
     ) -> dict | None:
         if not card.name:
             return None
@@ -567,11 +568,12 @@ class CardMatcherService:
         price_language = language_override or card.language
         pc_id, cache_key = self._price_cache_key(pc_url, scan_type, price_language)
 
-        cached = await price_cache.get(cache_key)
-        if cached is not None:
-            if isinstance(cached, dict) and cached.get("__not_found__"):
-                return None
-            return cached
+        if not force_refresh:
+            cached = await price_cache.get(cache_key)
+            if cached is not None:
+                if isinstance(cached, dict) and cached.get("__not_found__"):
+                    return None
+                return cached
 
         prices = await self.pc_scraper.get_prices(pc_url)
         if self._is_empty_prices(prices):

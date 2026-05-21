@@ -28,6 +28,7 @@ async def get_card(
     scan_type: str = "raw",
     language: str | None = None,
     card_number: str | None = None,
+    force_refresh: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Card).where(Card.id == card_id))
@@ -43,6 +44,7 @@ async def get_card(
         card, scan_type,
         language_override=language,
         ja_card_number=card_number if language == "ja" else None,
+        force_refresh=force_refresh,
     )
     await db.commit()
 

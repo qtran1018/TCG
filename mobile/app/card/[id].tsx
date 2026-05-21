@@ -26,7 +26,7 @@ export default function CardDetailScreen() {
     else setIsLoading(true);
     setError(null);
     api
-      .getCard(Number(id), scanType, routeLanguage, card_number)
+      .getCard(Number(id), scanType, routeLanguage, card_number, refresh)
       .then(setData)
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => { setIsLoading(false); setIsRefreshing(false); });
