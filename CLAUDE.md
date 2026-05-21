@@ -37,9 +37,9 @@ When retraining next:
 
 ---
 
-### Priority 2 — YOLO on-device (TFLite)
+### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v18, 2026-05-21)
 
-Eliminates the `/detect` network round-trip (200–800ms on Wi-Fi, often 1–3s on mobile data). Biggest UX win for users on cellular connections. Stub is in place in `mobile/utils/yoloDetector.ts` returning null; `detectCardsWithYolo()` is already called first in the pipeline before the backend fallback.
+Implemented in `mobile/utils/yoloDetector.ts`. Eliminates the `/detect` network round-trip.
 
 | Metric | Backend `/detect` (mobile data) | On-device TFLite |
 | --- | --- | --- |
@@ -48,62 +48,27 @@ Eliminates the `/detect` network round-trip (200–800ms on Wi-Fi, often 1–3s 
 | Backend load per scan | 1 detect call | 0 |
 | Data uploaded | Full 2400px image (~500KB–2MB) | Only cropped card regions |
 
-**Step 1 — Export TFLite model (backend, one-time)**
+**How it works (v18):**
+- Export chain: PyTorch → ONNX (onnxscript + onnxslim) → TF SavedModel (onnx2tf) → TFLite float16
+- `ultralytics` direct TFLite export segfaulted (onnx2tf crash); fixed by running onnx2tf manually
+- Model: `card_detector_float16.tflite` (5.1MB, float32 I/O, `[1, 5, 8400]` output)
+- Bundled at `mobile/assets/models/card_detector.tflite`; `metro.config.js` adds `tflite` to `assetExts`
+- Image preprocessing: resize to 640×640 (stretched), JPEG 0.92, base64 → `jpeg-js` decode → float32 RGB
+- Post-processing: conf > 0.25 filter, greedy NMS (IoU 0.45), stretched un-projection, area filter
+- Output layout auto-detected from `model.outputs[0].shape`: `[1,5,8400]` or `[1,8400,5]`
+- Graceful fallback: try-catch returns `null` → caller falls back to backend `/detect`
+- CPU delegate only (default); GPU delegates need Expo config plugin
 
-Previous export failed with `No module named 'onnxscript'`. Export chain: PyTorch → ONNX → TF SavedModel → TFLite.
-
+**To re-export after YOLO retraining:**
 ```bash
-# Inside tcg_backend container:
-pip install onnxscript onnx2tf onnxslim sng4onnx tensorflow
-python -c "from ultralytics import YOLO; YOLO('/app/backend/models/card_detector.pt').export(format='tflite', imgsz=640, int8=False)"
+docker exec tcg_backend python -c "from ultralytics import YOLO; YOLO('/app/models/card_detector.pt').export(format='onnx', imgsz=640)"
+docker exec tcg_backend onnx2tf -i /app/models/card_detector.onnx -o /app/models/card_detector_saved_model -osd
+# Then copy card_detector_float16.tflite to mobile/assets/models/card_detector.tflite
 ```
 
-Produces `card_detector_saved_model/card_detector_float32.tflite` (~12MB). Copy to `mobile/assets/models/card_detector.tflite`.
+**Validation:** Compare box count/coords between backend `/detect` and on-device for the same test photo. Drift >5px indicates preprocessing bug (normalization, NHWC order, scale factor). Backend `/detect` fallback still active if TFLite returns 0 boxes.
 
-Optional int8 quantization (~12MB → ~3MB, small accuracy hit — validate mAP50-95 stays above 0.92):
-
-```bash
-python -c "from ultralytics import YOLO; YOLO('/app/backend/models/card_detector.pt').export(format='tflite', imgsz=640, int8=True, data='/tmp/yolo_v2_merged/data.yaml')"
-```
-
-**Step 2 — Mobile integration (`mobile/utils/yoloDetector.ts`)**
-
-`react-native-fast-tflite ^3.0.1` is already in `mobile/package.json`. Replace the null-return stub:
-
-1. Load model on first call (cache in module-level variable to avoid reloading):
-   ```ts
-   import { loadTensorflowModel } from 'react-native-fast-tflite';
-   const model = await loadTensorflowModel(require('../assets/models/card_detector.tflite'));
-   ```
-   Try GPU delegate first (`{ delegate: 'android-gpu' }` on Android, `'core-ml'` on iOS), fall back to CPU.
-
-2. Preprocess: letterbox resize to 640×640 (pad with gray 114,114,114), decode JPEG → Float32Array, normalize 0–1. Save (scale, padX, padY) to un-letterbox boxes later.
-
-3. Run inference — output shape `[1, 5, 8400]` (cx, cy, w, h, confidence per anchor).
-
-4. Post-process: filter `confidence > 0.25`, convert (cx,cy,w,h) → (x1,y1,x2,y2), NMS at IoU threshold 0.45, un-letterbox to original image pixel coordinates.
-
-5. Return `{ regions: [...] }` matching the `boxesToRegions` contract in `detectCards.ts`.
-
-**Step 3 — Bundle the model**
-
-Add to `metro.config.js`: `config.resolver.assetExts.push('tflite')`
-
-**Step 4 — Validate**
-
-Compare detected box count + coordinates between backend `/detect` and on-device for the same test photos. Boxes should match within ~5px — larger drift indicates a preprocessing bug (letterbox math, normalization, NHWC vs NCHW).
-
-**Step 5 — Graceful fallback** (pipeline already structured in `useMultiCardScan.ts`)
-
-1. On-device TFLite → use boxes if returned
-2. Backend `/detect` if TFLite fails or returns 0 boxes
-3. `detectCardRegions` (OCR clustering) if backend also fails
-
-**Alternatives if TFLite export keeps failing:**
-- `onnxruntime-react-native` — runs ONNX intermediate directly, skips TF SavedModel step, same accuracy
-- Native NCNN/MNN — fastest mobile YOLO runtime, but requires writing native Android/iOS modules
-
-**Risks:** GPU delegate availability varies by Android device; iOS needs Core ML re-export for hardware acceleration; model file updates require a full app rebuild and store release.
+**Known risks:** GPU delegate needs Expo config plugin; iOS needs Core ML re-export; model updates require full app rebuild.
 
 ---
 
@@ -251,7 +216,7 @@ PriceCharting uses **two different numbering systems** for Japanese cards depend
 ## Known Issues
 
 - Background text isolation (keyboard keys, shelf labels) is unreliable in single-card mode. The overlay-zone block filter approach has coordinate mapping complexity across devices. Deferred — the multi-card approach will supersede it.
-- On-device YOLO detection (`mobile/utils/yoloDetector.ts`) is scaffolded but disabled — `detectCardsWithYolo` always returns null until `card_detector.tflite` is present. TFLite model export was attempted but not completed; falls back to backend `/detect`.
+- On-device YOLO detection (`mobile/utils/yoloDetector.ts`) fully implemented (v18). `card_detector_float16.tflite` (5.1MB) bundled at `mobile/assets/models/`. CPU delegate only — GPU needs Expo config plugin setup.
 - Image AI mode similarity scores for some cards (e.g. Lotad) are around 0.43 — below the `_SIM_FLOOR = 0.50` cutoff, so they return no image candidates. Combined/OCR mode reliably identifies these cards. Image AI works best for visually distinctive cards.
 
 ### Japanese card swap propagation — RESOLVED (v11, 2026-05-20)
@@ -728,6 +693,11 @@ docker exec tcg_backend python /scripts/migrate_partial_ivfflat.py
 ```
 
 Subsequent `scripts/build_embeddings.py` runs (with or without `--force`) automatically use `rebuild_ivfflat_indices()` to maintain both partial indices.
+
+### v19 — Reload cache bypass + TFLite on-device YOLO (2026-05-21)
+
+- **Reload cache bypass**: `GET /api/v1/cards/{id}` now accepts `?force_refresh=true` (FastAPI `Query` param). Passes through to `get_prices(..., force_refresh=True)` which skips the Redis `get()` call entirely when set — bypasses both the positive 24h cache and the 1h negative (not-found) cache. Backend still writes back after scraping. Mobile `api.getCard()` has new `forceRefresh?: boolean` param; the reload button in `card/[id].tsx` passes `refresh=true` so `loadCard(true)` → `forceRefresh=true`.
+- **TFLite on-device YOLO**: Export chain: `YOLO.export(format='onnx')` + `onnx2tf` (direct, not via ultralytics — ultralytics TFLite export segfaults in this container). Output: `card_detector_float16.tflite` (5.1MB, float32 I/O, output `[1, 5, 8400]`). `metro.config.js` created with `tflite` in `assetExts`. `mobile/utils/yoloDetector.ts` implemented: jpeg-js JPEG decode → float32 NHWC input → TFLite inference → greedy NMS → stretched (not letterboxed) 640×640 un-projection → box sort matching backend. Output layout auto-detected from `model.outputs[0].shape`. Try-catch returns `null` (falls back to backend `/detect`). Model loaded lazily, cached module-level.
 
 ### v17 — Language detection hardening + UX fixes (2026-05-21)
 
