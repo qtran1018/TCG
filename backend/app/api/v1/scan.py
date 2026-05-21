@@ -277,6 +277,16 @@ async def _ocr_search_one(
                 language=language,
                 db=db,
             )
+            # If JP search found nothing, retry as EN — handles EN cards whose flavor
+            # text was misread as kana by TextRecognitionScript.JAPANESE on the mobile,
+            # flipping cropLang to 'ja' despite being an English card.
+            if not cards and language == "ja":
+                cards, query_used = await _matcher.search_cards(
+                    ocr_text=hint.raw_text,
+                    game=game,
+                    language="en",
+                    db=db,
+                )
         return [CardOutLite.model_validate(c) for c in cards], query_used
     except Exception:
         logger.exception("OCR search failed for text: %s", (hint.raw_text or "")[:60])

@@ -47,6 +47,9 @@ Pokemon TCG/
 # Background texture photos (only needed for CLIP fine-tuning)
 assets/backgrounds/
 
+# Downloaded card image thumbnails for synthetic YOLO dataset generation
+assets/card_images/
+
 # Process logs
 logs/
 

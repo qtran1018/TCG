@@ -25,11 +25,42 @@ interface UseMultiCardScanReturn {
   error: string | null;
 }
 
-// Katakana U+30A0–U+30FF and hiragana U+3041–U+3096 are exclusive to Japanese.
-// EN cards never contain kana — a single match is sufficient to identify the crop as JP.
-const KANA_RE = /[゠-ヿぁ-ゖ]/;
+// Require 2+ consecutive kana characters to avoid false positives from OCR noise
+// on EN cards (e.g. a single stray kana misread from adjacent JP card bleed or decorative symbols).
+// All real JP Pokémon names are ≥3 kana; requiring 2 consecutive is safe.
+const KANA_RE = /[゠-ヿぁ-ゖ]{2,}/;
 function detectCropLanguage(text: string): "en" | "ja" {
   return KANA_RE.test(text) ? "ja" : "en";
+}
+
+const NUMBER_RE = /\d+\/\d+/;
+
+// Extract card number text from bottom-8% corners of the full-image OCR blocks.
+// Left corner covers most sets; right corner covers sets that print number on the right.
+// Returns whichever corner contains a N/total pattern, or falls back to any content found.
+function getNumberBlocksText(
+  allBlocks: Array<{ text: string; frame: any }>,
+  cropX: number, cropY: number, cropW: number, cropH: number,
+): string {
+  const numTop = cropY + cropH * 0.92;
+  const numBottom = cropY + cropH;
+  const leftBlocks = allBlocks.filter((b) => {
+    if (!b.frame) return false;
+    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
+    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
+    return cy >= numTop && cy <= numBottom && cx >= cropX && cx <= cropX + cropW * 0.35;
+  });
+  const rightBlocks = allBlocks.filter((b) => {
+    if (!b.frame) return false;
+    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
+    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
+    return cy >= numTop && cy <= numBottom && cx >= cropX + cropW * 0.65 && cx <= cropX + cropW;
+  });
+  const leftText = leftBlocks.map((b) => b.text).join(" ");
+  const rightText = rightBlocks.map((b) => b.text).join(" ");
+  if (NUMBER_RE.test(leftText)) return leftText;
+  if (NUMBER_RE.test(rightText)) return rightText;
+  return leftText || rightText;
 }
 
 function augmentWithNumberRegion(
@@ -37,15 +68,7 @@ function augmentWithNumberRegion(
   allBlocks: Array<{ text: string; frame: any }>,
   cropX: number, cropY: number, cropW: number, cropH: number,
 ): string {
-  const numTop = cropY + cropH * 0.78;
-  const numBottom = cropY + cropH;
-  const numberBlocks = allBlocks.filter((b) => {
-    if (!b.frame) return false;
-    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
-    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
-    return cy >= numTop && cy <= numBottom && cx >= cropX && cx <= cropX + cropW;
-  });
-  const numberText = numberBlocks.map((b) => b.text).join(" ");
+  const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
   return numberText && /\d/.test(numberText) ? `${cropText}\n${numberText}` : cropText;
 }
 
@@ -71,12 +94,13 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
       setError(null);
 
       try {
-        // 1. Resize image to 1600px wide (for OCR quality and backend CLIP)
+        // 1. Resize image to 2400px wide (higher than 1600 for better card number / small text fidelity).
+        //    PNG avoids JPEG compression loss on this master image used for OCR and cropping.
         setProgress("Processing image...");
         const resized = await ImageManipulator.manipulateAsync(
           imageUri,
-          [{ resize: { width: 1600 } }],
-          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+          [{ resize: { width: 2400 } }],
+          { compress: 1, format: ImageManipulator.SaveFormat.PNG },
         );
 
         // 2. OCR full image with JAPANESE script — it returns both Latin and kana,
@@ -142,7 +166,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           const cropped = await ImageManipulator.manipulateAsync(
             resized.uri,
             [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
-            { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+            { compress: 1, format: ImageManipulator.SaveFormat.PNG },
           );
           cropData.push({ regionIndex: i, uri: cropped.uri, cropX, cropY, cropW, cropH });
         }
@@ -153,8 +177,13 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         // Read base64 + OCR each crop IN PARALLEL — was sequential before.
         const cropResults = await Promise.all(
           cropData.map(async ({ uri, cropX, cropY, cropW, cropH }) => {
-            // Always read crop as base64 (needed for image modes)
-            const cropB64 = await FileSystem.readAsStringAsync(uri, {
+            // Re-encode crop as JPEG for base64 payload to backend (CLIP embedding).
+            // The PNG crop (uri) is kept lossless for local OCR; only the network
+            // payload is JPEG-compressed to avoid sending multi-MB PNGs per card.
+            const jpegForBackend = await ImageManipulator.manipulateAsync(
+              uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG },
+            );
+            const cropB64 = await FileSystem.readAsStringAsync(jpegForBackend.uri, {
               encoding: FileSystem.EncodingType.Base64,
             });
 
@@ -163,16 +192,46 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             let rawText: string | undefined;
             let cropLang: "en" | "ja" = "en";
             try {
+              // Full crop OCR — used for confidence check and number corner extraction.
               const cropResult = await TextRecognition.recognize(uri, TextRecognitionScript.JAPANESE);
-              let cropText = cropResult.blocks
+              const fullCropText = cropResult.blocks
                 .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
                 .map((b) => b.text)
                 .join("\n");
-              cropText = augmentWithNumberRegion(cropText, allBlocks, cropX, cropY, cropW, cropH);
-              cropLang = detectCropLanguage(cropText);
+              cropLang = detectCropLanguage(fullCropText);
+
               if (scanMode !== "image") {
-                const confidence = assessCardConfidence(cropText, cropResult.blocks.length, game, cropLang);
-                rawText = confidence.isCard ? cropText : undefined;
+                const confidence = assessCardConfidence(fullCropText, cropResult.blocks.length, game, cropLang);
+                if (confidence.isCard) {
+                  // Name region sub-crop: top 18% of the card image, 5–95% width.
+                  // This eliminates attack text, flavor text, and adjacent card bleed
+                  // from the name extraction input while keeping the card name + HP line.
+                  try {
+                    const nameH = Math.max(1, Math.round(cropH * 0.18));
+                    const nameW = Math.max(1, Math.round(cropW * 0.90));
+                    const nameOriginX = Math.round(cropW * 0.05);
+                    const nameCropImg = await ImageManipulator.manipulateAsync(
+                      uri,
+                      [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
+                      { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+                    );
+                    const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
+                    const nameText = nameResult.blocks
+                      .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                      .map((b) => b.text)
+                      .join("\n");
+                    // Detect language from name region — kana more reliably present here.
+                    if (nameText) cropLang = detectCropLanguage(nameText);
+                    // Append card number from bottom corners of full-image blocks.
+                    const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
+                    rawText = numberText && /\d/.test(numberText)
+                      ? `${nameText}\n${numberText}`
+                      : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
+                  } catch (e) {
+                    console.warn("[MultiScan] name region OCR failed, falling back to full crop:", e);
+                    rawText = augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
+                  }
+                }
               }
             } catch (e) {
               // One bad crop must not abort the entire scan — fall back to image-only signal.

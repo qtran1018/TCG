@@ -17,9 +17,9 @@ export function CameraScanner({ onCapture, isProcessing }: Props) {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.92,
+        quality: 1,
         base64: false,
-        skipProcessing: false,
+        skipProcessing: true,
       });
       if (photo?.uri) {
         onCapture(photo.uri);

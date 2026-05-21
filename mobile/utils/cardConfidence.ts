@@ -21,12 +21,22 @@ export interface ConfidenceResult {
 
 const THRESHOLD = 3;
 
+// A standalone EN trainer-type line is TCG-exclusive — no false positives possible.
+// Checked before scoring so trainer cards pass immediately without HP/keyword signals.
+const TRAINER_TYPE_STANDALONE_RE = /^(Supporter|Item|Tool|Technical\s+Machine|Trainer)$/im;
+
 export function assessCardConfidence(
   text: string,
   blockCount: number,
   game: "pokemon" | "onepiece",
   language: "en" | "ja" = "en",
 ): ConfidenceResult {
+  // Fast-pass: standalone EN trainer type keyword means it's definitely a TCG card.
+  // JP trainer cards pass via JA_KEYWORD_RE scoring below (グッズ, サポート, etc.).
+  if (game === "pokemon" && TRAINER_TYPE_STANDALONE_RE.test(text)) {
+    return { score: 10, isCard: true, reason: null };
+  }
+
   let score = 0;
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
 

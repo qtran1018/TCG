@@ -423,7 +423,7 @@ Each finding lists:
 |   | 19 | Move OpenCV detector to a separate module or delete it | 2.3 |
 | ✅ | 20 | Combine `_VALID_GAMES`/`_VALID_LANGUAGES` into shared module | 2.8 |
 | ✅ | 21 | Refactor `get_prices` into helper methods | 2.9 |
-| ✅ | 22 | Add proper error logging in place of silent `except` | 5.1 |
+| ⚠️ | 22 | Add proper error logging in place of silent `except` | 5.1 |
 | ✅ | 23 | Detect PriceCharting 404 and cache negative results | 5.2 |
 | ✅ | 24 | Reduce `CardOut` payload via `CardOutLite` schema | 4.4 |
 | ✅ | 25 | Memoize `PriceChart` computations with `useMemo` | 1.11 |

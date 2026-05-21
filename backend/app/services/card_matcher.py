@@ -94,7 +94,9 @@ def _find_pokemon_name(lines: list[str]) -> str | None:
             continue
         if any(c.isdigit() for c in clean):
             continue
-        if re.search(r"[.,!?;:()/\\']", clean):
+        # Allow possessive apostrophe ("Misty's Staryu") — strip 's before punct check.
+        clean_for_punct = re.sub(r"(?<=\w)'s\b", "", clean)
+        if re.search(r"[.,!?;:()/\\']", clean_for_punct):
             continue
         if not clean[0].isupper():
             continue
@@ -112,6 +114,43 @@ def _find_pokemon_name(lines: list[str]) -> str | None:
         if not _contains_pokemon_name(clean):
             continue
         return clean
+    return None
+
+
+_TRAINER_TYPE_RE = re.compile(r"^(Trainer|Supporter|Item|Tool|Technical\s+Machine)$", re.I)
+
+
+def _find_trainer_name(lines: list[str]) -> str | None:
+    """Return the Trainer/Supporter/Item/Tool card name by locating the type keyword.
+
+    Trainer cards have a standalone type line (e.g. "Supporter") with the card name
+    1–2 lines above it.  Parenthetical subtitles (e.g. "(Professor Magnolia)") are
+    stripped before validation.
+    """
+    for i, line in enumerate(lines):
+        if not _TRAINER_TYPE_RE.match(line.strip()):
+            continue
+        # Check up to 2 lines above the type keyword for the name.
+        for j in range(max(0, i - 2), i):
+            candidate = lines[j].strip()
+            # Strip parenthetical subtitle: "Boss's Orders (Ghetsis)" → "Boss's Orders"
+            candidate = re.sub(r"\s*\([^)]*\)\s*$", "", candidate).strip()
+            if not candidate or len(candidate) < 3:
+                continue
+            words = candidate.split()
+            if len(words) > 5:
+                continue
+            if any(c.isdigit() for c in candidate):
+                continue
+            if not candidate[0].isupper():
+                continue
+            if candidate.replace(" ", "").isupper() and len(candidate) > 3:
+                continue
+            # Allow possessive apostrophe ("Professor's Research") — strip before punct check.
+            clean_for_punct = re.sub(r"(?<=\w)'s\b", "", candidate)
+            if re.search(r"[.,!?;:()/\\']", clean_for_punct):
+                continue
+            return candidate
     return None
 
 
@@ -165,6 +204,8 @@ def extract_card_hints(ocr_text: str, game: str, language: str) -> dict:
                     hints["probable_name"] = english
         else:
             name = _find_pokemon_name(lines[:4])
+            if not name:
+                name = _find_trainer_name(lines)
             if name:
                 hints["probable_name"] = name
 
