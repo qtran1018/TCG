@@ -154,17 +154,36 @@ export default function CardDetailScreen() {
           </>
         ) : (
           <View style={styles.noPriceBox}>
-            <Text style={styles.noPriceText}>No pricing data available.</Text>
-            <TouchableOpacity
-              style={styles.retryBtn}
-              onPress={() => loadCard(true)}
-              disabled={isRefreshing}
-            >
-              {isRefreshing
-                ? <ActivityIndicator size="small" color={COLORS.accent} />
-                : <Text style={styles.retryText}>Retry</Text>
-              }
-            </TouchableOpacity>
+            {selectedVariant !== "normal" ? (
+              <>
+                <Text style={styles.noPriceText}>
+                  Variant not found on PriceCharting.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    const label = variantOptions.find((v) => v.key === selectedVariant)?.label ?? selectedVariant;
+                    const q = encodeURIComponent(`${card.name} ${label}`);
+                    Linking.openURL(`https://www.pricecharting.com/search-products?q=${q}&type=prices`);
+                  }}
+                >
+                  <Text style={styles.pcLinkText}>Search on PriceCharting →</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.noPriceText}>No pricing data available.</Text>
+                <TouchableOpacity
+                  style={styles.retryBtn}
+                  onPress={() => loadCard(true)}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing
+                    ? <ActivityIndicator size="small" color={COLORS.accent} />
+                    : <Text style={styles.retryText}>Retry</Text>
+                  }
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         )}
 

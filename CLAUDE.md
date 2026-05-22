@@ -8,14 +8,9 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 
 ### Priority 1 — Recognition improvements
 
-#### JP trainer card name extraction
+#### JP trainer card name extraction ✅ COMPLETED (v24, 2026-05-22)
 
-JP trainer cards pass confidence scoring (via `JA_KEYWORD_RE`) but return 0 candidates — `_find_kana_name` finds no Pokémon name on trainer cards and no `_find_jp_trainer_name` exists yet.
-
-**File:** `backend/app/services/card_matcher.py`
-
-- Add `_find_jp_trainer_name(lines)` that searches for the card name near JP type keywords (グッズ, サポート, スタジアム, ポケモンのどうぐ)
-- Mirror the EN `_find_trainer_name` logic but for kana/kanji lines
+`_find_jp_trainer_name()` added to `card_matcher.py`. Finds グッズ/サポート/スタジアム/ポケモンのどうぐ type keyword, takes name 1–2 lines above, strips JP parenthetical subtitles. `_search_db_ja_trainer()` searches `Card.name_ja` directly for trainer names that have no kana→EN translation. Falls through from `_find_kana_name` in `extract_card_hints` when no Pokémon kana name is found.
 
 #### CLIP similarity threshold tuning
 
@@ -35,18 +30,6 @@ When retraining next:
 
 - Add real photos of sleeved cards to `yolo_merged` (label as `card`)
 - Or generate synthetic sleeved cards: add semi-transparent border overlay in `generate_synthetic_yolo.py`
-
-#### OCR misread prefix variants — BASIC (v23, 2026-05-22) ✅
-
-`_POKEMON_NON_NAME_RE` expanded from `[b38g]?as[in][cgsq]\w*` to `.{0,2}as[in][cgsq]\w*` — catches OASIC, DASIC, and any 0–2-char OCR confusion before the ASIC/ASIG/ASNG stem.
-
-#### McDonald's promo set ranking (v23, 2026-05-22) ✅
-
-`_dedupe_and_rank` now adds `mcd_penalty` (tertiary sort key) for cards whose `set_code` starts with `"mcd"`. McDonald's variants only surface when set_total and card number both fail to differentiate.
-
-#### JP short-name language detection / KANA_RE (v23, 2026-05-22) ✅
-
-`KANA_RE` stabilized at `{2,}` consecutive kana. Detection runs on name-region sub-crop (top 18%) which contains only card name + HP — no EN text generates 2+ consecutive kana there. Fixes Litleo (シシコ→シコ misread). Unified EN+JP scan flow preserved (mixed-scan use case retained).
 
 ---
 
@@ -879,3 +862,44 @@ Note: in dim lighting CLIP scores typically sit at 0.55–0.75 regardless of ima
 - Dim lighting + desk lamp pointing up = CLIP scores below 0.83 gate → no "Both ✓" badges, mostly "OCR" badges. Working as designed.
 - Holofoil cards remain unreliable for image AI (pre-existing).
 - OCR misread fix above (`ASIG`, `ASNG`) is in v22.
+
+### v22.1 — Accuracy fixes: cross-language fallback margin + candidate pool widening + batch timeout (2026-05-22)
+
+- **Cross-language fallback margin**: JP→EN and EN→JP image fallback now requires `other_sim > best_sim + 0.05` before switching — prevents marginal differences (e.g. JP sim=0.477, EN sim=0.489) from causing wrong-language results.
+- **Candidate pool widening**: vector search `LIMIT 5 → 10`; IVFFlat `probes 10 → 20` — more candidates survive to RRF merge, better recall at ~5ms extra latency.
+- **Batch prices axios timeout**: `30s → 90s` — 20 cards × ~3s per uncached card = 60s worst case; default timeout produced spurious network errors while backend successfully completed.
+
+### v23 — OCR accuracy fixes: BASIC misreads, McDonald's ranking, JP short-name detection (2026-05-22)
+
+- **BASIC OCR misread prefix**: `_POKEMON_NON_NAME_RE` pattern expanded from `[b38g]?as[in][cgsq]\w*` to `.{0,2}as[in][cgsq]\w*` — catches OASIC, DASIC, and any 0–2-char OCR prefix confusion (B misread as O, D, 日, etc.) before the ASIC/ASIG/ASNG stem.
+- **McDonald's promo ranking**: `mcd_penalty` added as tertiary sort key in `_dedupe_and_rank` — `set_code.startswith("mcd")` → penalty 1; McDonald's variants only surface when set_total and card number both fail to differentiate.
+- **KANA_RE stabilized at `{2,}`**: lowered from `{3,}` to catch short JP names like シシコ (Litleo) that OCR misreads as 2 kana. Detection runs on name-region sub-crop (top 18%) — no EN text generates 2+ consecutive kana there. Unified EN+JP scan flow preserved.
+
+### v24 — JP trainer name extraction + card variant pricing (2026-05-22)
+
+#### JP trainer card name extraction
+
+- `_find_jp_trainer_name(lines)` in `card_matcher.py`: locates standalone JP type keyword (グッズ/サポート/スタジアム/ポケモンのどうぐ), takes name 1–2 lines above, strips parenthetical subtitles (full-width `（）` and half-width `()` parens).
+- `_search_db_ja_trainer()`: searches `Card.name_ja` directly for JP trainer names that have no kana→EN translation in the Pokémon dictionary.
+- Falls through from `_find_kana_name` in `extract_card_hints` — no change to Pokémon card path.
+- `build_search_query` updated to show JP trainer name in query label.
+
+#### Card variant pricing
+
+Variant picker on card detail screen — horizontal pills that re-fetch prices for a different PriceCharting listing of the same card.
+
+**URL pattern** (verified against real PriceCharting pages): variant suffix inserts between name slug and card number in the card slug; game slug unchanged.
+
+| Variant | Card slug example |
+|---|---|
+| 1st Edition | `charizard-1st-edition-4` |
+| Shadowless | `charizard-shadowless-4` |
+| Poké Ball | `umbreon-poke-ball-59` |
+| Master Ball | `gengar-master-ball-94` |
+
+**EN variants**: Normal / 1st Edition / Shadowless / Poké Ball  
+**JP variants**: Normal / Poké Ball / Master Ball
+
+**When variant has no price data**: shows "Variant not found on PriceCharting" with a "Search on PriceCharting →" link (opens browser to pre-populated search). URL construction is heuristic — PriceCharting may use different slugs for some cards; the search link lets the user verify manually.
+
+**Files**: `backend/app/scrapers/pricecharting.py` (`build_game_url` variant param), `backend/app/services/card_matcher.py` (`_build_pc_url`, `get_prices`), `backend/app/api/v1/cards.py` (`variant` query param), `mobile/services/api.ts`, `mobile/app/card/[id].tsx`.
