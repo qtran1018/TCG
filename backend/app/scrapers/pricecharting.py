@@ -130,22 +130,23 @@ class PricechartingScraper(BaseScraper):
     def build_game_url(self, name: str, set_name: str, card_number: str, game: str = "pokemon", language: str = "en", variant: str = "normal") -> str:
         num = card_number.split("/")[0].lstrip("0") or "0"
         name_slug = _slugify(name)
+        # Variant suffix is inserted between name slug and card number.
+        # e.g. charizard-1st-edition-4, gengar-master-ball-94, umbreon-poke-ball-59
+        _VARIANT_SUFFIX: dict[str, str] = {
+            "1st_edition": "-1st-edition",
+            "shadowless": "-shadowless",
+            "poke_ball": "-poke-ball",
+            "master_ball": "-master-ball",
+        }
+        suffix = _VARIANT_SUFFIX.get(variant, "")
         if game == "pokemon":
             if language == "ja":
                 set_slug = _JP_PC_SET_SLUG.get(set_name) or _slugify(set_name)
-                if variant == "pokeball_stamp":
-                    return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}-pokeball-stamp-{num}"
-                if variant == "master_ball_stamp":
-                    return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}-master-ball-stamp-{num}"
-                return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}-{num}"
+                return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}{suffix}-{num}"
             set_slug = _slugify(set_name)
-            if variant == "1st_edition":
-                return f"https://www.pricecharting.com/game/pokemon-1st-edition-{set_slug}/{name_slug}-{num}"
-            if variant == "shadowless":
-                return f"https://www.pricecharting.com/game/pokemon-shadowless-{set_slug}/{name_slug}-{num}"
-            return f"https://www.pricecharting.com/game/pokemon-{set_slug}/{name_slug}-{num}"
+            return f"https://www.pricecharting.com/game/pokemon-{set_slug}/{name_slug}{suffix}-{num}"
         set_slug = _slugify(set_name)
-        return f"https://www.pricecharting.com/game/{set_slug}/{name_slug}-{num}"
+        return f"https://www.pricecharting.com/game/{set_slug}/{name_slug}{suffix}-{num}"
 
     async def search(self, query: str, max_results: int = 10) -> list[PCSearchResult]:
         url = SEARCH_URL.format(query=query.replace(" ", "+"))

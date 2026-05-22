@@ -14,11 +14,12 @@ const EN_VARIANTS = [
   { key: "normal", label: "Normal" },
   { key: "1st_edition", label: "1st Edition" },
   { key: "shadowless", label: "Shadowless" },
+  { key: "poke_ball", label: "Poké Ball" },
 ];
 const JP_VARIANTS = [
   { key: "normal", label: "Normal" },
-  { key: "pokeball_stamp", label: "Pokéball" },
-  { key: "master_ball_stamp", label: "Master Ball" },
+  { key: "poke_ball", label: "Poké Ball" },
+  { key: "master_ball", label: "Master Ball" },
 ];
 
 export default function CardDetailScreen() {
