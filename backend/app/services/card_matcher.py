@@ -53,12 +53,11 @@ def _contains_pokemon_name(text: str) -> bool:
 
 
 # Terms that are never the card name.
-# The first alternation `[b38g]?as[in][cgsq]\w*` catches BASIC and its common OCR
-# misreads: B→[3,8] (digit confusion), B→G (similar shape), B→dropped (ASIC, ASIG),
-# I→N (vertical-stroke confusion → ASNG, ASNC). Handles BASIC/BASIG/BASIQ/BASIS,
-# GASIC/GASIG/GASIS, ASIC/ASIG/ASIQ, ASNG/ASNC, 3ASIC, 8ASIC, etc.
+# `.{0,2}as[in][cgsq]\w*` catches BASIC and its OCR misreads: any 0–2-char prefix
+# (B→O/D/G/3/8/日/dropped) followed by ASIC/ASIG/ASIQ/ASNC/ASNG etc.
+# Covers BASIC, OASIC, DASIC, GASIC, 3ASIC, 8ASIC, ASIC, ASIG, ASNG, etc.
 _POKEMON_NON_NAME_RE = re.compile(
-    r"^([b38g]?as[in][cgsq]\w*|stage\s*[12]|mega|"
+    r"^(.{0,2}as[in][cgsq]\w*|stage\s*[12]|mega|"
     r"weakness|resistance|retreat|damage|ability|trainer|item|"
     r"stadium|supporter|energy|water|fire|grass|lightning|psychic|"
     r"fighting|darkness|metal|fairy|colorless|dragon|"
@@ -346,7 +345,9 @@ class CardMatcherService:
                     num_rank = 2
             else:
                 num_rank = 0
-            return (set_match, num_rank)
+            # Tertiary: deprioritize McDonald's promo sets (uncommon, frequently outranked by real sets)
+            mcd_penalty = 1 if (c.set_code or "").startswith("mcd") else 0
+            return (set_match, num_rank, mcd_penalty)
 
         unique.sort(key=rank)
         return unique

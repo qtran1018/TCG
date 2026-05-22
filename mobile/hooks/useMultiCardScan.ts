@@ -40,9 +40,9 @@ interface UseMultiCardScanReturn {
 }
 
 // Require 3+ consecutive kana. Applied to the name-region sub-crop (top 18%) which is
-// clean enough that false positives are rare. The {3,} minimum also guards against
-// single stray kana. All real JP Pokémon names are ≥3 kana (shortest: アブラ = Abra = 3).
-const KANA_RE = /[゠-ヿぁ-ゖ]{3,}/;
+// The {2,} minimum catches short JP names like シシコ (Litleo, 3 kana but OCR may
+// misread as 2). Name-region sub-crop keeps false positives rare in practice.
+const KANA_RE = /[゠-ヿぁ-ゖ]{2,}/;
 function detectCropLanguage(text: string): "en" | "ja" {
   return KANA_RE.test(text) ? "ja" : "en";
 }
