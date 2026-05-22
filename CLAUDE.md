@@ -899,3 +899,13 @@ Variant picker on card detail screen — horizontal pills that re-fetch prices f
 **When variant has no price data**: shows "Variant not found on PriceCharting" with a "Search on PriceCharting →" link (opens browser to pre-populated search). URL construction is heuristic — PriceCharting may use different slugs for some cards; the search link lets the user verify manually.
 
 **Files**: `backend/app/scrapers/pricecharting.py` (`build_game_url` variant param), `backend/app/services/card_matcher.py` (`_build_pc_url`, `get_prices`), `backend/app/api/v1/cards.py` (`variant` query param), `mobile/services/api.ts`, `mobile/app/card/[id].tsx`.
+
+### v25 — Streaming batch prices (2026-05-22)
+
+Replaced the wait-for-all batch prices request with an NDJSON stream — prices appear card-by-card as they resolve rather than all at once.
+
+**Backend**: `POST /api/v1/cards/prices/stream` in `cards.py`. Uses `asyncio.ensure_future` + `asyncio.as_completed` — all price fetches run concurrently and results are yielded the moment each completes. Cache hits (Redis) emit immediately; scrape misses follow as the rate limiter allows. Same `BatchPricesItem` shape per line. `POST /api/v1/cards/prices` unchanged (backwards compatible).
+
+**Mobile `api.ts`**: `api.streamPrices()` — XHR `onprogress` NDJSON parser (same pattern as `scanStream`). Accepts `onResult(item: BatchPricesItem)` callback and `AbortSignal` for cleanup.
+
+**Mobile `batch-prices.tsx`**: replaced `api.batchPrices()` + bulk `setEntries` with `api.streamPrices()` + per-result `setEntries`. Each card row's spinner resolves independently as its price arrives. `AbortController` cancels the stream on unmount.

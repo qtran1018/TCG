@@ -40,44 +40,39 @@ export default function BatchPricesScreen() {
   useEffect(() => {
     if (batchPriceCards.length === 0) return;
 
-    let cancelled = false;
-    (async () => {
-      // Single POST /cards/prices request replaces N independent /cards/{id}
-      // calls. Backend resolves cache hits in parallel and serializes misses
-      // through its own rate limiter.
-      let items: Awaited<ReturnType<typeof api.batchPrices>> = [];
-      try {
-        const jaCardNumbers = Object.fromEntries(
-          batchPriceCards
-            .filter((bpc) => bpc.jaCardNumber)
-            .map((bpc) => [bpc.card.id, bpc.jaCardNumber!]),
-        );
-        items = await api.batchPrices(
-          batchPriceCards.map((bpc) => bpc.card.id),
-          scanType,
-          Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
-        );
-      } catch (e) {
-        console.warn("[batch-prices] batch fetch failed:", e);
-      }
-      if (cancelled) return;
+    const controller = new AbortController();
+    const jaCardNumbers = Object.fromEntries(
+      batchPriceCards
+        .filter((bpc) => bpc.jaCardNumber)
+        .map((bpc) => [bpc.card.id, bpc.jaCardNumber!]),
+    );
 
-      const byId = new Map(items.map((it) => [it.card_id, it]));
+    api.streamPrices(
+      batchPriceCards.map((bpc) => bpc.card.id),
+      scanType,
+      Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
+      (item) => {
+        setEntries((prev) =>
+          prev.map((entry) => {
+            if (entry.card.id !== item.card_id) return entry;
+            if (item.error) return { ...entry, loading: false, error: true };
+            return {
+              ...entry,
+              data: { card: item.card ?? entry.card, price: item.price },
+              loading: false,
+            };
+          }),
+        );
+      },
+      controller.signal,
+    ).catch((e) => {
+      console.warn("[batch-prices] stream failed:", e);
       setEntries((prev) =>
-        prev.map((entry) => {
-          const item = byId.get(entry.card.id);
-          if (!item || item.error) {
-            return { ...entry, loading: false, error: true };
-          }
-          return {
-            ...entry,
-            data: { card: item.card ?? entry.card, price: item.price },
-            loading: false,
-          };
-        }),
+        prev.map((entry) => entry.loading ? { ...entry, loading: false, error: true } : entry),
       );
-    })();
-    return () => { cancelled = true; };
+    });
+
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

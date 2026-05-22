@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -110,6 +112,61 @@ async def batch_prices(req: BatchPricesRequest, db: AsyncSession = Depends(get_d
     items = await asyncio.gather(*[fetch_one(cid) for cid in card_ids])
     await db.commit()
     return BatchPricesResponse(items=list(items))
+
+
+@router.post("/prices/stream")
+async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depends(get_db)):
+    """Stream prices for multiple cards as NDJSON.
+
+    Each card resolves independently — cache hits emit immediately, scrape
+    misses follow as they complete. Client receives a JSON object per line
+    with the same BatchPricesItem shape as /prices.
+    """
+    card_ids = list(dict.fromkeys(req.card_ids))[:25]
+    if not card_ids:
+        async def _empty():
+            return
+            yield  # noqa: unreachable — makes this an async generator
+        return StreamingResponse(_empty(), media_type="application/x-ndjson")
+
+    result = await db.execute(select(Card).where(Card.id.in_(card_ids)))
+    cards_by_id: dict[int, Card] = {c.id: c for c in result.scalars().all()}
+
+    async def fetch_one(card_id: int) -> BatchPricesItem:
+        card = cards_by_id.get(card_id)
+        if not card:
+            return BatchPricesItem(card_id=card_id, error="not_found")
+        try:
+            ja_card_number = req.ja_card_numbers.get(card_id) if req.ja_card_numbers else None
+            price_dict = await _matcher.get_prices(
+                card, req.scan_type,
+                language_override=card.language,
+                ja_card_number=ja_card_number if card.language == "ja" else None,
+            )
+        except Exception as e:
+            logger.exception("Stream price fetch failed for card %d", card_id)
+            return BatchPricesItem(
+                card_id=card_id,
+                card=CardOut.model_validate(card),
+                error=type(e).__name__,
+            )
+        price_out = (
+            PriceOut(**price_dict, fetched_at=datetime.utcnow()) if price_dict else None
+        )
+        return BatchPricesItem(
+            card_id=card_id,
+            card=CardOut.model_validate(card),
+            price=price_out,
+        )
+
+    async def generate():
+        tasks = [asyncio.ensure_future(fetch_one(cid)) for cid in card_ids]
+        for fut in asyncio.as_completed(tasks):
+            item = await fut
+            yield item.model_dump_json() + "\n"
+        await db.commit()
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @router.post("/history", status_code=201)

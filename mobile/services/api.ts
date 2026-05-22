@@ -170,6 +170,67 @@ export const api = {
     return data;
   },
 
+  /**
+   * Stream prices for multiple cards as NDJSON. Calls onResult for each card
+   * as its price resolves — cache hits arrive first, scrape misses follow.
+   * Same XHR onprogress pattern as scanStream.
+   */
+  streamPrices(
+    cardIds: number[],
+    scanType: ScanType,
+    jaCardNumbers: Record<number, string> | undefined,
+    onResult: (item: BatchPricesItem) => void,
+    signal?: AbortSignal,
+  ): Promise<{ aborted: boolean }> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE_URL}/cards/prices/stream`);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.timeout = 90000;
+
+      if (signal) {
+        signal.addEventListener("abort", () => xhr.abort());
+      }
+
+      let processedLen = 0;
+      let lineBuffer = "";
+
+      const flush = (text: string) => {
+        const lines = text.split("\n");
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lineBuffer + lines[i];
+          lineBuffer = "";
+          if (!line.trim()) continue;
+          try { onResult(JSON.parse(line) as BatchPricesItem); } catch { /* ignore bad lines */ }
+        }
+        lineBuffer = lines[lines.length - 1];
+      };
+
+      xhr.onprogress = () => {
+        const chunk = xhr.responseText.slice(processedLen);
+        processedLen = xhr.responseText.length;
+        if (chunk) flush(chunk);
+      };
+
+      xhr.onload = () => {
+        if (lineBuffer.trim()) {
+          try { onResult(JSON.parse(lineBuffer) as BatchPricesItem); } catch { /* ignore */ }
+        }
+        resolve({ aborted: false });
+      };
+
+      xhr.onerror = () => reject(new Error("Stream prices request failed"));
+      xhr.ontimeout = () => reject(new Error("Stream prices timed out"));
+      xhr.onabort = () => resolve({ aborted: true });
+
+      xhr.send(JSON.stringify({
+        card_ids: cardIds,
+        scan_type: scanType,
+        ...(jaCardNumbers && Object.keys(jaCardNumbers).length > 0 && { ja_card_numbers: jaCardNumbers }),
+      }));
+    });
+  },
+
   async batchPrices(
     cardIds: number[],
     scanType: ScanType,
