@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     pokemon_tcg_api_key: str = ""
     psa_api_key: str = ""
 
-    pricecharting_rate_limit_seconds: float = 3.0
+    pricecharting_rate_limit_seconds: float = 0.5
     scrape_cache_ttl_prices: int = 86400       # 24h
     scrape_cache_ttl_metadata: int = 604800    # 7d
 

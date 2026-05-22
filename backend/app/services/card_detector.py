@@ -1,11 +1,11 @@
 import base64
+import io
 import logging
 import os
 from pathlib import Path
 
-import cv2
-import numpy as np
 import torch
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,8 @@ def detect_card_rectangles(
     returns an empty box list (mobile falls back to OCR clustering).
     """
     img_bytes = base64.b64decode(image_base64)
-    arr = np.frombuffer(img_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image")
-    h, w = img.shape[:2]
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    w, h = img.size
 
     model = _get_yolo_model()
     if model is None:
