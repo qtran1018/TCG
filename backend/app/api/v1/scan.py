@@ -443,6 +443,24 @@ async def scan(req: ScanRequest):
         if ocr_failed:
             logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
             ocr_res = ([], "")
+
+        # Re-rank image candidates by card number extracted from the bottom-strip OCR.
+        # Handles same-art cards from different sets (e.g. Doduo #84/165 Pokémon 151
+        # vs #142/190 Shiny Treasure ex — identical CLIP embedding, different number).
+        # In combined/OCR mode OCR weight=2 usually wins anyway; in image-only mode
+        # this is the only set-disambiguation signal available.
+        raw_text = hints[i].raw_text or ""
+        num_m = re.search(r"(\d+)/\d+", raw_text)
+        if num_m:
+            num = _normalize_number(num_m.group(1))
+            img_candidates, img_sim, img_query = image_res  # type: ignore[misc]
+            if img_candidates:
+                matching = [c for c in img_candidates if c.card_number and _normalize_number(c.card_number) == num]
+                rest = [c for c in img_candidates if not (c.card_number and _normalize_number(c.card_number) == num)]
+                if matching:
+                    logger.debug("Image re-rank by card_number=%s: promoted %d/%d", num, len(matching), len(img_candidates))
+                image_res = (matching + rest, img_sim, img_query)
+
         return _build_result(
             i, req.scan_mode, image_res, ocr_res,
             image_failed=image_failed, ocr_failed=ocr_failed,

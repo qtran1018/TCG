@@ -131,6 +131,42 @@ function getCropRegionTextAndCount(
   return { text, blockCount: blocks.length };
 }
 
+// Dedicated bottom-strip OCR for card number extraction. The full-image OCR pass
+// (allBlocks) does not reliably detect the small N/NNN text at the bottom of cards —
+// at 2400px scale those blocks are ~20px tall, below ML Kit's detection threshold.
+// This runs a focused crop (bottom 18%, full width) per card through ML Kit LATIN,
+// which is faster and more accurate for digit recognition than JAPANESE mode.
+// All crops run in Promise.all — typical total: ~100–150ms for 12 cards.
+// Returns undefined per card when the number can't be read (distant/blurry card).
+async function extractCardNumbers(
+  cropData: Array<{ cropX: number; cropY: number; cropW: number; cropH: number }>,
+  imageUri: string,
+): Promise<(string | undefined)[]> {
+  return Promise.all(
+    cropData.map(async ({ cropX, cropY, cropW, cropH }) => {
+      // Bottom 18% — generous enough for distant cards and YOLO box imprecision,
+      // tight enough to avoid HP/damage numbers in the card body.
+      const stripTop = Math.round(cropY + cropH * 0.82);
+      const stripH = Math.max(1, Math.round(cropH * 0.18));
+      // Minimum dimensions for meaningful OCR — skip if card is too small in frame.
+      if (stripH < 10 || cropW < 20) return undefined;
+      try {
+        const strip = await ImageManipulator.manipulateAsync(
+          imageUri,
+          [{ crop: { originX: Math.round(cropX), originY: stripTop, width: Math.round(cropW), height: stripH } }],
+          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 },
+        );
+        const result = await TextRecognition.recognize(strip.uri, TextRecognitionScript.LATIN);
+        const text = result.blocks.map((b) => b.text).join(" ");
+        const match = text.match(/\d+\/\d+/);
+        return match ? match[0] : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+}
+
 export function useMultiCardScan(): UseMultiCardScanReturn {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
@@ -254,10 +290,16 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         setProgress(`Identifying ${cropData.length} card${cropData.length !== 1 ? "s" : ""}...`);
 
         // `resized.uri` is already JPEG 0.95 from step 1 — skip the re-encode entirely
-        // and base64 it directly. Kicks off in parallel with per-crop OCR text assembly.
+        // and base64 it directly. Both promises kick off concurrently with the
+        // synchronous cropResults assembly below.
         const fullImagePromise: Promise<string> = FileSystem.readAsStringAsync(resized.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        // Dedicated bottom-strip OCR for each card. Full-image allBlocks doesn't
+        // reliably pick up the small N/NNN text — this targets just the bottom 18%
+        // with ML Kit LATIN for better digit recall. Runs in parallel so it adds
+        // ~100–150ms total rather than blocking the stream start.
+        const numberStripPromise = extractCardNumbers(cropData, resized.uri);
 
         const cropResults = cropData.map(({ cropX, cropY, cropW, cropH }) => {
           let rawText: string | undefined;
@@ -293,18 +335,29 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           return { rawText, cropLang };
         });
 
-        const fullImageB64 = await fullImagePromise;
+        const [fullImageB64, cardNumbers] = await Promise.all([fullImagePromise, numberStripPromise]);
 
         if (enableTiming) t2 = Date.now();
 
         const boxes = cropData.map(({ cropX, cropY, cropW, cropH }) => ({
           left: cropX, top: cropY, width: cropW, height: cropH,
         }));
-        const ocrHints: ScanOcrHint[] = cropResults.map((r) => ({
-          raw_text: r.rawText,
-          language: r.cropLang,
-          game,
-        }));
+        const ocrHints: ScanOcrHint[] = cropResults.map((r, i) => {
+          const extracted = cardNumbers[i]; // "84/165" or undefined
+          let rawText = r.rawText;
+          if (extracted) {
+            if (rawText && !NUMBER_RE.test(rawText)) {
+              // Append number — name region text rarely includes it (small bottom text).
+              rawText = `${rawText}\n${extracted}`;
+            } else if (!rawText) {
+              // Image mode or unidentified crop: send just the number so the backend
+              // can still re-rank image AI candidates by set.
+              rawText = extracted;
+            }
+            // If rawText already contains N/NNN (rare allBlocks hit), keep as-is.
+          }
+          return { raw_text: rawText, language: r.cropLang, game };
+        });
 
         // 6. Signal the store that streaming is starting
         setMultiScanLoading(true, regions.length);
