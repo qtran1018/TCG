@@ -38,28 +38,31 @@ When retraining next:
 
 ---
 
-### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v18, 2026-05-21)
+### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v22, 2026-05-22)
 
 Implemented in `mobile/utils/yoloDetector.ts`. Eliminates the `/detect` network round-trip.
 
 | Metric                | Backend `/detect` (mobile data) | On-device TFLite                                    |
 | --------------------- | --------------------------------- | --------------------------------------------------- |
-| Round-trip latency    | 1000–3000ms                      | 50–200ms                                           |
+| Round-trip latency    | 1000–3000ms                      | 100–200ms (post-warmup)                            |
 | Works offline         | No                                | Yes (detection only — OCR/CLIP still need backend) |
 | Backend load per scan | 1 detect call                     | 0                                                   |
-| Data uploaded         | Full 2400px image (~500KB–2MB)   | Only cropped card regions                           |
+| Data uploaded         | Full 2400px image (~500KB–2MB)   | One full image + box coords (server-side crop)     |
 
-**How it works (v18):**
+**How it works (v22):**
 
 - Export chain: PyTorch → ONNX (onnxscript + onnxslim) → TF SavedModel (onnx2tf) → TFLite float16
-- `ultralytics` direct TFLite export segfaulted (onnx2tf crash); fixed by running onnx2tf manually
+- `ultralytics` direct TFLite export segfaulted; fixed by running onnx2tf manually
 - Model: `card_detector_float16.tflite` (5.1MB, float32 I/O, `[1, 5, 8400]` output)
 - Bundled at `mobile/assets/models/card_detector.tflite`; `metro.config.js` adds `tflite` to `assetExts`
-- Image preprocessing: resize to 640×640 (stretched), JPEG 0.92, base64 → `jpeg-js` decode → float32 RGB
+- Library: `react-native-fast-tflite` **v2.0.0** (v3.0.1 rejected onnx2tf op set silently — downgrade required)
+- Delegate: NNAPI on Android (routes to Hexagon DSP on Snapdragon 8 Gen 1), Core ML on iOS, CPU fallback
+- Input: resize full image to 640×640 JPEG 0.95, base64 → `jpeg-js` decode → float32 RGB NHWC
 - Post-processing: conf > 0.25 filter, greedy NMS (IoU 0.45), stretched un-projection, area filter
 - Output layout auto-detected from `model.outputs[0].shape`: `[1,5,8400]` or `[1,8400,5]`
+- Stale-handle recovery: try/catch around `model.run()`; on failure, resets `_model`/`_modelPromise` and retries once
 - Graceful fallback: try-catch returns `null` → caller falls back to backend `/detect`
-- CPU delegate only (default); GPU delegates need Expo config plugin
+- **Do not use `Promise.all([ML Kit OCR, NNAPI YOLO])`** — causes native bridge resource conflict; sequential is stable
 
 **To re-export after YOLO retraining:**
 
@@ -774,7 +777,7 @@ When YOLO detected the card regions, the per-crop full-image OCR pass + `assessC
 - `mobile/hooks/useMultiCardScan.ts`: `regionsFromYolo` flag set when YOLO returned boxes; per-crop pipeline branches on this flag — YOLO path runs 1 ML Kit call per crop (name region only); fallback path runs 2 calls per crop (full crop + name region) with confidence gate unchanged
 - Card number extraction unchanged — still reads from `allBlocks` (full-image OCR computed once at start)
 - Expected saving: N crops × 2 ML Kit calls → N crops × 1 ML Kit call (~2–3s on 12 cards)
-- **Status**: implemented but not yet verified — broken TFLite model during testing caused `regionsFromYolo=false` on all test runs. Pending clean run with restored onnx2tf model.
+- **Superseded by v21 spatial-filter OCR** — eliminated per-crop ML Kit calls entirely (zero ML Kit per crop), saving ~6s on 12 cards. The `regionsFromYolo` branch is subsumed by the spatial-filter approach.
 
 #### Language flag emoji on scan results (2026-05-22)
 
@@ -864,3 +867,40 @@ Note: in dim lighting CLIP scores typically sit at 0.55–0.75 regardless of ima
 - Dim lighting + desk lamp pointing up = CLIP scores below 0.83 gate → no "Both ✓" badges, mostly "OCR" badges. Working as designed.
 - Holofoil cards remain unreliable for image AI (pre-existing).
 - OCR misread fix above (`ASIG`, `ASNG`) is in v22.
+
+### v22.1 — Accuracy fixes: cross-language fallback margin + candidate pool widening + batch timeout (2026-05-22)
+
+Three targeted fixes landed after v22 speed testing revealed accuracy issues under real scan conditions.
+
+#### Cross-language fallback margin (`backend/app/api/v1/scan.py`)
+
+Old behaviour: JP→EN and EN→JP fallback triggered whenever the other-language sim was any positive amount higher. A JP Dewgong scan (JP sim=0.477, EN sim=0.489, diff=0.012) returned the EN card incorrectly.
+
+Fix: fallback now requires a minimum margin of 0.05 before switching languages.
+
+```python
+_FALLBACK_MARGIN = 0.05
+
+if best_sim < _SIM_THRESHOLD:
+    other = "en" if language == "ja" else "ja"
+    other_candidates, other_sim, _ = await _vector_search(...)
+    if other_sim > best_sim + _FALLBACK_MARGIN:
+        return other_candidates, other_sim, other_query
+```
+
+#### Candidate pool widening (`backend/app/api/v1/scan.py`)
+
+- Vector search `LIMIT 5 → 10`: more candidates survive to RRF merge, making the correct card reachable as a swap option.
+- IVFFlat `probes 10 → 20`: scans more cluster entries per query; better recall for low-confidence matches at ~5ms extra latency per search.
+
+Both changes are pure recall improvements with negligible latency cost.
+
+#### Batch prices axios timeout (`mobile/services/api.ts`)
+
+12 cards × ~3s per uncached card = ~36s worst case — exceeds the default 30s axios timeout, producing a spurious "network error" while the backend successfully completed all scrapes. Fixed by overriding the per-call timeout to 90s.
+
+```typescript
+const { data } = await client.post("/cards/prices", {...}, { timeout: 90000 });
+```
+
+A comment explains the rationale: `~3s per uncached card. 20 cards × 3s = 60s worst case; override to allow a full cold-cache batch to complete.`

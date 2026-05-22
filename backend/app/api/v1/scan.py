@@ -164,13 +164,14 @@ async def _vector_search(
         )
         .where(Card.embedding.isnot(None), Card.language == language)
         .order_by(distance_col)
-        .limit(5)
+        .limit(10)
     )
     async with AsyncSessionLocal() as db:
-        # Raise IVFFlat probes from default 1 → 10 for better recall on
-        # cluster-boundary cards. Cost: +5–10ms per query; benefit: meaningfully
-        # higher chance the true match is in the candidate set.
-        await db.execute(text("SET LOCAL ivfflat.probes = 10"))
+        # Raise IVFFlat probes from default 1 → 20 for better recall on
+        # cluster-boundary cards in dim / low-confidence conditions. Cost: +10–20ms
+        # per query; benefit: correct card more likely in swap candidates when the
+        # primary match is wrong but only just (sim=0.52 wrong, correct=0.51).
+        await db.execute(text("SET LOCAL ivfflat.probes = 20"))
         rows = (await db.execute(stmt)).mappings().all()
 
     scored: list[tuple[tuple, float, bool, dict]] = []
@@ -185,9 +186,11 @@ async def _vector_search(
 
     scored.sort(key=lambda x: x[0])
     best_sim = max((s for _, s, _, _ in scored), default=0.0)
-    # Return top 5 as candidates for swap options, but only if above the floor.
+    # Return top 10 as candidates for swap options, but only if above the floor.
+    # 10 vs 5 helps recover the correct card when CLIP scores cluster tightly in dim
+    # conditions and the top-1 is off by a small margin.
     if best_sim >= _SIM_FLOOR:
-        candidates = [CardOutLite.model_validate(row) for _, _, _, row in scored[:5]]
+        candidates = [CardOutLite.model_validate(row) for _, _, _, row in scored[:10]]
     else:
         candidates = []
         logger.info("Image search: below floor (best_sim=%.3f, floor=%.2f) — no candidates", best_sim, _SIM_FLOOR)
@@ -239,14 +242,25 @@ async def _image_search_one(
     )
     candidates, best_sim, query_used = await _vector_search(embedding, query_phash, cache_seed, language)
 
-    # If JP image search is below confident threshold, also try EN — mirrors the OCR
-    # JP→EN fallback and recovers EN cards that triggered kana language detection on mobile
-    # (e.g. water-type symbol misread as 2 kana, flipping cropLang to 'ja').
-    if language == "ja" and best_sim < _SIM_THRESHOLD:
-        en_candidates, en_sim, en_query = await _vector_search(embedding, query_phash, cache_seed, "en")
-        if en_sim > best_sim:
-            logger.info("Image search: JP sim=%.3f < threshold, EN sim=%.3f — using EN result", best_sim, en_sim)
-            return en_candidates, en_sim, en_query
+    # Cross-language fallback. When the primary-language search is below the confident
+    # threshold, also probe the other language. Only override if the other language is
+    # MEANINGFULLY higher — a 0.01–0.02 lead at sub-threshold confidence is noise and
+    # was causing JP cards to be returned as the visually-similar EN print (e.g. Dewgong
+    # JP photo with kana correctly detected: JP=0.477, EN=0.489 → wrongly returned EN).
+    _FALLBACK_MARGIN = 0.05
+    if best_sim < _SIM_THRESHOLD:
+        other = "en" if language == "ja" else "ja"
+        other_candidates, other_sim, other_query = await _vector_search(embedding, query_phash, cache_seed, other)
+        if other_sim > best_sim + _FALLBACK_MARGIN:
+            logger.info(
+                "Image search: %s sim=%.3f < threshold, %s sim=%.3f (margin %.02f) — using %s result",
+                language, best_sim, other, other_sim, _FALLBACK_MARGIN, other,
+            )
+            return other_candidates, other_sim, other_query
+        logger.debug(
+            "Image search: %s sim=%.3f, %s sim=%.3f — within margin, keeping %s",
+            language, best_sim, other, other_sim, language,
+        )
 
     return candidates, best_sim, query_used
 

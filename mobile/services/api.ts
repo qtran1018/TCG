@@ -173,11 +173,14 @@ export const api = {
     scanType: ScanType,
     jaCardNumbers?: Record<number, string>,
   ): Promise<BatchPricesItem[]> {
+    // Batch price fetches serialize through the scraper rate limiter on backend
+    // (~3s per uncached card). 20 cards × 3s = 60s worst case; override the
+    // default 30s axios timeout to allow a full cold-cache batch to complete.
     const { data } = await client.post<{ items: BatchPricesItem[] }>("/cards/prices", {
       card_ids: cardIds,
       scan_type: scanType,
       ...(jaCardNumbers && Object.keys(jaCardNumbers).length > 0 && { ja_card_numbers: jaCardNumbers }),
-    });
+    }, { timeout: 90000 });
     return data.items;
   },
 
