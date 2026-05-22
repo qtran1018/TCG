@@ -22,6 +22,7 @@ export default function ScanScreen() {
   const [mode, setMode] = useState<Mode>("settings");
   const [certInput, setCertInput] = useState("");
   const [scanMode, setScanMode] = useState<ScanMode>("ocr");
+  const [speedTestMode, setSpeedTestMode] = useState(false);
 
   const { game, scanType, setGame, setScanType, clearMultiScan, setMultiScanLoading } =
     useScanStore();
@@ -39,9 +40,9 @@ export default function ScanScreen() {
       setMultiScanLoading(true);
       setMode("settings");
       router.push("/multi-results");
-      await multiScan(uri, game, scanMode);
+      await multiScan(uri, game, scanMode, speedTestMode);
     },
-    [multiScan, game, scanMode, clearMultiScan, setMultiScanLoading, router],
+    [multiScan, game, scanMode, speedTestMode, clearMultiScan, setMultiScanLoading, router],
   );
 
   const handlePSALookup = useCallback(async () => {
@@ -97,6 +98,23 @@ export default function ScanScreen() {
 
             <Section label="Recognition Mode">
               <ScanModeToggle value={scanMode} onChange={setScanMode} />
+            </Section>
+
+            <Section label="Speed Test">
+              <TouchableOpacity
+                style={[styles.speedTestBtn, speedTestMode && styles.speedTestBtnActive]}
+                onPress={() => setSpeedTestMode((v) => !v)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.speedTestBtnText, speedTestMode && styles.speedTestBtnTextActive]}>
+                  {speedTestMode ? "⚡ Speed Test ON" : "⚡ Speed Test OFF"}
+                </Text>
+              </TouchableOpacity>
+              {speedTestMode && (
+                <Text style={styles.speedTestHint}>
+                  Times scan pipeline only — skips price fetch on card detail
+                </Text>
+              )}
             </Section>
 
             {scanType === "psa" ? (
@@ -206,6 +224,18 @@ const styles = StyleSheet.create({
   scanBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   btnDisabled: { opacity: 0.5 },
   loadingText: { color: COLORS.textMuted, textAlign: "center", marginTop: 16, fontSize: 14 },
+  speedTestBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignSelf: "flex-start",
+  },
+  speedTestBtnActive: { borderColor: COLORS.accent, backgroundColor: `${COLORS.accent}18` },
+  speedTestBtnText: { color: COLORS.textMuted, fontSize: 13, fontWeight: "600" },
+  speedTestBtnTextActive: { color: COLORS.accent },
+  speedTestHint: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
   multiProgressBanner: {
     position: "absolute",
     bottom: 120,

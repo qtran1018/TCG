@@ -10,16 +10,30 @@ import { useScanStore } from "@/store/scanStore";
 import type { Game } from "@/constants";
 import type { ScanOcrHint, ScanStreamResult } from "@/services/api";
 import type { CardRegion } from "@/utils/detectCards";
-import type { DetectedCard } from "@/types/scan";
+import type { DetectedCard, ScanTiming } from "@/types/scan";
 
 export type ScanMode = "ocr" | "image" | "combined";
+
+const TIMING_LOG = `${FileSystem.documentDirectory}scan_timing_log.json`;
+
+async function _appendTimingLog(timing: ScanTiming): Promise<void> {
+  let entries: unknown[] = [];
+  try {
+    const existing = await FileSystem.readAsStringAsync(TIMING_LOG);
+    entries = JSON.parse(existing);
+  } catch {
+    // File doesn't exist yet — start fresh
+  }
+  entries.push({ ...timing, ts: new Date().toISOString() });
+  await FileSystem.writeAsStringAsync(TIMING_LOG, JSON.stringify(entries, null, 2));
+}
 
 // Re-export so existing imports still compile
 export type { DetectedCard } from "@/types/scan";
 export type { MultiScanResult } from "@/types/scan";
 
 interface UseMultiCardScanReturn {
-  scan: (imageUri: string, game: Game, scanMode?: ScanMode) => Promise<boolean>;
+  scan: (imageUri: string, game: Game, scanMode?: ScanMode, enableTiming?: boolean) => Promise<boolean>;
   isProcessing: boolean;
   progress: string;
   error: string | null;
@@ -83,15 +97,19 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
     setMultiScanLoading,
     setMultiScanError,
     appendMultiScanCard,
+    setScanTiming,
   } = useScanStore();
 
   // Abort any in-flight scan stream when the hook unmounts (e.g. user navigates away).
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const scan = useCallback(
-    async (imageUri: string, game: Game, scanMode: ScanMode = "ocr"): Promise<boolean> => {
+    async (imageUri: string, game: Game, scanMode: ScanMode = "ocr", enableTiming = false): Promise<boolean> => {
       setIsProcessing(true);
       setError(null);
+
+      const t0 = enableTiming ? Date.now() : 0;
+      let t1 = 0, t2 = 0, t3 = 0;
 
       try {
         // 1. Resize image to 2400px wide (higher than 1600 for better card number / small text fidelity).
@@ -113,10 +131,12 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
 
         // 3. Detect card regions — on-device YOLO first, then fallbacks
         let regions: CardRegion[];
+        let regionsFromYolo = false;
         const yoloResult = await detectCardsWithYolo(resized.uri, resized.width, resized.height);
 
         if (yoloResult && yoloResult.boxes.length > 0) {
           regions = boxesToRegions(yoloResult.boxes);
+          regionsFromYolo = true;
           setProgress(`Found ${regions.length} card${regions.length !== 1 ? "s" : ""}...`);
         } else if (!yoloResult) {
           // YOLO model absent — fall back to backend /detect
@@ -127,6 +147,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             const detected = await api.detectCards(base64, 20);
             if (detected.boxes.length > 0) {
               regions = boxesToRegions(detected.boxes);
+              regionsFromYolo = true;  // backend /detect also runs YOLO — same trust level as on-device
               setProgress(`Found ${regions.length} card outline${regions.length !== 1 ? "s" : ""}...`);
             } else {
               regions = detectCardRegions(allBlocks, resized.width, resized.height);
@@ -138,6 +159,9 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           // YOLO found nothing — fall back to OCR clustering
           regions = detectCardRegions(allBlocks, resized.width, resized.height);
         }
+
+        if (enableTiming) t1 = Date.now();
+        console.log(`[MultiScan] detection: fromYolo=${regionsFromYolo} regions=${regions.length}`);
 
         if (regions.length === 0) {
           const msg = "No cards detected. Try better lighting or move closer.";
@@ -194,47 +218,76 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             let rawText: string | undefined;
             let cropLang: "en" | "ja" = "en";
             try {
-              // Full crop OCR — used for confidence check and number corner extraction.
-              const cropResult = await TextRecognition.recognize(uri, TextRecognitionScript.JAPANESE);
-              const fullCropText = cropResult.blocks
-                .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                .map((b) => b.text)
-                .join("\n");
-
-              // Language detection: ALWAYS use the name-region sub-crop (top 18%, 5–95% width).
-              // Full crop text is too noisy — type symbols, energy icons, flavor text, and
-              // attack text produce kana misreads on EN cards even at the {3,} threshold.
-              // Name region contains only card name + HP, which is clean enough to be reliable.
               let nameText = "";
-              try {
-                const nameH = Math.max(1, Math.round(cropH * 0.18));
-                const nameW = Math.max(1, Math.round(cropW * 0.90));
-                const nameOriginX = Math.round(cropW * 0.05);
-                const nameCropImg = await ImageManipulator.manipulateAsync(
-                  uri,
-                  [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
-                  { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-                );
-                const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
-                nameText = nameResult.blocks
-                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                  .map((b) => b.text)
-                  .join("\n");
-              } catch (e) {
-                console.warn("[MultiScan] name region OCR failed, falling back to full crop for language detection:", e);
-              }
-              // Prefer name region for language; fall back to full crop if name region empty.
-              cropLang = nameText ? detectCropLanguage(nameText) : detectCropLanguage(fullCropText);
 
-              if (scanMode !== "image") {
-                const confidence = assessCardConfidence(fullCropText, cropResult.blocks.length, game, cropLang);
-                if (confidence.isCard) {
-                  // nameText already computed above — reuse it for rawText.
-                  // Append card number from bottom corners of full-image blocks.
+              if (regionsFromYolo) {
+                // YOLO already confirmed this is a card — skip full-crop OCR and confidence
+                // check entirely. Only run the name-region sub-crop OCR (top 18%), which is
+                // all the backend actually needs. Card number still comes from allBlocks
+                // (full-image OCR, already computed once above).
+                try {
+                  const nameH = Math.max(1, Math.round(cropH * 0.18));
+                  const nameW = Math.max(1, Math.round(cropW * 0.90));
+                  const nameOriginX = Math.round(cropW * 0.05);
+                  const nameCropImg = await ImageManipulator.manipulateAsync(
+                    uri,
+                    [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
+                    { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+                  );
+                  const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
+                  nameText = nameResult.blocks
+                    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                    .map((b) => b.text)
+                    .join("\n");
+                } catch (e) {
+                  console.warn("[MultiScan] name region OCR failed:", e);
+                }
+                cropLang = detectCropLanguage(nameText);
+                if (scanMode !== "image") {
                   const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
                   rawText = numberText && /\d/.test(numberText)
                     ? `${nameText}\n${numberText}`
-                    : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
+                    : nameText || undefined;
+                }
+              } else {
+                // OCR clustering fallback — full-crop OCR still needed for confidence check
+                // since the fallback detector is noisy and may produce non-card regions.
+                const cropResult = await TextRecognition.recognize(uri, TextRecognitionScript.JAPANESE);
+                const fullCropText = cropResult.blocks
+                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                  .map((b) => b.text)
+                  .join("\n");
+
+                // Language detection: ALWAYS use the name-region sub-crop (top 18%, 5–95% width).
+                // Full crop text is too noisy — type symbols, energy icons, flavor text, and
+                // attack text produce kana misreads on EN cards even at the {3,} threshold.
+                try {
+                  const nameH = Math.max(1, Math.round(cropH * 0.18));
+                  const nameW = Math.max(1, Math.round(cropW * 0.90));
+                  const nameOriginX = Math.round(cropW * 0.05);
+                  const nameCropImg = await ImageManipulator.manipulateAsync(
+                    uri,
+                    [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
+                    { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+                  );
+                  const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
+                  nameText = nameResult.blocks
+                    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+                    .map((b) => b.text)
+                    .join("\n");
+                } catch (e) {
+                  console.warn("[MultiScan] name region OCR failed, falling back to full crop for language detection:", e);
+                }
+                cropLang = nameText ? detectCropLanguage(nameText) : detectCropLanguage(fullCropText);
+
+                if (scanMode !== "image") {
+                  const confidence = assessCardConfidence(fullCropText, cropResult.blocks.length, game, cropLang);
+                  if (confidence.isCard) {
+                    const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
+                    rawText = numberText && /\d/.test(numberText)
+                      ? `${nameText}\n${numberText}`
+                      : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
+                  }
                 }
               }
             } catch (e) {
@@ -246,6 +299,8 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             return { cropB64, rawText, cropLang };
           }),
         );
+
+        if (enableTiming) t2 = Date.now();
 
         const crops: string[] = cropResults.map((r) => r.cropB64);
         const ocrHints: ScanOcrHint[] = cropResults.map((r) => ({
@@ -270,6 +325,8 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           const topId = item.candidates[0].id;
           if (seenIds.has(topId)) return;
           seenIds.add(topId);
+
+          if (enableTiming && t3 === 0) t3 = Date.now();
 
           const hint = ocrHints[item.crop_index];
           const rawText = hint?.raw_text ?? "";
@@ -307,6 +364,18 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
 
         setMultiScanLoading(false);
 
+        if (enableTiming) {
+          const t4 = Date.now();
+          const timing: ScanTiming = {
+            yoloMs: t1 - t0,
+            cropPrepMs: t2 - t1,
+            firstResultMs: t3 > 0 ? t3 - t0 : t4 - t0,
+            totalStreamMs: t4 - t0,
+          };
+          setScanTiming(timing);
+          _appendTimingLog(timing).catch(() => {});
+        }
+
         // Aborted (user backed out or new scan started) — don't surface an
         // error and don't claim success; the caller is responsible for new state.
         if (streamOutcome?.aborted) {
@@ -333,7 +402,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         setProgress("");
       }
     },
-    [appendMultiScanCard, clearMultiScan, setMultiScanLoading, setMultiScanError],
+    [appendMultiScanCard, clearMultiScan, setMultiScanLoading, setMultiScanError, setScanTiming],
   );
 
   return { scan, isProcessing, progress, error };

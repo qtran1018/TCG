@@ -1,6 +1,8 @@
 import { loadTensorflowModel, type TfliteModel } from 'react-native-fast-tflite';
+import { Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Asset } from 'expo-asset';
 import * as jpegJs from 'jpeg-js';
 import type { DetectBox } from '@/services/api';
 
@@ -22,10 +24,26 @@ let _modelPromise: Promise<TfliteModel | null> | null = null;
 async function getModel(): Promise<TfliteModel | null> {
   if (_model !== null) return _model;
   if (_modelPromise) return _modelPromise;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  _modelPromise = loadTensorflowModel(require('../assets/models/card_detector.tflite'), [])
-    .then((m) => { _model = m; return m; })
-    .catch(() => null);
+  const delegate = Platform.OS === 'ios' ? 'core-ml' : 'default';
+  _modelPromise = (async () => {
+    try {
+      // Pre-resolve the asset to a real local file path. In dev mode the Metro
+      // URL has a malformed double-? query string the native loader can't handle;
+      // downloading first gives us a clean file:// URI it can open directly.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const asset = Asset.fromModule(require('../assets/models/card_detector.tflite'));
+      await asset.downloadAsync();
+      const localUri = asset.localUri ?? asset.uri;
+      console.log('[YOLO] loading model from:', localUri);
+      const m = await loadTensorflowModel({ url: localUri }, delegate);
+      _model = m;
+      return m;
+    } catch (e) {
+      console.error('[YOLO] model load failed:', e);
+      _modelPromise = null;
+      return null;
+    }
+  })();
   return _modelPromise;
 }
 
@@ -34,8 +52,10 @@ export async function detectCardsWithYolo(
   origW: number,
   origH: number,
 ): Promise<YoloDetectResult | null> {
+  console.log('[YOLO] detectCardsWithYolo called');
   try {
     const model = await getModel();
+    console.log('[YOLO] model loaded:', model !== null);
     if (!model) return null;
 
     // Resize to MODEL_SIZE×MODEL_SIZE (stretched — both scales tracked for un-projection).
@@ -71,6 +91,15 @@ export async function detectCardsWithYolo(
     // Detect layout from the output tensor shape.
     const outShape = model.outputs[0]?.shape ?? [];
     const transposed = outShape.length >= 3 && outShape[1] === ANCHORS; // [1,8400,5]
+
+    // Diagnostic: log output shape and max confidence to verify layout and model output.
+    let maxConf = 0;
+    let maxConfIdx = 0;
+    for (let j = 0; j < ANCHORS; j++) {
+      const conf = transposed ? output[j * 5 + 4] : output[4 * ANCHORS + j];
+      if (conf > maxConf) { maxConf = conf; maxConfIdx = j; }
+    }
+    console.log(`[YOLO] outShape=${JSON.stringify(outShape)} transposed=${transposed} maxConf=${maxConf.toFixed(4)} at j=${maxConfIdx} outputLen=${output.length}`);
 
     type Det = { x1: number; y1: number; x2: number; y2: number; conf: number };
     const detections: Det[] = [];
@@ -114,7 +143,8 @@ export async function detectCardsWithYolo(
       });
 
     return { boxes, imageWidth: origW, imageHeight: origH };
-  } catch {
+  } catch (e) {
+    console.error('[YOLO] detectCardsWithYolo failed:', e);
     return null;
   }
 }

@@ -29,12 +29,16 @@ async def get_card(
     language: str | None = None,
     card_number: str | None = None,
     force_refresh: bool = Query(False),
+    skip_price: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Card).where(Card.id == card_id))
     card = result.scalar_one_or_none()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    if skip_price:
+        return CardWithPrice(card=CardOut.model_validate(card), price=None)
 
     # Fetch fresh price (cached internally). Pass scan language to override card.language
     # for price URL building — e.g. Japanese scan of an English-stored card.

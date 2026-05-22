@@ -37,38 +37,41 @@ When retraining next:
 
 ---
 
-### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v18, 2026-05-21)
+### Priority 2 — YOLO on-device (TFLite) ⚠️ NOT WORKING (v18 attempted, 2026-05-21)
 
-Implemented in `mobile/utils/yoloDetector.ts`. Eliminates the `/detect` network round-trip.
+Code implemented in `mobile/utils/yoloDetector.ts` but the model **never loads on device**. All speed test "YOLO" times (~5–7s) were the fallback path: backend `/detect` network round-trip, not on-device inference.
 
-| Metric | Backend `/detect` (mobile data) | On-device TFLite |
+**Current state:**
+- Model file is bundled: `mobile/assets/models/card_detector.tflite` (5.1MB onnx2tf float16 export)
+- `expo-asset` pre-download resolves Metro dev-mode double-`?` URL bug → clean `file:///` path logged
+- `react-native-fast-tflite` v3.0.1 `createModel()` fails with empty native error for this model
+- Root cause: likely unsupported TFLite op, schema version mismatch, or control-flow op from onnx2tf that the bundled TFLite C++ runtime can't handle
+- Logs confirm: `[YOLO] loading model from: file:///…ExponentAsset-c5b5f0a3….tflite` → `[YOLO] model loaded: false` → `ERROR [YOLO] model load failed: <empty>`
+
+**Applied workaround (v20):** `regionsFromYolo = true` is set for backend `/detect` results too — backend uses the same `card_detector.pt` (mAP50 0.993), so its boxes are equally trustworthy. This enables the OCR optimization (1 ML Kit call per crop vs 2) on every scan, saving ~2–3s without needing on-device inference.
+
+**Expected benefit if fixed:**
+| Metric | Backend `/detect` (current) | On-device TFLite (goal) |
 | --- | --- | --- |
-| Round-trip latency | 1000–3000ms | 50–200ms |
-| Works offline | No | Yes (detection only — OCR/CLIP still need backend) |
+| Detection latency | ~5–7s (base64 encode + upload + RTX 3080 + response) | 50–200ms |
+| Works offline | No | Yes (detection only) |
 | Backend load per scan | 1 detect call | 0 |
-| Data uploaded | Full 2400px image (~500KB–2MB) | Only cropped card regions |
+| Data uploaded | Full 2400px image (~500KB–2MB) | Only cropped regions |
 
-**How it works (v18):**
-- Export chain: PyTorch → ONNX (onnxscript + onnxslim) → TF SavedModel (onnx2tf) → TFLite float16
-- `ultralytics` direct TFLite export segfaulted (onnx2tf crash); fixed by running onnx2tf manually
-- Model: `card_detector_float16.tflite` (5.1MB, float32 I/O, `[1, 5, 8400]` output)
-- Bundled at `mobile/assets/models/card_detector.tflite`; `metro.config.js` adds `tflite` to `assetExts`
-- Image preprocessing: resize to 640×640 (stretched), JPEG 0.92, base64 → `jpeg-js` decode → float32 RGB
-- Post-processing: conf > 0.25 filter, greedy NMS (IoU 0.45), stretched un-projection, area filter
-- Output layout auto-detected from `model.outputs[0].shape`: `[1,5,8400]` or `[1,8400,5]`
-- Graceful fallback: try-catch returns `null` → caller falls back to backend `/detect`
-- CPU delegate only (default); GPU delegates need Expo config plugin
+**Three approaches to try (timebox 2–3 hrs total):**
 
-**To re-export after YOLO retraining:**
+1. **Downgrade `react-native-fast-tflite` from v3 to v2.x** — v3 may have broken compatibility with onnx2tf's custom op set. Check npm for last v2 release; update `package.json`.
+2. **ultralytics direct TFLite export** — previously segfaulted (`onnx2tf` crash). Container has been updated; worth retrying: `docker exec tcg_backend python -c "from ultralytics import YOLO; YOLO('/app/models/card_detector.pt').export(format='tflite', imgsz=640)"`. Output goes directly to `card_detector_saved_model/card_detector_float32.tflite`.
+3. **Test production build** — `expo run:android --variant release`. Dev builds load assets via Metro bundle server; release builds embed assets as raw APK files. The native loader may behave differently in release mode (no Metro URL layer at all).
+
+**To re-export (onnx2tf path):**
 ```bash
 docker exec tcg_backend python -c "from ultralytics import YOLO; YOLO('/app/models/card_detector.pt').export(format='onnx', imgsz=640)"
 docker exec tcg_backend onnx2tf -i /app/models/card_detector.onnx -o /app/models/card_detector_saved_model -osd
 # Then copy card_detector_float16.tflite to mobile/assets/models/card_detector.tflite
 ```
 
-**Validation:** Compare box count/coords between backend `/detect` and on-device for the same test photo. Drift >5px indicates preprocessing bug (normalization, NHWC order, scale factor). Backend `/detect` fallback still active if TFLite returns 0 boxes.
-
-**Known risks:** GPU delegate needs Expo config plugin; iOS needs Core ML re-export; model updates require full app rebuild.
+**For INT8 quantization (future, after float16 works):** use onnx2tf's own pipeline (`--quant_type int8 --calib_data_dir /calib_images`), NOT `tf.lite.TFLiteConverter`. TFLiteConverter does not preserve onnx2tf's `[1,5,8400]` tensor layout and produces `fully_quantize: 0` (incomplete INT8, slower than float16). Calibration images are at `C:\Users\Quang\Desktop\TCG Training Data\Pokemon TCG` (225 photos in 23 batch folders).
 
 ---
 
@@ -707,3 +710,77 @@ Subsequent `scripts/build_embeddings.py` runs (with or without `--force`) automa
 - **JP PriceCharting URL fix**: `_JP_PC_SET_SLUG` dict maps TCGCollector set names that `_slugify` would mangle to pre-slugified PriceCharting slugs (e.g. "Pokémon Card 151" → `scarlet-&-violet-151`). `/console/` link filter added to `_parse_prices` — prevents set-listing disambiguation page links from being stored as sale URLs. Guard: if `price_loose is None` and all sale URLs are None, clears `recent_sales` to avoid bogus rows.
 - **"Complete" row removed** from `PriceDisplay.tsx`: `price_cib` is PriceCharting's "Complete In Box" game tier — never populated for trading cards.
 - **Reload button on card details page**: `loadCard(refresh?)` extracted from `useEffect`. Error state → accent "Retry" button. No-price state → "Retry" inside the box. Price loaded → "↻ Refresh price" link below `PriceDisplay` with spinner. Re-fetch hits backend which checks Redis cache (24h price TTL, 1h negative TTL).
+
+### v20 — httpx scraper, speed benchmark mode, OCR optimization (2026-05-22)
+
+#### Playwright → httpx scraper switch
+
+Removed 300MB headless Chromium dependency entirely. PriceCharting now fetched with `httpx.AsyncClient` — persistent TCP/TLS connections, brotli decompression via `brotlicffi`, rate limit dropped from 3.0s → 0.5s. Per-card fetch improved from ~5–7s to ~1s.
+
+- `backend/app/scrapers/base.py` — full rewrite: `_get_client()` returns a shared `httpx.AsyncClient`; `close_client()` called on shutdown; `BaseScraper.fetch_page()` interface preserved so `pricecharting.py` and `psa.py` needed no changes
+- `backend/requirements.txt` — removed `playwright==1.47.0`, `opencv-python-headless==4.10.0.84`; added `brotlicffi==1.1.0.0`
+- `backend/app/config.py` — `pricecharting_rate_limit_seconds: 3.0 → 0.5`
+- `backend/Dockerfile` — switched from Playwright image to `python:3.12-slim`; kept `libgl1 libglib2.0-0` apt packages (still needed by ultralytics transitive `opencv-python` dep)
+- `backend/app/services/card_detector.py` — removed direct `cv2` usage; switched `cv2.imdecode` → `PIL.Image.open(io.BytesIO()).convert("RGB")`; YOLO accepts PIL images natively
+
+#### Speed benchmark mode (dev feature)
+
+Times the scan pipeline (button press → first card result from backend) independently of the PriceCharting scrape. Real functionality preserved.
+
+- **Backend**: `GET /api/v1/cards/{id}` accepts `?skip_price=true` — returns `price: null` immediately, no scrape
+- **`mobile/types/scan.ts`**: `ScanTiming` interface (`yoloMs`, `cropPrepMs`, `firstResultMs`, `totalStreamMs`)
+- **`mobile/store/scanStore.ts`**: `scanTiming: ScanTiming | null` field + `setScanTiming` action; cleared on `clearMultiScan`/`reset`
+- **`mobile/services/api.ts`**: `skipPrice?: boolean` on `getCard()` → appends `skip_price: true`
+- **`mobile/hooks/useMultiCardScan.ts`**: `enableTiming` 4th param; timestamps at YOLO complete (t1), crop prep complete (t2), first streamed result (t3), stream done (t4)
+- **`mobile/app/(tabs)/index.tsx`**: "⚡ Speed Test" toggle button; passes `speedTestMode` to `multiScan()`
+- **`mobile/app/multi-results.tsx`**: gold timing banner (first card / all cards / YOLO / OCR prep ms); passes `speedTest=1` to card detail nav
+- **`mobile/app/card/[id].tsx`**: reads `speedTest` param, skips price fetch, times card-detail round-trip, shows gold banner
+
+#### Speed test results — Samsung S22+ (Snapdragon 8 Gen 1), 12 cards
+
+| Run | Delegate / Model | First card | All cards | YOLO | OCR prep | Notes |
+|---|---|---|---|---|---|---|
+| 1 (baseline) | CPU float16 | 12.10s | 12.52s | 4969ms | 5695ms | First clean CPU baseline |
+| 2 | GPU delegate | 16.99s | 17.43s | 9832ms | 6558ms | First run, init overhead |
+| 3 | GPU delegate | 14.04s | 14.39s | 7121ms | 6275ms | Second run, still slower than CPU |
+| 4 | CPU float16 (reverted) | 13.97s | 14.36s | 6806ms | 6406ms | Normal CPU variance, phone at 51°C |
+| 5 | CPU float16 | 13.88s | 14.22s | 7160ms | 6065ms | After OCR opt + INT8 attempt |
+| 6 | CPU float16 (TFLiteConverter regen) | 13.39s | 13.79s | 6726ms | 6060ms | regionsFromYolo=false — model broken |
+| 7 | CPU float16 (onnx2tf original restored) | TBD | — | — | — | Pending rebuild to verify OCR opt savings |
+
+**GPU delegate verdict**: slower than CPU on S22+ (Snapdragon 8 Gen 1) due to YOLO op compatibility — some ops fall back to CPU with quantize/dequantize overhead. Reverted. Phone temps 51°C are below throttle threshold (~80°C); variance (~30%) is normal Android scheduler noise.
+
+**Key finding**: backend is fast (~1.4s to first card result). Bottleneck is entirely on-device: YOLO (~5–7s CPU) + OCR prep (~5.7s for N crops × 2 ML Kit passes).
+
+#### INT8 quantization attempt — failed (2026-05-22)
+
+Attempted to produce an INT8 TFLite model for faster ARM CPU inference.
+
+- Calibration: 225 real card photos from `C:\Users\Quang\Desktop\TCG Training Data\Pokemon TCG` (23 batch folders of 10), copied into container at `/calib_images`
+- Script: `scripts/quantize_int8.py` — reads existing `card_detector_saved_model`, runs TFLiteConverter with `Optimize.DEFAULT` + `TFLITE_BUILTINS_INT8` + float32 I/O
+- Output: `card_detector_int8.tflite` (2853KB, down from 5.1MB float16) — written to `backend/models/`
+- **Result: slower than float16** — converter output `fully_quantize: 0` (incomplete quantization). YOLO has ops that don't map to INT8 in TFLite, so quantize/dequantize nodes were inserted at every float/INT8 boundary, adding overhead exceeding the INT8 speedup. YOLO went from ~5s → ~7–9s.
+- **Root cause of 0 boxes**: TFLiteConverter regenerated float16 model also failed (`fromYolo=false`) — TFLiteConverter does not preserve the onnx2tf output tensor layout (`[1, 5, 8400]`). The mobile post-processing expects this specific layout and got something different, producing no detections.
+- **Fix**: restored original onnx2tf-generated `card_detector_float16.tflite` from `card_detector_saved_model/card_detector_float16.tflite` — this file survived in the saved model directory untouched.
+
+**For future INT8 attempts**: use onnx2tf's own quantization pipeline (`--quant_type int8 --calib_data_dir`), not TFLiteConverter. onnx2tf handles the YOLO-specific op layout and tensor naming correctly; TFLiteConverter does not. onnx2tf is not currently in `requirements.txt` — install separately when needed.
+
+#### OCR optimization — skip full-crop OCR for YOLO-detected regions
+
+When YOLO detected the card regions, the per-crop full-image OCR pass + `assessCardConfidence` check are redundant — YOLO (mAP50 0.993) already confirmed the regions are cards. Only the name-region sub-crop OCR (top 18%) is needed for the backend hint.
+
+- `mobile/hooks/useMultiCardScan.ts`: `regionsFromYolo` flag set when YOLO returned boxes; per-crop pipeline branches on this flag — YOLO path runs 1 ML Kit call per crop (name region only); fallback path runs 2 calls per crop (full crop + name region) with confidence gate unchanged
+- Card number extraction unchanged — still reads from `allBlocks` (full-image OCR computed once at start)
+- Expected saving: N crops × 2 ML Kit calls → N crops × 1 ML Kit call (~2–3s on 12 cards)
+- **Applied workaround**: even though on-device YOLO fails, backend `/detect` also uses YOLO (same `card_detector.pt`), so `regionsFromYolo = true` is now also set for backend-detect results. OCR optimization fires on every scan.
+- **Status**: implemented; expected ~2–3s OCR prep savings not yet confirmed by a clean speed-test run (all runs during session were clouded by broken INT8 model or model-restore state). Verify by rebuilding with the restored onnx2tf float16 and running speed test — OCR prep should drop from ~6s to ~3s for 12 cards.
+
+#### Language flag emoji on scan results (2026-05-22)
+
+Added 🇺🇸/🇯🇵 flag in the badges row of each card result in `multi-results.tsx`. Reads `card.language` — `'ja'` shows 🇯🇵, anything else shows 🇺🇸. Appears left of card number and rarity badges.
+
+#### Speed test logging (2026-05-22)
+
+- `useMultiCardScan.ts`: `_appendTimingLog()` appends each speed test result to `scan_timing_log.json` in the app's document directory
+- `multi-results.tsx`: "Copy log" button in timing banner opens native share sheet with full JSON log content
+- Each entry: `{ yoloMs, cropPrepMs, firstResultMs, totalStreamMs, ts }`

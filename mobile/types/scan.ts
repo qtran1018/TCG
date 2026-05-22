@@ -20,3 +20,10 @@ export interface MultiScanResult {
   totalRegionsFound: number;
   totalConfident: number;
 }
+
+export interface ScanTiming {
+  yoloMs: number;        // YOLO detection duration
+  cropPrepMs: number;    // crop OCR + base64 encode duration
+  firstResultMs: number; // button press → first card result (key metric)
+  totalStreamMs: number; // button press → all results received
+}

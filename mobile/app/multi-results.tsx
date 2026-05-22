@@ -1,10 +1,11 @@
 import React, { useState, useCallback, useMemo } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  Image, Modal, ScrollView, ActivityIndicator,
+  Image, Modal, ScrollView, ActivityIndicator, Share,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import * as FileSystem from "expo-file-system/legacy";
 import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 import type { CardOut } from "@/services/api";
@@ -20,6 +21,7 @@ export default function MultiResultsScreen() {
     multiScanLoading,
     multiScanError,
     multiScanTotalRegions,
+    scanTiming,
     setBatchPriceCards,
   } = useScanStore();
 
@@ -43,10 +45,11 @@ export default function MultiResultsScreen() {
           id: String(card.id),
           language: card.language,
           ...(card.language === "ja" && dc?.cardNumber && { card_number: dc.cardNumber }),
+          ...(scanTiming !== null && { speedTest: "1" }),
         },
       });
     },
-    [router],
+    [router, scanTiming],
   );
 
   const handleSwapSelect = useCallback((dc: DetectedCard, card: CardOut) => {
@@ -89,6 +92,16 @@ export default function MultiResultsScreen() {
   }, [cards, checkedIndices, getSelected, setBatchPriceCards, router]);
 
   const handleOpenSwap = useCallback((dc: DetectedCard) => setSwapTarget(dc), []);
+
+  const handleCopyTimingLog = useCallback(async () => {
+    try {
+      const logPath = `${FileSystem.documentDirectory}scan_timing_log.json`;
+      const content = await FileSystem.readAsStringAsync(logPath);
+      await Share.share({ message: content, title: "Scan Timing Log" });
+    } catch {
+      // No log file yet
+    }
+  }, []);
 
   // extraData must change whenever selections or checkedIndices change so FlatList
   // forces CellRenderer re-renders. Without this, VirtualizedList skips updating
@@ -185,6 +198,20 @@ export default function MultiResultsScreen() {
           </View>
         )}
       </View>
+
+      {scanTiming && !multiScanLoading && (
+        <View style={styles.timingBanner}>
+          <Text style={styles.timingBannerText}>
+            ⚡ First card: {(scanTiming.firstResultMs / 1000).toFixed(2)}s
+            {"  "}|{"  "}All cards: {(scanTiming.totalStreamMs / 1000).toFixed(2)}s
+            {"  "}|{"  "}YOLO: {scanTiming.yoloMs}ms
+            {"  "}|{"  "}OCR prep: {scanTiming.cropPrepMs}ms
+          </Text>
+          <TouchableOpacity onPress={handleCopyTimingLog}>
+            <Text style={styles.timingLogBtn}>Copy log</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <FlatList
         data={cards}
@@ -306,6 +333,11 @@ const ResultRow = React.memo(function ResultRow({
             <Text style={styles.setName} numberOfLines={1}>{selected.set_name}</Text>
           )}
           <View style={styles.badges}>
+            {selected?.language && (
+              <Text style={styles.badge}>
+                {selected.language === "ja" ? "🇯🇵" : "🇺🇸"}
+              </Text>
+            )}
             {displayCardNumber && (
               <Text style={styles.badge}>#{displayCardNumber}</Text>
             )}
@@ -348,6 +380,18 @@ const styles = StyleSheet.create({
   getPricesBtn: { backgroundColor: COLORS.accent, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
   getPricesBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
+  timingBanner: {
+    marginHorizontal: 16,
+    marginBottom: 6,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  timingBannerText: { color: "#FFD700", fontSize: 11, fontWeight: "600", flex: 1 },
+  timingLogBtn: { color: "#FFD700", fontSize: 11, fontWeight: "700", opacity: 0.75, paddingLeft: 8 },
 
   // Loading states
   loadingCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },

@@ -131,6 +131,7 @@ export const api = {
     language?: string,
     cardNumber?: string,
     forceRefresh?: boolean,
+    skipPrice?: boolean,
   ): Promise<CardWithPrice> {
     const { data } = await client.get<CardWithPrice>(`/cards/${cardId}`, {
       params: {
@@ -138,6 +139,7 @@ export const api = {
         ...(language && { language }),
         ...(cardNumber && { card_number: cardNumber }),
         ...(forceRefresh && { force_refresh: true }),
+        ...(skipPrice && { skip_price: true }),
       },
     });
     return data;

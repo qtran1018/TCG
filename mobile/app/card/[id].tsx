@@ -11,26 +11,32 @@ import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 
 export default function CardDetailScreen() {
-  const { id, psaGrade, language: routeLanguage, card_number } = useLocalSearchParams<{
-    id: string; psaGrade?: string; language?: string; card_number?: string;
+  const { id, psaGrade, language: routeLanguage, card_number, speedTest } = useLocalSearchParams<{
+    id: string; psaGrade?: string; language?: string; card_number?: string; speedTest?: string;
   }>();
+  const isSpeedTest = speedTest === "1";
   const { scanType } = useScanStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailMs, setDetailMs] = useState<number | null>(null);
 
   const loadCard = useCallback((refresh = false) => {
     if (!id) return;
     if (refresh) setIsRefreshing(true);
     else setIsLoading(true);
     setError(null);
+    const t0 = isSpeedTest ? Date.now() : 0;
     api
-      .getCard(Number(id), scanType, routeLanguage, card_number, refresh)
-      .then(setData)
+      .getCard(Number(id), scanType, routeLanguage, card_number, refresh, isSpeedTest)
+      .then((result) => {
+        if (isSpeedTest) setDetailMs(Date.now() - t0);
+        setData(result);
+      })
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => { setIsLoading(false); setIsRefreshing(false); });
-  }, [id, scanType, routeLanguage, card_number]);
+  }, [id, scanType, routeLanguage, card_number, isSpeedTest]);
 
   useEffect(() => { loadCard(); }, [loadCard]);
 
@@ -63,6 +69,13 @@ export default function CardDetailScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <ScrollView contentContainerStyle={styles.content}>
+        {isSpeedTest && detailMs !== null && (
+          <View style={styles.timingBanner}>
+            <Text style={styles.timingBannerText}>
+              ⚡ Card detail: {(detailMs / 1000).toFixed(2)}s (skip_price=true)
+            </Text>
+          </View>
+        )}
         {displayImageUrl ? (
           <Image
             source={{ uri: displayImageUrl }}
@@ -196,4 +209,11 @@ const styles = StyleSheet.create({
   retryText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   pcLink: { alignItems: "center", paddingVertical: 12 },
   pcLinkText: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
+  timingBanner: {
+    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  timingBannerText: { color: "#FFD700", fontSize: 11, fontWeight: "600" },
 });
