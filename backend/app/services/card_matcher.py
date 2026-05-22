@@ -160,6 +160,36 @@ def _find_trainer_name(lines: list[str]) -> str | None:
 # Japanese equivalents of BASIC / Stage 1 / Stage 2 that appear on card art
 _JA_NON_NAME = frozenset(["たね", "1進化", "2進化", "ステージ1", "ステージ2"])
 
+# JP trainer type keywords that appear as standalone lines on the card.
+_JA_TRAINER_TYPE_RE = re.compile(r"^(グッズ|サポート|スタジアム|ポケモンのどうぐ)$")
+
+
+def _find_jp_trainer_name(lines: list[str]) -> str | None:
+    """Return the JP trainer/supporter/stadium card name.
+
+    Mirrors EN _find_trainer_name: finds the standalone type keyword, then
+    looks 1–2 lines above for the card name.  Strips JP parenthetical subtitles
+    (「ボスの司令（ゲーチス）」→「ボスの司令」).
+    """
+    for i, line in enumerate(lines):
+        if not _JA_TRAINER_TYPE_RE.match(line.strip()):
+            continue
+        for j in range(max(0, i - 2), i):
+            candidate = lines[j].strip()
+            # Strip JP parenthetical subtitle: full-width parens
+            candidate = re.sub(r"\s*（[^）]*）\s*$", "", candidate).strip()
+            # Also strip half-width parens used by some OCR outputs
+            candidate = re.sub(r"\s*\([^)]*\)\s*$", "", candidate).strip()
+            if not candidate or len(candidate) < 1:
+                continue
+            if _JA_TRAINER_TYPE_RE.match(candidate):
+                continue
+            # Must contain at least one kana or kanji character
+            if not re.search(r"[ぁ-ゖ゠-ヿ一-鿿]", candidate):
+                continue
+            return candidate
+    return None
+
 
 def _find_kana_name(lines: list[str]) -> str | None:
     """Return the kana Pokémon name from OCR lines by lookup against the known kana dict."""
@@ -205,6 +235,10 @@ def extract_card_hints(ocr_text: str, game: str, language: str) -> dict:
                 english = kana_to_english(kana)
                 if english:
                     hints["probable_name"] = english
+            else:
+                ja_trainer = _find_jp_trainer_name(lines)
+                if ja_trainer:
+                    hints["ja_trainer_name"] = ja_trainer
         else:
             name = _find_pokemon_name(lines[:4])
             if not name:
@@ -226,6 +260,11 @@ def build_search_query(hints: dict, game: str, language: str) -> str:
     """Returns a human-readable label for the query (used in API response only)."""
     if "probable_name" in hints:
         name = hints["probable_name"]
+        if "card_number" in hints:
+            return f"{name} #{hints['card_number']}"
+        return name
+    if "ja_trainer_name" in hints:
+        name = hints["ja_trainer_name"]
         if "card_number" in hints:
             return f"{name} #{hints['card_number']}"
         return name
@@ -270,6 +309,11 @@ class CardMatcherService:
                 return ordered, query
 
         db_cards = await self._search_db(hints, game, language, db)
+
+        # JP trainer/supporter/stadium: if OCR found a JP name but no kana→EN translation,
+        # fall back to name_ja substring search.
+        if not db_cards and hints.get("ja_trainer_name") and language == "ja":
+            db_cards = await self._search_db_ja_trainer(hints, game, db)
 
         # Skip external API for Japanese: pokemontcg.io has no Japanese card data.
         # _search_db already searches the English cards with the kana→EN translated name.
@@ -422,6 +466,29 @@ class CardMatcherService:
         )
         return list(fuzzy.scalars().all())
 
+    async def _search_db_ja_trainer(self, hints: dict, game: str, db: AsyncSession) -> list[Card]:
+        """Search JP cards by name_ja for trainer/supporter/stadium cards whose JP name
+        cannot be translated to English via the kana→EN dictionary."""
+        ja_name = hints.get("ja_trainer_name", "")
+        card_number = hints.get("card_number", "")
+        if not ja_name:
+            return []
+        base = select(Card).where(Card.game == game, Card.language == "ja", Card.name_ja.isnot(None))
+        name_ja_match = Card.name_ja.ilike(f"%{ja_name}%")
+        if card_number:
+            num_match = Card.card_number.ilike(f"%{card_number}%")
+            num_priority = case((num_match, 0), else_=1).label("num_priority")
+            stmt = (
+                base.add_columns(num_priority)
+                .where(name_ja_match)
+                .order_by(num_priority, Card.id.desc())
+                .limit(10)
+            )
+            rows = (await db.execute(stmt)).all()
+            return [r[0] for r in rows]
+        result = await db.execute(base.where(name_ja_match).order_by(Card.id.desc()).limit(10))
+        return list(result.scalars().all())
+
     async def _search_external(self, query: str, game: str, language: str, db: AsyncSession, hints: dict | None = None) -> list[Card]:
         cards: list[Card] = []
         if game == "pokemon":
@@ -491,8 +558,9 @@ class CardMatcherService:
         card: Card,
         language_override: str | None,
         ja_card_number: str | None = None,
+        variant: str = "normal",
     ) -> str | None:
-        """Build PriceCharting URL for the given card and language.
+        """Build PriceCharting URL for the given card, language, and variant.
 
         Never modifies the card object — duplicate rows in DB could trigger
         unique constraint violations if we write back. For language_override="ja",
@@ -508,7 +576,12 @@ class CardMatcherService:
             if not number:
                 return None
             return self.pc_scraper.build_game_url(
-                card.name, card.set_name, number, card.game, "ja"
+                card.name, card.set_name, number, card.game, "ja", variant
+            )
+        # Non-normal variants always rebuild — stored URL is always normal variant.
+        if variant != "normal" and card.set_name and card.card_number:
+            return self.pc_scraper.build_game_url(
+                card.name, card.set_name, card.card_number, card.game, card.language, variant
             )
         pc_url = card.pricecharting_url
         if pc_url is None and card.set_name and card.card_number:
@@ -562,11 +635,12 @@ class CardMatcherService:
         language_override: str | None = None,
         ja_card_number: str | None = None,
         force_refresh: bool = False,
+        variant: str = "normal",
     ) -> dict | None:
         if not card.name:
             return None
 
-        pc_url = self._build_pc_url(card, language_override, ja_card_number)
+        pc_url = self._build_pc_url(card, language_override, ja_card_number, variant)
         if not pc_url:
             return None
 

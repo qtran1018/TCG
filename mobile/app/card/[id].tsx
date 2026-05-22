@@ -10,6 +10,17 @@ import { api, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
 import { COLORS } from "@/constants";
 
+const EN_VARIANTS = [
+  { key: "normal", label: "Normal" },
+  { key: "1st_edition", label: "1st Edition" },
+  { key: "shadowless", label: "Shadowless" },
+];
+const JP_VARIANTS = [
+  { key: "normal", label: "Normal" },
+  { key: "pokeball_stamp", label: "Pokéball" },
+  { key: "master_ball_stamp", label: "Master Ball" },
+];
+
 export default function CardDetailScreen() {
   const { id, psaGrade, language: routeLanguage, card_number, speedTest } = useLocalSearchParams<{
     id: string; psaGrade?: string; language?: string; card_number?: string; speedTest?: string;
@@ -21,22 +32,31 @@ export default function CardDetailScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailMs, setDetailMs] = useState<number | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState("normal");
 
-  const loadCard = useCallback((refresh = false) => {
+  const cardLanguage = data?.card.language ?? routeLanguage ?? "en";
+  const variantOptions = cardLanguage === "ja" ? JP_VARIANTS : EN_VARIANTS;
+
+  const loadCard = useCallback((refresh = false, variant = selectedVariant) => {
     if (!id) return;
     if (refresh) setIsRefreshing(true);
     else setIsLoading(true);
     setError(null);
     const t0 = isSpeedTest ? Date.now() : 0;
     api
-      .getCard(Number(id), scanType, routeLanguage, card_number, refresh, isSpeedTest)
+      .getCard(Number(id), scanType, routeLanguage, card_number, refresh, isSpeedTest, variant)
       .then((result) => {
         if (isSpeedTest) setDetailMs(Date.now() - t0);
         setData(result);
       })
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => { setIsLoading(false); setIsRefreshing(false); });
-  }, [id, scanType, routeLanguage, card_number, isSpeedTest]);
+  }, [id, scanType, routeLanguage, card_number, isSpeedTest, selectedVariant]);
+
+  const handleVariantChange = useCallback((variant: string) => {
+    setSelectedVariant(variant);
+    loadCard(false, variant);
+  }, [loadCard]);
 
   useEffect(() => { loadCard(); }, [loadCard]);
 
@@ -101,6 +121,20 @@ export default function CardDetailScreen() {
           {card.name_ja && card.language === "en" && (
             <MetaItem label="JP Name" value={card.name_ja} />
           )}
+        </View>
+
+        <View style={styles.variantRow}>
+          {variantOptions.map((v) => (
+            <TouchableOpacity
+              key={v.key}
+              style={[styles.variantPill, selectedVariant === v.key && styles.variantPillActive]}
+              onPress={() => handleVariantChange(v.key)}
+            >
+              <Text style={[styles.variantPillText, selectedVariant === v.key && styles.variantPillTextActive]}>
+                {v.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {price ? (
@@ -209,6 +243,18 @@ const styles = StyleSheet.create({
   retryText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   pcLink: { alignItems: "center", paddingVertical: 12 },
   pcLinkText: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
+  variantRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  variantPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  variantPillActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  variantPillText: { color: COLORS.textMuted, fontSize: 13, fontWeight: "600" },
+  variantPillTextActive: { color: "#fff" },
   timingBanner: {
     backgroundColor: "rgba(0,0,0,0.65)",
     borderRadius: 8,

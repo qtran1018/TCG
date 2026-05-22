@@ -36,6 +36,18 @@ When retraining next:
 - Add real photos of sleeved cards to `yolo_merged` (label as `card`)
 - Or generate synthetic sleeved cards: add semi-transparent border overlay in `generate_synthetic_yolo.py`
 
+#### OCR misread prefix variants — BASIC (v23, 2026-05-22) ✅
+
+`_POKEMON_NON_NAME_RE` expanded from `[b38g]?as[in][cgsq]\w*` to `.{0,2}as[in][cgsq]\w*` — catches OASIC, DASIC, and any 0–2-char OCR confusion before the ASIC/ASIG/ASNG stem.
+
+#### McDonald's promo set ranking (v23, 2026-05-22) ✅
+
+`_dedupe_and_rank` now adds `mcd_penalty` (tertiary sort key) for cards whose `set_code` starts with `"mcd"`. McDonald's variants only surface when set_total and card number both fail to differentiate.
+
+#### JP short-name language detection / KANA_RE (v23, 2026-05-22) ✅
+
+`KANA_RE` stabilized at `{2,}` consecutive kana. Detection runs on name-region sub-crop (top 18%) which contains only card name + HP — no EN text generates 2+ consecutive kana there. Fixes Litleo (シシコ→シコ misread). Unified EN+JP scan flow preserved (mixed-scan use case retained).
+
 ---
 
 ### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v22, 2026-05-22)
@@ -867,40 +879,3 @@ Note: in dim lighting CLIP scores typically sit at 0.55–0.75 regardless of ima
 - Dim lighting + desk lamp pointing up = CLIP scores below 0.83 gate → no "Both ✓" badges, mostly "OCR" badges. Working as designed.
 - Holofoil cards remain unreliable for image AI (pre-existing).
 - OCR misread fix above (`ASIG`, `ASNG`) is in v22.
-
-### v22.1 — Accuracy fixes: cross-language fallback margin + candidate pool widening + batch timeout (2026-05-22)
-
-Three targeted fixes landed after v22 speed testing revealed accuracy issues under real scan conditions.
-
-#### Cross-language fallback margin (`backend/app/api/v1/scan.py`)
-
-Old behaviour: JP→EN and EN→JP fallback triggered whenever the other-language sim was any positive amount higher. A JP Dewgong scan (JP sim=0.477, EN sim=0.489, diff=0.012) returned the EN card incorrectly.
-
-Fix: fallback now requires a minimum margin of 0.05 before switching languages.
-
-```python
-_FALLBACK_MARGIN = 0.05
-
-if best_sim < _SIM_THRESHOLD:
-    other = "en" if language == "ja" else "ja"
-    other_candidates, other_sim, _ = await _vector_search(...)
-    if other_sim > best_sim + _FALLBACK_MARGIN:
-        return other_candidates, other_sim, other_query
-```
-
-#### Candidate pool widening (`backend/app/api/v1/scan.py`)
-
-- Vector search `LIMIT 5 → 10`: more candidates survive to RRF merge, making the correct card reachable as a swap option.
-- IVFFlat `probes 10 → 20`: scans more cluster entries per query; better recall for low-confidence matches at ~5ms extra latency per search.
-
-Both changes are pure recall improvements with negligible latency cost.
-
-#### Batch prices axios timeout (`mobile/services/api.ts`)
-
-12 cards × ~3s per uncached card = ~36s worst case — exceeds the default 30s axios timeout, producing a spurious "network error" while the backend successfully completed all scrapes. Fixed by overriding the per-call timeout to 90s.
-
-```typescript
-const { data } = await client.post("/cards/prices", {...}, { timeout: 90000 });
-```
-
-A comment explains the rationale: `~3s per uncached card. 20 cards × 3s = 60s worst case; override to allow a full cold-cache batch to complete.`

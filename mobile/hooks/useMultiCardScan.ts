@@ -39,9 +39,9 @@ interface UseMultiCardScanReturn {
   error: string | null;
 }
 
-// Require 3+ consecutive kana. Applied to the name-region sub-crop (top 18%) which is
-// The {2,} minimum catches short JP names like シシコ (Litleo, 3 kana but OCR may
-// misread as 2). Name-region sub-crop keeps false positives rare in practice.
+// Applied to the name-region sub-crop (top 18%), which contains only card name + HP —
+// virtually no EN text produces 2+ consecutive kana there. {2,} catches short JP names
+// like シシコ (Litleo) that OCR may return as 2 kana after a stroke misread.
 const KANA_RE = /[゠-ヿぁ-ゖ]{2,}/;
 function detectCropLanguage(text: string): "en" | "ja" {
   return KANA_RE.test(text) ? "ja" : "en";

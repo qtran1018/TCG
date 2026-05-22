@@ -132,6 +132,7 @@ export const api = {
     cardNumber?: string,
     forceRefresh?: boolean,
     skipPrice?: boolean,
+    variant?: string,
   ): Promise<CardWithPrice> {
     const { data } = await client.get<CardWithPrice>(`/cards/${cardId}`, {
       params: {
@@ -140,6 +141,7 @@ export const api = {
         ...(cardNumber && { card_number: cardNumber }),
         ...(forceRefresh && { force_refresh: true }),
         ...(skipPrice && { skip_price: true }),
+        ...(variant && variant !== "normal" && { variant }),
       },
     });
     return data;

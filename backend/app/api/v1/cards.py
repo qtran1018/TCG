@@ -30,6 +30,7 @@ async def get_card(
     card_number: str | None = None,
     force_refresh: bool = Query(False),
     skip_price: bool = Query(False),
+    variant: str = Query("normal"),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Card).where(Card.id == card_id))
@@ -49,6 +50,7 @@ async def get_card(
         language_override=language,
         ja_card_number=card_number if language == "ja" else None,
         force_refresh=force_refresh,
+        variant=variant,
     )
     await db.commit()
 
