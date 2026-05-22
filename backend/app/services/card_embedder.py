@@ -64,10 +64,20 @@ def embed_image(image_bytes: bytes) -> np.ndarray:
     return embed_batch([image_bytes])[0]
 
 
-def compute_phash(image_bytes: bytes) -> str | None:
-    """Perceptual hash of the art-region crop. Returns hex string or None on error."""
+def _to_pil(src: "Image.Image | bytes") -> "Image.Image":
+    """Accept either a PIL Image (zero-copy path) or JPEG/PNG bytes (decode once)."""
+    if isinstance(src, Image.Image):
+        return src if src.mode == "RGB" else src.convert("RGB")
+    return Image.open(io.BytesIO(src)).convert("RGB")
+
+
+def compute_phash(src: "Image.Image | bytes") -> str | None:
+    """Perceptual hash of the art-region crop. Returns hex string or None on error.
+
+    Accepts a PIL Image directly to skip JPEG decode when the caller already has one.
+    """
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = _to_pil(src)
         return str(imagehash.phash(_crop_art(img)))
     except Exception:
         logger.warning("phash computation failed", exc_info=True)
@@ -85,17 +95,19 @@ def _crop_art(img):
     return img.crop((int(w * 0.04), int(h * 0.12), int(w * 0.96), int(h * 0.52)))
 
 
-def embed_batch(images_bytes: list[bytes]) -> list[np.ndarray]:
+def embed_batch(images: "list[Image.Image | bytes]") -> list[np.ndarray]:
     """Embed multiple images in one forward pass. Returns list of 512-dim float32 arrays.
+
+    Accepts a heterogeneous list of PIL Images and/or encoded bytes — PIL Images are
+    passed straight through (no JPEG decode round-trip), bytes get decoded once.
+    This matters in the /scan hot path where callers already crop with PIL and would
+    otherwise have to JPEG-encode just to pass us bytes we'd immediately decode.
 
     Synchronous (CPU/GPU). Callers in async contexts should wrap with asyncio.to_thread
     so the event loop isn't blocked during the forward pass.
     """
     _load_model()
-    tensors = [
-        _preprocess(_crop_art(Image.open(io.BytesIO(b)).convert("RGB")))
-        for b in images_bytes
-    ]
+    tensors = [_preprocess(_crop_art(_to_pil(src))) for src in images]
     batch = torch.stack(tensors).to(_device)
     if _USE_HALF:
         batch = batch.half()

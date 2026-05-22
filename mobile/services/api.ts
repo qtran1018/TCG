@@ -212,7 +212,9 @@ export const api = {
    * complete line so the UI can update progressively.
    */
   scanStream(
-    crops: string[],
+    payload:
+      | { crops: string[]; image?: undefined; boxes?: undefined }
+      | { image: string; boxes: { left: number; top: number; width: number; height: number }[]; crops?: undefined },
     ocrHints: ScanOcrHint[],
     scanMode: string,
     onResult: (item: ScanStreamResult) => void,
@@ -263,7 +265,7 @@ export const api = {
       xhr.onabort = () => resolve({ aborted: true });
 
       xhr.send(JSON.stringify({
-        crops,
+        ...payload,
         ocr_hints: ocrHints,
         scan_mode: scanMode,
       }));

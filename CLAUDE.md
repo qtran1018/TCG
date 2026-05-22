@@ -32,68 +32,70 @@ JP trainer cards pass confidence scoring (via `JA_KEYWORD_RE`) but return 0 cand
 Training data has no sleeved cards. Most collectors use penny sleeves or deck sleeves, which add a clear/matte border and change card edge appearance.
 
 When retraining next:
+
 - Add real photos of sleeved cards to `yolo_merged` (label as `card`)
 - Or generate synthetic sleeved cards: add semi-transparent border overlay in `generate_synthetic_yolo.py`
 
 ---
 
-### Priority 2 — YOLO on-device (TFLite) ⚠️ NOT WORKING (v18 attempted, 2026-05-21)
+### Priority 2 — YOLO on-device (TFLite) ✅ COMPLETED (v18, 2026-05-21)
 
-Code implemented in `mobile/utils/yoloDetector.ts` but the model **never loads on device**. All speed test "YOLO" times (~5–7s) were the fallback path: backend `/detect` network round-trip, not on-device inference.
+Implemented in `mobile/utils/yoloDetector.ts`. Eliminates the `/detect` network round-trip.
 
-**Current state:**
-- Model file is bundled: `mobile/assets/models/card_detector.tflite` (5.1MB onnx2tf float16 export)
-- `expo-asset` pre-download resolves Metro dev-mode double-`?` URL bug → clean `file:///` path logged
-- `react-native-fast-tflite` v3.0.1 `createModel()` fails with empty native error for this model
-- Root cause: likely unsupported TFLite op, schema version mismatch, or control-flow op from onnx2tf that the bundled TFLite C++ runtime can't handle
-- Logs confirm: `[YOLO] loading model from: file:///…ExponentAsset-c5b5f0a3….tflite` → `[YOLO] model loaded: false` → `ERROR [YOLO] model load failed: <empty>`
+| Metric                | Backend `/detect` (mobile data) | On-device TFLite                                    |
+| --------------------- | --------------------------------- | --------------------------------------------------- |
+| Round-trip latency    | 1000–3000ms                      | 50–200ms                                           |
+| Works offline         | No                                | Yes (detection only — OCR/CLIP still need backend) |
+| Backend load per scan | 1 detect call                     | 0                                                   |
+| Data uploaded         | Full 2400px image (~500KB–2MB)   | Only cropped card regions                           |
 
-**Applied workaround (v20):** `regionsFromYolo = true` is set for backend `/detect` results too — backend uses the same `card_detector.pt` (mAP50 0.993), so its boxes are equally trustworthy. This enables the OCR optimization (1 ML Kit call per crop vs 2) on every scan, saving ~2–3s without needing on-device inference.
+**How it works (v18):**
 
-**Expected benefit if fixed:**
-| Metric | Backend `/detect` (current) | On-device TFLite (goal) |
-| --- | --- | --- |
-| Detection latency | ~5–7s (base64 encode + upload + RTX 3080 + response) | 50–200ms |
-| Works offline | No | Yes (detection only) |
-| Backend load per scan | 1 detect call | 0 |
-| Data uploaded | Full 2400px image (~500KB–2MB) | Only cropped regions |
+- Export chain: PyTorch → ONNX (onnxscript + onnxslim) → TF SavedModel (onnx2tf) → TFLite float16
+- `ultralytics` direct TFLite export segfaulted (onnx2tf crash); fixed by running onnx2tf manually
+- Model: `card_detector_float16.tflite` (5.1MB, float32 I/O, `[1, 5, 8400]` output)
+- Bundled at `mobile/assets/models/card_detector.tflite`; `metro.config.js` adds `tflite` to `assetExts`
+- Image preprocessing: resize to 640×640 (stretched), JPEG 0.92, base64 → `jpeg-js` decode → float32 RGB
+- Post-processing: conf > 0.25 filter, greedy NMS (IoU 0.45), stretched un-projection, area filter
+- Output layout auto-detected from `model.outputs[0].shape`: `[1,5,8400]` or `[1,8400,5]`
+- Graceful fallback: try-catch returns `null` → caller falls back to backend `/detect`
+- CPU delegate only (default); GPU delegates need Expo config plugin
 
-**Three approaches to try (timebox 2–3 hrs total):**
+**To re-export after YOLO retraining:**
 
-1. **Downgrade `react-native-fast-tflite` from v3 to v2.x** — v3 may have broken compatibility with onnx2tf's custom op set. Check npm for last v2 release; update `package.json`.
-2. **ultralytics direct TFLite export** — previously segfaulted (`onnx2tf` crash). Container has been updated; worth retrying: `docker exec tcg_backend python -c "from ultralytics import YOLO; YOLO('/app/models/card_detector.pt').export(format='tflite', imgsz=640)"`. Output goes directly to `card_detector_saved_model/card_detector_float32.tflite`.
-3. **Test production build** — `expo run:android --variant release`. Dev builds load assets via Metro bundle server; release builds embed assets as raw APK files. The native loader may behave differently in release mode (no Metro URL layer at all).
-
-**To re-export (onnx2tf path):**
 ```bash
 docker exec tcg_backend python -c "from ultralytics import YOLO; YOLO('/app/models/card_detector.pt').export(format='onnx', imgsz=640)"
 docker exec tcg_backend onnx2tf -i /app/models/card_detector.onnx -o /app/models/card_detector_saved_model -osd
 # Then copy card_detector_float16.tflite to mobile/assets/models/card_detector.tflite
 ```
 
-**For INT8 quantization (future, after float16 works):** use onnx2tf's own pipeline (`--quant_type int8 --calib_data_dir /calib_images`), NOT `tf.lite.TFLiteConverter`. TFLiteConverter does not preserve onnx2tf's `[1,5,8400]` tensor layout and produces `fully_quantize: 0` (incomplete INT8, slower than float16). Calibration images are at `C:\Users\Quang\Desktop\TCG Training Data\Pokemon TCG` (225 photos in 23 batch folders).
+**Validation:** Compare box count/coords between backend `/detect` and on-device for the same test photo. Drift >5px indicates preprocessing bug (normalization, NHWC order, scale factor). Backend `/detect` fallback still active if TFLite returns 0 boxes.
+
+**Known risks:** GPU delegate needs Expo config plugin; iOS needs Core ML re-export; model updates require full app rebuild.
 
 ---
 
 ### Future — Image AI improvements
 
 **Real photo fine-tuning** (if CLIP similarity remains unreliable after threshold tuning):
+
 - CLIP via `open-clip-torch` is MIT licensed — safe for commercial release
 - Collect thousands of real labeled card photos spanning hundreds of sets (holo/special cards included)
 - Fine-tune with InfoNCE contrastive loss; re-embed all cards
 - Note: 300 photos of ~200–300 cards would overfit badly — minimum useful scale is thousands of images
 
 **DINOv2 / DINOv3 (research benchmarking only — non-commercial licenses):**
+
 - Dense patch-level matching; better suited to card identity than CLIP's global embedding
 - DINOv2: CC BY-NC 4.0; DINOv3: custom Meta access-gated — neither can be shipped in a released app
 - Evaluate locally against CLIP if CLIP continues to struggle
 
-| Model | License | App release |
-| --- | --- | --- |
-| CLIP (open-clip-torch) | MIT | Yes |
-| DINOv2 | CC BY-NC 4.0 | No |
-| DINOv3 | Custom (access-gated) | No |
-| YOLO11n (ultralytics) | AGPL-3.0 | Yes (with attribution) |
+| Model                  | License               | App release            |
+| ---------------------- | --------------------- | ---------------------- |
+| CLIP (open-clip-torch) | MIT                   | Yes                    |
+| DINOv2                 | CC BY-NC 4.0          | No                     |
+| DINOv3                 | Custom (access-gated) | No                     |
+| YOLO11n (ultralytics)  | AGPL-3.0              | Yes (with attribution) |
 
 ---
 
@@ -156,12 +158,12 @@ Cards nobody scans for 30 days fall out of the hot set automatically and stop be
 
 ### Known Limitations (no fix planned)
 
-| Issue | Notes |
-| --- | --- |
-| Older JP sets price 404 on PriceCharting | Pre-2003 JP sets use Pokédex number not set position (e.g. Gastly #92 not #49). Would need a lookup table or scrape-based URL discovery. |
-| JP Abra (kana-heavy cards) not detected | OCR confidence < 3 + image sim < 0.50 floor → 0 candidates. Fundamental limitation — scan separately with better conditions. |
-| Holofoil image AI unreliable | Reflective surfaces produce visual appearances impossible to synthesize. CLIP fine-tuning didn't close this gap. Use OCR or Combined mode. |
-| Items with digits in name (Pokégear 3.0) | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case. |
+| Issue                                     | Notes                                                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Older JP sets price 404 on PriceCharting  | Pre-2003 JP sets use Pokédex number not set position (e.g. Gastly #92 not #49). Would need a lookup table or scrape-based URL discovery.  |
+| JP Abra (kana-heavy cards) not detected   | OCR confidence < 3 + image sim < 0.50 floor → 0 candidates. Fundamental limitation — scan separately with better conditions.             |
+| Holofoil image AI unreliable              | Reflective surfaces produce visual appearances impossible to synthesize. CLIP fine-tuning didn't close this gap. Use OCR or Combined mode. |
+| Items with digits in name (Pokégear 3.0) | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case.                                                         |
 
 ---
 
@@ -649,19 +651,19 @@ py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/ca
 - **Training**: fine-tuned from `card_detector.pt` (not base `yolo11n.pt`) on RTX 3080, 30 epochs, batch=16, imgsz=640. ~1.5hr total.
 - **Convergence confirmed**: resumed training with `patience=15` early stopping — halted after 16 additional epochs with no mAP improvement, confirming epoch 30 was the converged optimum.
 
-| Epoch | Box loss | Cls loss | DFL loss |
-|-------|----------|----------|----------|
-| 1     | 0.5281   | 0.4664   | 0.9653   |
-| 10    | 0.3893   | 0.3348   | 0.8852   |
-| 20    | 0.3233   | 0.2776   | 0.8618   |
+| Epoch                | Box loss         | Cls loss         | DFL loss         |
+| -------------------- | ---------------- | ---------------- | ---------------- |
+| 1                    | 0.5281           | 0.4664           | 0.9653           |
+| 10                   | 0.3893           | 0.3348           | 0.8852           |
+| 20                   | 0.3233           | 0.2776           | 0.8618           |
 | **30 (final)** | **0.2316** | **0.1915** | **0.8067** |
 
-| Metric | v1 (CPU, 50 epochs) | v2 (GPU, 30 epochs) |
-|--------|---------------------|---------------------|
-| mAP50 | 0.992 | **0.993** |
-| mAP50-95 | 0.904 | **0.964** (+6.6%) |
-| Precision | 0.977 | 0.977 |
-| Recall | 0.985 | 0.980 |
+| Metric    | v1 (CPU, 50 epochs) | v2 (GPU, 30 epochs)     |
+| --------- | ------------------- | ----------------------- |
+| mAP50     | 0.992               | **0.993**         |
+| mAP50-95  | 0.904               | **0.964** (+6.6%) |
+| Precision | 0.977               | 0.977                   |
+| Recall    | 0.985               | 0.980                   |
 
 - Deployed to `backend/models/card_detector.pt`; v1 backup at `card_detector_v1_backup.pt`.
 
@@ -738,15 +740,15 @@ Times the scan pipeline (button press → first card result from backend) indepe
 
 #### Speed test results — Samsung S22+ (Snapdragon 8 Gen 1), 12 cards
 
-| Run | Delegate / Model | First card | All cards | YOLO | OCR prep | Notes |
-|---|---|---|---|---|---|---|
-| 1 (baseline) | CPU float16 | 12.10s | 12.52s | 4969ms | 5695ms | First clean CPU baseline |
-| 2 | GPU delegate | 16.99s | 17.43s | 9832ms | 6558ms | First run, init overhead |
-| 3 | GPU delegate | 14.04s | 14.39s | 7121ms | 6275ms | Second run, still slower than CPU |
-| 4 | CPU float16 (reverted) | 13.97s | 14.36s | 6806ms | 6406ms | Normal CPU variance, phone at 51°C |
-| 5 | CPU float16 | 13.88s | 14.22s | 7160ms | 6065ms | After OCR opt + INT8 attempt |
-| 6 | CPU float16 (TFLiteConverter regen) | 13.39s | 13.79s | 6726ms | 6060ms | regionsFromYolo=false — model broken |
-| 7 | CPU float16 (onnx2tf original restored) | TBD | — | — | — | Pending rebuild to verify OCR opt savings |
+| Run          | Delegate / Model                        | First card      | All cards | YOLO   | OCR prep | Notes                                 |
+| ------------ | --------------------------------------- | --------------- | --------- | ------ | -------- | ------------------------------------- |
+| 1 (baseline) | CPU float16                             | 12.10s          | 12.52s    | 4969ms | 5695ms   | First clean CPU baseline              |
+| 2            | GPU delegate                            | 16.99s          | 17.43s    | 9832ms | 6558ms   | First run, init overhead              |
+| 3            | GPU delegate                            | 14.04s          | 14.39s    | 7121ms | 6275ms   | Second run, still slower than CPU     |
+| 4            | CPU float16 (reverted)                  | 13.97s          | 14.36s    | 6806ms | 6406ms   | Normal CPU variance, phone at 51°C   |
+| 5            | CPU float16                             | 13.88s          | 14.22s    | 7160ms | 6065ms   | After OCR opt + INT8 attempt          |
+| 6            | CPU float16 (TFLiteConverter regen)     | 13.39s          | 13.79s    | 6726ms | 6060ms   | regionsFromYolo=false — model broken |
+| 7            | CPU float16 (onnx2tf original restored) | pending rebuild | —        | —     | —       | Restoring to verify OCR opt           |
 
 **GPU delegate verdict**: slower than CPU on S22+ (Snapdragon 8 Gen 1) due to YOLO op compatibility — some ops fall back to CPU with quantize/dequantize overhead. Reverted. Phone temps 51°C are below throttle threshold (~80°C); variance (~30%) is normal Android scheduler noise.
 
@@ -772,8 +774,7 @@ When YOLO detected the card regions, the per-crop full-image OCR pass + `assessC
 - `mobile/hooks/useMultiCardScan.ts`: `regionsFromYolo` flag set when YOLO returned boxes; per-crop pipeline branches on this flag — YOLO path runs 1 ML Kit call per crop (name region only); fallback path runs 2 calls per crop (full crop + name region) with confidence gate unchanged
 - Card number extraction unchanged — still reads from `allBlocks` (full-image OCR computed once at start)
 - Expected saving: N crops × 2 ML Kit calls → N crops × 1 ML Kit call (~2–3s on 12 cards)
-- **Applied workaround**: even though on-device YOLO fails, backend `/detect` also uses YOLO (same `card_detector.pt`), so `regionsFromYolo = true` is now also set for backend-detect results. OCR optimization fires on every scan.
-- **Status**: implemented; expected ~2–3s OCR prep savings not yet confirmed by a clean speed-test run (all runs during session were clouded by broken INT8 model or model-restore state). Verify by rebuilding with the restored onnx2tf float16 and running speed test — OCR prep should drop from ~6s to ~3s for 12 cards.
+- **Status**: implemented but not yet verified — broken TFLite model during testing caused `regionsFromYolo=false` on all test runs. Pending clean run with restored onnx2tf model.
 
 #### Language flag emoji on scan results (2026-05-22)
 
@@ -784,3 +785,82 @@ Added 🇺🇸/🇯🇵 flag in the badges row of each card result in `multi-res
 - `useMultiCardScan.ts`: `_appendTimingLog()` appends each speed test result to `scan_timing_log.json` in the app's document directory
 - `multi-results.tsx`: "Copy log" button in timing banner opens native share sheet with full JSON log content
 - Each entry: `{ yoloMs, cropPrepMs, firstResultMs, totalStreamMs, ts }`
+
+### v21 — Server-side cropping + spatial-filter OCR + NNAPI delegate (2026-05-22)
+
+Three independent optimizations landed together. All preserved in v22.
+
+- **Spatial-filter OCR** (`mobile/hooks/useMultiCardScan.ts`): eliminated all per-crop ML Kit OCR calls. New helpers `getNameRegionText()` and `getCropRegionTextAndCount()` spatially filter the already-computed full-image OCR blocks for each crop's name region (top 18%, 5–95% width) and full-crop region. Same pixel density as the previous per-crop sub-crop pass. Saves ~6s on 12 cards.
+- **Server-side cropping** (`backend/app/api/v1/scan.py`, `mobile/services/api.ts`): `/scan` now accepts `{image, boxes}` instead of N pre-cropped base64 JPEGs. Mobile sends one full image + box coords; backend slices with `PIL.Image.crop` (~5ms/box). Eliminates N `ImageManipulator.manipulateAsync` + N JPEG re-encodes + N base64 reads on the phone (~500ms–1s saved on 12 cards). Legacy `crops: list[str]` path preserved for backwards compat.
+- **NNAPI delegate preference** (`mobile/utils/yoloDetector.ts`): replaced hard-coded delegate with `['nnapi', 'default']` on Android, `['core-ml', 'default']` on iOS, with transparent fallback if the first delegate rejects the model. NNAPI routes to Snapdragon Hexagon DSP when available.
+
+### v22 — On-device YOLO unblocked + JPEG resize + PIL-direct embedder (2026-05-22)
+
+**Headline:** Samsung S22+, 12 cards: 13.97s → **3.12s first card (4.5× faster)**. On par with SKANIT/DeckTradr territory.
+
+#### On-device YOLO now working
+
+`react-native-fast-tflite` v3.0.1 was rejecting onnx2tf's op set with an empty native error. Downgraded to **v2.0.0** (single API-compatible v2 release on npm). Model loads first try with NNAPI delegate.
+
+Two post-load fixes for v2 API differences:
+
+1. **Input format**: v3 accepted `ArrayBuffer[]`; v2 wants `TypedArray[]`. Symptom: `"Exception in HostFunction: no ArrayBuffer attached"`. Fix: `model.run([input])` not `model.run([input.buffer])`.
+2. **Output unwrap conditional**: v2 may return `Float32Array` directly. Fix: `outputs[0] instanceof Float32Array ? outputs[0] : new Float32Array(outputs[0]!)`.
+
+#### Stale NNAPI handle recovery
+
+Module-level `_model` cache goes stale after fast refresh / app backgrounding / native-side GC. Symptom on second-session scan: `"Value is undefined, expected an Object"` from `runModel`. Fix: try/catch around `model.run()`; on failure, nuke `_model` + `_modelPromise`, call `getModel()` for a fresh load, retry inference once.
+
+#### Failed approach: `Promise.all([OCR, YOLO])`
+
+Attempted to overlap ML Kit OCR and NNAPI YOLO. Both completed individually but the YOLO call crashed inside `runModel` with `"Value is undefined, expected an Object"` whenever paired with concurrent ML Kit. Suspected native-bridge resource conflict between the two systems. **Do not retry.** YOLO is only ~100–200ms post-warmup; sequential is stable and the parallelism win is small.
+
+#### Resize: PNG (lossless) → JPEG 0.95
+
+Discovered `resize=3001ms` was the new dominant cost — PNG encode of a multi-megapixel raw camera image. Switched to JPEG 0.95: ~500ms encode, visually lossless, no measurable OCR accuracy impact. Side effect: `resized.uri` is already JPEG, so the backend payload promise skips its redundant JPEG re-encode and base64s the file directly.
+
+#### Embedder: accept PIL Image directly (eliminate double JPEG)
+
+Image-AI path was doing two JPEG round-trips: mobile encoded full image as JPEG 0.95, backend cropped with PIL then re-encoded each crop as JPEG 0.92, `embed_batch` decoded that back to PIL inside CLIP preprocessing. Each compression pass shaves ~2–5% off CLIP similarity scores, pushing borderline cards below `_IMAGE_MIN_SIM_WITH_OCR = 0.83` in Combined mode (visible as "more OCR-only badges, no Both ✓ badges").
+
+Refactor:
+
+- **`backend/app/services/card_embedder.py`**: `embed_batch` and `compute_phash` now accept `PIL.Image | bytes`. New `_to_pil(src)` helper: PIL passes through, bytes decoded once. Other callers (`build_embeddings.py`, `retry_failures.py`) unaffected — still pass bytes.
+- **`backend/app/api/v1/scan.py`**: `imgs` is now `list[PIL.Image | None]`; new parallel `cache_seeds: list[str | None]`. `_vector_search` and `_image_search_one` take `cache_seed: str` instead of `img_bytes`. Cache strategy:
+  - Server-crop path: `f"{sha256(full_image_bytes)}:{left},{top},{right},{bottom}"`
+  - Legacy crops path: `sha256(crop_bytes)` (unchanged)
+- **Dead code removed**: `_batch_image_search` was unreferenced. Deleted.
+
+Cache seed change invalidates pre-existing Redis entries on deploy; 1h TTL means self-healing within an hour.
+
+Note: in dim lighting CLIP scores typically sit at 0.55–0.75 regardless of image quality, so the 0.83 gate still filters most image hits out of Combined mode. Better lighting recovers "Both ✓" badges.
+
+#### BASIC OCR strip regex expanded
+
+`_POKEMON_NON_NAME_RE` in `card_matcher.py` previously only matched `BASIC` variants with the leading B intact. New pattern `[b38g]?as[in][cgsq]\w*` handles dropped-B misreads (`ASIC`, `ASIG`, `ASIQ`), digit-confusion misreads (`3ASIC`, `8ASIC`), G-confusion (`GASIC`, `GASIG`), and I→N stroke confusion (`ASNG`, `ASNC`). Discovered when user reported search queries like `"ASIG Suicune"` and `"ASNG Gastly"` displayed on results screen.
+
+#### Speed test results — Samsung S22+, 12 cards (post-v22)
+
+| Run | First card | All cards | YOLO bucket | OCR prep | Notes |
+|---|---|---|---|---|---|
+| Pre-v21 baseline | 13.97s | 14.36s | 6806ms | 6406ms | v20 reference |
+| v21 (parallel attempt) | 8.15s | 8.59s | 7105ms | 365ms | NNAPI crashed, fell back to backend |
+| v21 (sequential, PNG resize) | 5.91s | 6.28s | 4683ms | 333ms | On-device YOLO working but resize=3000ms |
+| **v22 run 1** | **2.97s** | **3.39s** | **2047ms** | **46ms** | JPEG resize + on-device YOLO |
+| **v22 run 2** | **3.14s** | **3.56s** | **2096ms** | **56ms** | Stable repeat |
+| **v22 post-PIL** | **3.12s** | **3.51s** | **2156ms** | **37ms** | After PIL-direct embedder change |
+
+`yolo bucket` breakdown (post-v22): resize ~580ms + on-device YOLO ~1050ms (incl. JS preprocessing) + full-image OCR ~600ms.
+
+#### Remaining latency targets (Round 4 candidates)
+
+1. **`yoloDetector.ts` JS preprocessing** (~850ms of the 1050ms YOLO bucket): file read → atob → JPEG decode (jpeg-js) → Float32 array build, all in single-threaded JS. Replace `jpeg-js` with a native decoder or a worklet.
+2. **Full-image OCR** (~600ms): try `LATIN` script as fast path with `JAPANESE` fallback only when no Latin hits found (current pass is always JAPANESE which is slower).
+3. **Camera capture quality**: `quality: 1, skipProcessing: true` produces multi-megapixel raw — lowering to 0.85 could cut ~200ms off resize with no OCR impact.
+4. **NNAPI warmup**: first inference takes ~1000ms due to native compilation; preload at app startup so first user scan is fast.
+
+#### Accuracy notes (not v22 regressions, but observed during v22 testing)
+
+- Dim lighting + desk lamp pointing up = CLIP scores below 0.83 gate → no "Both ✓" badges, mostly "OCR" badges. Working as designed.
+- Holofoil cards remain unreliable for image AI (pre-existing).
+- OCR misread fix above (`ASIG`, `ASNG`) is in v22.

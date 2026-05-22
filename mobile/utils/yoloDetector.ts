@@ -21,28 +21,47 @@ const ANCHORS = 8400;
 let _model: TfliteModel | null = null;
 let _modelPromise: Promise<TfliteModel | null> | null = null;
 
+// Try delegates in preference order. On Android, NNAPI routes to whatever
+// accelerator is available (Hexagon DSP / NPU / GPU) — on Snapdragon 8 Gen 1
+// this means the Hexagon DSP, typically 2–4× faster than CPU for INT8 and
+// comparable or faster than CPU for float16 YOLO. Falls back to CPU if NNAPI
+// rejects the model (some ops may not be NNAPI-compatible).
+const DELEGATE_PREFERENCE: Array<'core-ml' | 'nnapi' | 'default'> =
+  Platform.OS === 'ios' ? ['core-ml', 'default'] : ['nnapi', 'default'];
+
 async function getModel(): Promise<TfliteModel | null> {
   if (_model !== null) return _model;
   if (_modelPromise) return _modelPromise;
-  const delegate = Platform.OS === 'ios' ? 'core-ml' : 'default';
   _modelPromise = (async () => {
+    // Pre-resolve the asset to a real local file path. In dev mode the Metro
+    // URL has a malformed double-? query string the native loader can't handle;
+    // downloading first gives us a clean file:// URI it can open directly.
+    let localUri: string;
     try {
-      // Pre-resolve the asset to a real local file path. In dev mode the Metro
-      // URL has a malformed double-? query string the native loader can't handle;
-      // downloading first gives us a clean file:// URI it can open directly.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const asset = Asset.fromModule(require('../assets/models/card_detector.tflite'));
       await asset.downloadAsync();
-      const localUri = asset.localUri ?? asset.uri;
+      localUri = asset.localUri ?? asset.uri;
       console.log('[YOLO] loading model from:', localUri);
-      const m = await loadTensorflowModel({ url: localUri }, delegate);
-      _model = m;
-      return m;
     } catch (e) {
-      console.error('[YOLO] model load failed:', e);
+      console.error('[YOLO] asset resolve failed:', e);
       _modelPromise = null;
       return null;
     }
+
+    for (const delegate of DELEGATE_PREFERENCE) {
+      try {
+        const m = await loadTensorflowModel({ url: localUri }, delegate);
+        console.log(`[YOLO] model loaded with delegate=${delegate}`);
+        _model = m;
+        return m;
+      } catch (e) {
+        console.warn(`[YOLO] delegate=${delegate} failed:`, e);
+      }
+    }
+    console.error('[YOLO] all delegates failed; falling back to backend /detect');
+    _modelPromise = null;
+    return null;
   })();
   return _modelPromise;
 }
@@ -84,8 +103,24 @@ export async function detectCardsWithYolo(
       input[i * 3 + 2] = rgbaData[i * 4 + 2] / 255.0;
     }
 
-    const outputs = await model.run([input.buffer]);
-    const output = new Float32Array(outputs[0]!);
+    // v2 API: pass TypedArray[] directly (not [arrayBuffer]).
+    // v3 had auto-unwrap of ArrayBuffer; v2 doesn't and throws "no ArrayBuffer attached".
+    let outputs: ArrayBufferView[];
+    try {
+      outputs = await model.run([input]);
+    } catch (runErr) {
+      // NNAPI can throw "Value is undefined, expected an Object" when the cached native
+      // model handle goes stale (fast refresh, app backgrounding, GC of native side).
+      // Reset the module cache and retry once with a fresh load — second call usually
+      // succeeds because the reload picks up a valid handle.
+      console.warn('[YOLO] run failed, resetting model cache and retrying:', runErr);
+      _model = null;
+      _modelPromise = null;
+      const fresh = await getModel();
+      if (!fresh) return null;
+      outputs = await fresh.run([input]);
+    }
+    const output = outputs[0] instanceof Float32Array ? outputs[0] : new Float32Array(outputs[0]!);
 
     // Ultralytics TFLite exports in either [1,5,8400] or [1,8400,5] layout.
     // Detect layout from the output tensor shape.

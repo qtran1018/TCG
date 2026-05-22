@@ -1,12 +1,14 @@
 import asyncio
 import base64
 import hashlib
+import io
 import logging
 import re
 
 import imagehash
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
+from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy import Float, cast, select, text
 
@@ -38,9 +40,26 @@ class OcrHint(BaseModel):
     game: str = "pokemon"
 
 
+class Box(BaseModel):
+    left: int
+    top: int
+    width: int
+    height: int
+
+
 class ScanRequest(BaseModel):
-    crops: list[str]           # base64-encoded JPEG, one per detected card region
-    ocr_hints: list[OcrHint]   # parallel to crops; padded with defaults if shorter
+    # Two input modes (mutually exclusive, image+boxes wins if both present):
+    #
+    # (a) Legacy — client pre-crops each region and base64-encodes N JPEGs.
+    #     Useful when on-device YOLO ran and crops are already sliced in memory.
+    #
+    # (b) Server-side crop — client sends ONE full-image base64 + box coords.
+    #     Eliminates N client-side JPEG re-encodes + base64 conversions on the phone
+    #     (~500ms–1s saved on 12 cards). PIL crop on the server is ~5ms per box.
+    crops: list[str] | None = None
+    image: str | None = None
+    boxes: list[Box] | None = None
+    ocr_hints: list[OcrHint]   # parallel to crops/boxes; padded with defaults if shorter
     scan_mode: str = "combined"  # "ocr" | "image" | "combined"
 
 
@@ -124,10 +143,15 @@ def _rrf_merge(
 async def _vector_search(
     embedding,
     query_phash: str | None,
-    img_bytes: bytes,
+    cache_seed: str,
     language: str = "en",
 ) -> tuple[list[CardOutLite], float, str]:
-    """pgvector nearest-neighbor search + phash re-ranking. Returns (candidates, best_sim, query_used)."""
+    """pgvector nearest-neighbor search + phash re-ranking. Returns (candidates, best_sim, query_used).
+
+    `cache_seed` is the deterministic identifier used to key the Redis cache entry —
+    decoupled from the image bytes so callers can pass a PIL Image down the embedding
+    path and avoid the JPEG encode→decode round-trip on the hot path.
+    """
     embedding_list = embedding.tolist()
     distance_col = cast(Card.embedding.op("<=>")(embedding_list), Float).label("distance")
     stmt = (
@@ -180,21 +204,22 @@ async def _vector_search(
 
     # Cache key includes language so EN and JP scans on the same image return separate results.
     cache_item = _ImageSearchCache(candidates=candidates, best_sim=best_sim, query_used=query_used)
-    key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
+    key = f"{cache_seed}:{language}"
     await search_cache.set("embedding", key, ttl=_IMAGE_CACHE_TTL, value=cache_item.model_dump(mode="json"))
     return candidates, best_sim, query_used
 
 
 async def _image_search_one(
     idx: int,
-    img_bytes: bytes | None,
+    image: "Image.Image | None",
+    cache_seed: str | None,
     language: str = "en",
 ) -> tuple[list[CardOutLite], float, str]:
-    """Per-crop image search. Caches by SHA-256 of crop bytes + language."""
-    if img_bytes is None:
+    """Per-crop image search. Caches by cache_seed + language."""
+    if image is None or cache_seed is None:
         return [], 0.0, "image:no_match"
 
-    key = f"{hashlib.sha256(img_bytes).hexdigest()}:{language}"
+    key = f"{cache_seed}:{language}"
     cached = await search_cache.get("embedding", key)
     if cached is not None:
         if "best_sim" in cached:
@@ -209,76 +234,21 @@ async def _image_search_one(
 
     # Run embedding + phash off the event loop in parallel.
     embedding, query_phash = await asyncio.gather(
-        asyncio.to_thread(lambda: embed_batch([img_bytes])[0]),
-        asyncio.to_thread(compute_phash, img_bytes),
+        asyncio.to_thread(lambda: embed_batch([image])[0]),
+        asyncio.to_thread(compute_phash, image),
     )
-    candidates, best_sim, query_used = await _vector_search(embedding, query_phash, img_bytes, language)
+    candidates, best_sim, query_used = await _vector_search(embedding, query_phash, cache_seed, language)
 
     # If JP image search is below confident threshold, also try EN — mirrors the OCR
     # JP→EN fallback and recovers EN cards that triggered kana language detection on mobile
     # (e.g. water-type symbol misread as 2 kana, flipping cropLang to 'ja').
     if language == "ja" and best_sim < _SIM_THRESHOLD:
-        en_candidates, en_sim, en_query = await _vector_search(embedding, query_phash, img_bytes, "en")
+        en_candidates, en_sim, en_query = await _vector_search(embedding, query_phash, cache_seed, "en")
         if en_sim > best_sim:
             logger.info("Image search: JP sim=%.3f < threshold, EN sim=%.3f — using EN result", best_sim, en_sim)
             return en_candidates, en_sim, en_query
 
     return candidates, best_sim, query_used
-
-
-async def _batch_image_search(
-    imgs: list[bytes | None],
-    language: str = "en",
-) -> dict[int, tuple[list[CardOutLite], float, str]]:
-    """
-    Embed all uncached crops in one CLIP forward pass, then run pgvector searches in parallel.
-    For cached crops, return immediately. Returns {crop_index: (candidates, best_sim, query_used)}.
-    Language is included in the cache key so EN and JP scans stay separate.
-    """
-    results: dict[int, tuple[list[CardOutLite], float, str]] = {}
-
-    # Build cache keys for all non-null crops in one pass, then mget — single
-    # Redis round-trip instead of N.
-    crop_indices: list[int] = [i for i, b in enumerate(imgs) if b is not None]
-    cache_key_parts: list[tuple[str, ...]] = [
-        ("embedding", f"{hashlib.sha256(imgs[i]).hexdigest()}:{language}")
-        for i in crop_indices
-    ]
-    cached_values = await search_cache.mget(cache_key_parts) if cache_key_parts else []
-
-    to_embed: list[tuple[int, bytes]] = []
-    for i, cached in zip(crop_indices, cached_values):
-        if cached is not None:
-            if "best_sim" in cached:
-                item = _ImageSearchCache(**cached)
-                results[i] = (item.candidates, item.best_sim, item.query_used)
-            else:
-                m = re.search(r"image:([\d.]+)", cached.get("query_used", ""))
-                results[i] = (
-                    [CardOutLite(**c) for c in cached.get("candidates", [])],
-                    float(m.group(1)) if m else 0.0,
-                    cached.get("query_used", "image:no_match"),
-                )
-        else:
-            to_embed.append((i, imgs[i]))
-
-    if to_embed:
-        # Batch CLIP forward pass + phash in parallel, both off the event loop.
-        batch_embeddings, phashes = await asyncio.gather(
-            asyncio.to_thread(embed_batch, [b for _, b in to_embed]),
-            asyncio.gather(*[asyncio.to_thread(compute_phash, b) for _, b in to_embed]),
-        )
-
-        async def search_one(idx: int, img_bytes: bytes, embedding, qhash: str | None):
-            return idx, await _vector_search(embedding, qhash, img_bytes, language)
-
-        vector_results = await asyncio.gather(*[
-            search_one(idx, img_bytes, emb, qh)
-            for (idx, img_bytes), emb, qh in zip(to_embed, batch_embeddings, phashes)
-        ])
-        results.update(dict(vector_results))
-
-    return results
 
 
 async def _ocr_search_one(
@@ -375,18 +345,65 @@ async def scan(req: ScanRequest):
     completion order (not crop order) so fast cards appear in the UI without
     waiting for slow ones.
     """
-    crops = req.crops[:20]
-    hints = list(req.ocr_hints[:20])
-    while len(hints) < len(crops):
-        hints.append(OcrHint())
-
-    # Decode all crops up front (cheap).
-    imgs: list[bytes | None] = []
-    for b64 in crops:
+    # Decide input mode: server-side crop (image+boxes) takes priority when present.
+    # `imgs` is now list[PIL.Image] — passed straight through to the embedder so we
+    # avoid the JPEG re-encode → JPEG re-decode round-trip that was happening before.
+    # `cache_seeds` is a parallel list of deterministic cache key strings.
+    imgs: list["Image.Image | None"] = []
+    cache_seeds: list[str | None] = []
+    if req.image and req.boxes:
+        boxes = req.boxes[:20]
         try:
-            imgs.append(base64.b64decode(b64))
+            full_bytes = base64.b64decode(req.image)
+            # Hash the full image once; per-box cache seed = full_sha + box coords.
+            # Stable: same input image + same box → same cache hit.
+            full_sha = hashlib.sha256(full_bytes).hexdigest()
+            full_img = Image.open(io.BytesIO(full_bytes))
+            full_img.load()
+            if full_img.mode != "RGB":
+                full_img = full_img.convert("RGB")
+            W, H = full_img.size
+            for b in boxes:
+                try:
+                    left = max(0, min(W, int(b.left)))
+                    top = max(0, min(H, int(b.top)))
+                    right = max(0, min(W, int(b.left + b.width)))
+                    bottom = max(0, min(H, int(b.top + b.height)))
+                    if right <= left or bottom <= top:
+                        imgs.append(None)
+                        cache_seeds.append(None)
+                        continue
+                    # PIL.crop creates a lightweight view — no pixel copy until needed.
+                    imgs.append(full_img.crop((left, top, right, bottom)))
+                    cache_seeds.append(f"{full_sha}:{left},{top},{right},{bottom}")
+                except Exception:
+                    logger.warning("server-side crop failed", exc_info=True)
+                    imgs.append(None)
+                    cache_seeds.append(None)
         except Exception:
-            imgs.append(None)
+            logger.exception("failed to decode full image for server-side crop")
+            imgs = [None] * len(boxes)
+            cache_seeds = [None] * len(boxes)
+        num_items = len(boxes)
+    else:
+        crops = (req.crops or [])[:20]
+        for b64 in crops:
+            try:
+                raw = base64.b64decode(b64)
+                img = Image.open(io.BytesIO(raw))
+                img.load()
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                imgs.append(img)
+                cache_seeds.append(hashlib.sha256(raw).hexdigest())
+            except Exception:
+                imgs.append(None)
+                cache_seeds.append(None)
+        num_items = len(crops)
+
+    hints = list(req.ocr_hints[:20])
+    while len(hints) < num_items:
+        hints.append(OcrHint())
 
     do_image = req.scan_mode in ("image", "combined")
     do_ocr = req.scan_mode in ("ocr", "combined")
@@ -399,7 +416,7 @@ async def scan(req: ScanRequest):
 
     async def per_crop(i: int) -> ScanResultItem:
         lang = hints[i].language if hints[i].language in VALID_LANGUAGES else "en"
-        image_task = _image_search_one(i, imgs[i], lang) if do_image else _empty_image(i)
+        image_task = _image_search_one(i, imgs[i], cache_seeds[i], lang) if do_image else _empty_image(i)
         ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
         # return_exceptions=True so a failure in one branch doesn't zero out the
         # other — surface degraded mode via partial flag instead.
@@ -419,7 +436,7 @@ async def scan(req: ScanRequest):
 
     async def generate():
         # Kick off all crops in parallel; yield each result as it completes.
-        tasks = [asyncio.create_task(per_crop(i)) for i in range(len(crops))]
+        tasks = [asyncio.create_task(per_crop(i)) for i in range(num_items)]
         try:
             for coro in asyncio.as_completed(tasks):
                 result = await coro

@@ -52,9 +52,13 @@ def _contains_pokemon_name(text: str) -> bool:
     return False
 
 
-# Terms that are never the card name
+# Terms that are never the card name.
+# The first alternation `[b38g]?as[in][cgsq]\w*` catches BASIC and its common OCR
+# misreads: B→[3,8] (digit confusion), B→G (similar shape), B→dropped (ASIC, ASIG),
+# I→N (vertical-stroke confusion → ASNG, ASNC). Handles BASIC/BASIG/BASIQ/BASIS,
+# GASIC/GASIG/GASIS, ASIC/ASIG/ASIQ, ASNG/ASNC, 3ASIC, 8ASIC, etc.
 _POKEMON_NON_NAME_RE = re.compile(
-    r"^(basi\w*|basic|basig|basiq|[gb]asi[cgsq]|stage\s*[12]|mega|"
+    r"^([b38g]?as[in][cgsq]\w*|stage\s*[12]|mega|"
     r"weakness|resistance|retreat|damage|ability|trainer|item|"
     r"stadium|supporter|energy|water|fire|grass|lightning|psychic|"
     r"fighting|darkness|metal|fairy|colorless|dragon|"

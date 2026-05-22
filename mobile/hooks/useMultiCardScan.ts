@@ -86,6 +86,51 @@ function augmentWithNumberRegion(
   return numberText && /\d/.test(numberText) ? `${cropText}\n${numberText}` : cropText;
 }
 
+// Spatial filter for the name region (top 18% of crop, 5–95% width). Reads from the
+// already-computed full-image OCR blocks instead of running a fresh ML Kit pass on the
+// sub-crop. Saves one ML Kit call per crop — at 12 cards this is ~3s on a Samsung S22+.
+// Same pixel density as the previous sub-crop approach (full image is 2400px PNG;
+// crops are sliced from that image at full resolution).
+function getNameRegionText(
+  allBlocks: Array<{ text: string; frame: any }>,
+  cropX: number, cropY: number, cropW: number, cropH: number,
+): string {
+  const nameTop = cropY;
+  const nameBottom = cropY + cropH * 0.18;
+  const nameLeft = cropX + cropW * 0.05;
+  const nameRight = cropX + cropW * 0.95;
+  const blocks = allBlocks.filter((b) => {
+    if (!b.frame) return false;
+    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
+    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
+    return cy >= nameTop && cy <= nameBottom && cx >= nameLeft && cx <= nameRight;
+  });
+  return blocks
+    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+    .map((b) => b.text)
+    .join("\n");
+}
+
+// Spatial filter for the entire crop region. Returns text + block count so the
+// confidence check (which uses block count for the OCR-clustering fallback path)
+// still works without re-OCRing the crop.
+function getCropRegionTextAndCount(
+  allBlocks: Array<{ text: string; frame: any }>,
+  cropX: number, cropY: number, cropW: number, cropH: number,
+): { text: string; blockCount: number } {
+  const blocks = allBlocks.filter((b) => {
+    if (!b.frame) return false;
+    const cy = b.frame.top + (b.frame.height ?? 0) / 2;
+    const cx = b.frame.left + (b.frame.width ?? 0) / 2;
+    return cy >= cropY && cy <= cropY + cropH && cx >= cropX && cx <= cropX + cropW;
+  });
+  const text = blocks
+    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
+    .map((b) => b.text)
+    .join("\n");
+  return { text, blockCount: blocks.length };
+}
+
 export function useMultiCardScan(): UseMultiCardScanReturn {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
@@ -110,36 +155,49 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
 
       const t0 = enableTiming ? Date.now() : 0;
       let t1 = 0, t2 = 0, t3 = 0;
+      let tResize = 0, tOcr = 0, tYolo = 0;
 
       try {
-        // 1. Resize image to 2400px wide (higher than 1600 for better card number / small text fidelity).
-        //    PNG avoids JPEG compression loss on this master image used for OCR and cropping.
+        // 1. Resize image to 2400px wide. JPEG quality 0.95 instead of lossless PNG —
+        //    PNG encode of a multi-megapixel image takes ~3000ms on a phone; JPEG ~500ms.
+        //    Quality 0.95 is visually lossless and OCR accuracy is unchanged in testing.
         setProgress("Processing image...");
+        const resizeStart = Date.now();
         const resized = await ImageManipulator.manipulateAsync(
           imageUri,
           [{ resize: { width: 2400 } }],
-          { compress: 1, format: ImageManipulator.SaveFormat.PNG },
+          { compress: 0.95, format: ImageManipulator.SaveFormat.JPEG },
         );
+        if (enableTiming) tResize = Date.now() - resizeStart;
 
-        // 2. OCR full image with JAPANESE script — it returns both Latin and kana,
-        //    so one pass covers EN and JP cards.
+        // 2. Run YOLO first (fast: ~100–200ms on NNAPI/Hexagon after warmup),
+        //    then OCR. Earlier attempt to parallelize via Promise.all caused NNAPI
+        //    inference to fail with "Value is undefined, expected an Object" — likely
+        //    a resource conflict between ML Kit and NNAPI native bindings. Sequential
+        //    is stable. The YOLO time is small enough that parallelizing doesn't help much.
+        const yoloStart = Date.now();
+        const yoloResult = await detectCardsWithYolo(resized.uri, resized.width, resized.height);
+        if (enableTiming) tYolo = Date.now() - yoloStart;
+
         setProgress("Scanning for cards...");
+        const ocrStart = Date.now();
         const fullResult = await TextRecognition.recognize(resized.uri, TextRecognitionScript.JAPANESE);
+        if (enableTiming) tOcr = Date.now() - ocrStart;
+
         const allBlocks = fullResult.blocks
           .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
           .map((b) => ({ text: b.text, frame: b.frame as any }));
 
-        // 3. Detect card regions — on-device YOLO first, then fallbacks
+        // 3. Pick detection result — on-device YOLO first, then backend /detect, then OCR clustering
         let regions: CardRegion[];
         let regionsFromYolo = false;
-        const yoloResult = await detectCardsWithYolo(resized.uri, resized.width, resized.height);
 
         if (yoloResult && yoloResult.boxes.length > 0) {
           regions = boxesToRegions(yoloResult.boxes);
           regionsFromYolo = true;
           setProgress(`Found ${regions.length} card${regions.length !== 1 ? "s" : ""}...`);
         } else if (!yoloResult) {
-          // YOLO model absent — fall back to backend /detect
+          // YOLO model absent or failed — fall back to backend /detect
           try {
             const base64 = await FileSystem.readAsStringAsync(resized.uri, {
               encoding: FileSystem.EncodingType.Base64,
@@ -156,12 +214,12 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
             regions = detectCardRegions(allBlocks, resized.width, resized.height);
           }
         } else {
-          // YOLO found nothing — fall back to OCR clustering
+          // YOLO loaded but returned 0 boxes — fall back to OCR clustering
           regions = detectCardRegions(allBlocks, resized.width, resized.height);
         }
 
         if (enableTiming) t1 = Date.now();
-        console.log(`[MultiScan] detection: fromYolo=${regionsFromYolo} regions=${regions.length}`);
+        console.log(`[MultiScan] detection: fromYolo=${regionsFromYolo} regions=${regions.length} | resize=${tResize}ms ocr=${tOcr}ms yolo=${tYolo}ms`);
 
         if (regions.length === 0) {
           const msg = "No cards detected. Try better lighting or move closer.";
@@ -170,12 +228,14 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           return false;
         }
 
-        // 4. Crop each detected region
+        // 4. Compute crop box coordinates (server crops on-demand — no per-crop
+        //    ImageManipulator.manipulateAsync, no per-crop JPEG re-encode, no per-crop
+        //    base64 read). The full image is re-encoded as JPEG once and sent with the
+        //    boxes; backend slices with PIL (~5ms/crop). Saves ~500ms–1s on 12 cards.
         setProgress(`Found ${regions.length} region${regions.length !== 1 ? "s" : ""}, reading each...`);
         const regionCount = Math.min(regions.length, 20);
         const cropData: Array<{
           regionIndex: number;
-          uri: string;
           cropX: number; cropY: number; cropW: number; cropH: number;
         }> = [];
 
@@ -186,123 +246,60 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
           const cropY = Math.max(0, bb.top - margin);
           const cropW = Math.min(resized.width - cropX, bb.width + margin * 2);
           const cropH = Math.min(resized.height - cropY, bb.height + margin * 2);
-
-          const cropped = await ImageManipulator.manipulateAsync(
-            resized.uri,
-            [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
-            { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-          );
-          cropData.push({ regionIndex: i, uri: cropped.uri, cropX, cropY, cropW, cropH });
+          cropData.push({ regionIndex: i, cropX, cropY, cropW, cropH });
         }
 
-        // 5. Build crop base64 list + OCR hints for the combined /scan endpoint
+        // 5. Build OCR hints + box coords for the combined /scan endpoint.
+        //    All OCR comes from spatial filtering of allBlocks — zero per-crop ML Kit calls.
         setProgress(`Identifying ${cropData.length} card${cropData.length !== 1 ? "s" : ""}...`);
 
-        // Read base64 + OCR each crop IN PARALLEL — was sequential before.
-        const cropResults = await Promise.all(
-          cropData.map(async ({ uri, cropX, cropY, cropW, cropH }) => {
-            // Kick off the JPEG re-encode + base64 read for the backend payload
-            // concurrently with the OCR chain — they only depend on `uri`, not
-            // on OCR results. Saves ~200–400ms per crop on real phones.
-            const backendPayloadPromise: Promise<string> = (async () => {
-              const jpegForBackend = await ImageManipulator.manipulateAsync(
-                uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG },
+        // `resized.uri` is already JPEG 0.95 from step 1 — skip the re-encode entirely
+        // and base64 it directly. Kicks off in parallel with per-crop OCR text assembly.
+        const fullImagePromise: Promise<string> = FileSystem.readAsStringAsync(resized.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const cropResults = cropData.map(({ cropX, cropY, cropW, cropH }) => {
+          let rawText: string | undefined;
+          let cropLang: "en" | "ja" = "en";
+          try {
+            const nameText = getNameRegionText(allBlocks, cropX, cropY, cropW, cropH);
+            cropLang = detectCropLanguage(nameText);
+
+            if (regionsFromYolo) {
+              if (scanMode !== "image") {
+                const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
+                rawText = numberText && /\d/.test(numberText)
+                  ? `${nameText}\n${numberText}`
+                  : nameText || undefined;
+              }
+            } else {
+              const { text: fullCropText, blockCount } = getCropRegionTextAndCount(
+                allBlocks, cropX, cropY, cropW, cropH,
               );
-              return FileSystem.readAsStringAsync(jpegForBackend.uri, {
-                encoding: FileSystem.EncodingType.Base64,
-              });
-            })();
-
-            // Build OCR hint for this crop (used in ocr + combined modes).
-            // JAPANESE script returns both Latin and kana — one pass handles EN and JP.
-            let rawText: string | undefined;
-            let cropLang: "en" | "ja" = "en";
-            try {
-              let nameText = "";
-
-              if (regionsFromYolo) {
-                // YOLO already confirmed this is a card — skip full-crop OCR and confidence
-                // check entirely. Only run the name-region sub-crop OCR (top 18%), which is
-                // all the backend actually needs. Card number still comes from allBlocks
-                // (full-image OCR, already computed once above).
-                try {
-                  const nameH = Math.max(1, Math.round(cropH * 0.18));
-                  const nameW = Math.max(1, Math.round(cropW * 0.90));
-                  const nameOriginX = Math.round(cropW * 0.05);
-                  const nameCropImg = await ImageManipulator.manipulateAsync(
-                    uri,
-                    [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
-                    { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-                  );
-                  const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
-                  nameText = nameResult.blocks
-                    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                    .map((b) => b.text)
-                    .join("\n");
-                } catch (e) {
-                  console.warn("[MultiScan] name region OCR failed:", e);
-                }
-                cropLang = detectCropLanguage(nameText);
-                if (scanMode !== "image") {
+              if (scanMode !== "image") {
+                const confidence = assessCardConfidence(fullCropText, blockCount, game, cropLang);
+                if (confidence.isCard) {
                   const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
                   rawText = numberText && /\d/.test(numberText)
                     ? `${nameText}\n${numberText}`
-                    : nameText || undefined;
-                }
-              } else {
-                // OCR clustering fallback — full-crop OCR still needed for confidence check
-                // since the fallback detector is noisy and may produce non-card regions.
-                const cropResult = await TextRecognition.recognize(uri, TextRecognitionScript.JAPANESE);
-                const fullCropText = cropResult.blocks
-                  .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                  .map((b) => b.text)
-                  .join("\n");
-
-                // Language detection: ALWAYS use the name-region sub-crop (top 18%, 5–95% width).
-                // Full crop text is too noisy — type symbols, energy icons, flavor text, and
-                // attack text produce kana misreads on EN cards even at the {3,} threshold.
-                try {
-                  const nameH = Math.max(1, Math.round(cropH * 0.18));
-                  const nameW = Math.max(1, Math.round(cropW * 0.90));
-                  const nameOriginX = Math.round(cropW * 0.05);
-                  const nameCropImg = await ImageManipulator.manipulateAsync(
-                    uri,
-                    [{ crop: { originX: nameOriginX, originY: 0, width: nameW, height: nameH } }],
-                    { compress: 1, format: ImageManipulator.SaveFormat.PNG },
-                  );
-                  const nameResult = await TextRecognition.recognize(nameCropImg.uri, TextRecognitionScript.JAPANESE);
-                  nameText = nameResult.blocks
-                    .sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0))
-                    .map((b) => b.text)
-                    .join("\n");
-                } catch (e) {
-                  console.warn("[MultiScan] name region OCR failed, falling back to full crop for language detection:", e);
-                }
-                cropLang = nameText ? detectCropLanguage(nameText) : detectCropLanguage(fullCropText);
-
-                if (scanMode !== "image") {
-                  const confidence = assessCardConfidence(fullCropText, cropResult.blocks.length, game, cropLang);
-                  if (confidence.isCard) {
-                    const numberText = getNumberBlocksText(allBlocks, cropX, cropY, cropW, cropH);
-                    rawText = numberText && /\d/.test(numberText)
-                      ? `${nameText}\n${numberText}`
-                      : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
-                  }
+                    : nameText || augmentWithNumberRegion(fullCropText, allBlocks, cropX, cropY, cropW, cropH);
                 }
               }
-            } catch (e) {
-              // One bad crop must not abort the entire scan — fall back to image-only signal.
-              console.warn("[MultiScan] crop OCR failed:", e);
             }
+          } catch (e) {
+            console.warn("[MultiScan] crop OCR failed:", e);
+          }
+          return { rawText, cropLang };
+        });
 
-            const cropB64 = await backendPayloadPromise;
-            return { cropB64, rawText, cropLang };
-          }),
-        );
+        const fullImageB64 = await fullImagePromise;
 
         if (enableTiming) t2 = Date.now();
 
-        const crops: string[] = cropResults.map((r) => r.cropB64);
+        const boxes = cropData.map(({ cropX, cropY, cropW, cropH }) => ({
+          left: cropX, top: cropY, width: cropW, height: cropH,
+        }));
         const ocrHints: ScanOcrHint[] = cropResults.map((r) => ({
           raw_text: r.rawText,
           language: r.cropLang,
@@ -318,7 +315,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         const controller = new AbortController();
         abortRef.current = controller;
 
-        const streamOutcome = await api.scanStream(crops, ocrHints, scanMode, (item: ScanStreamResult) => {
+        const streamOutcome = await api.scanStream({ image: fullImageB64, boxes }, ocrHints, scanMode, (item: ScanStreamResult) => {
           if (item.candidates.length === 0) return;
 
           // Deduplicate by top candidate ID
