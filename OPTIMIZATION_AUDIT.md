@@ -13,23 +13,31 @@ Scope: full backend (`backend/app/`) and mobile (`mobile/`) trees.
 
 _(All previously partial items now resolved — see §1.12 and §5.1 below.)_
 
+### ✅ Previously Skipped, Now Resolved
+
+| #          | Item                            | Resolved in | Notes                                             |
+| ---------- | ------------------------------- | ----------- | ------------------------------------------------- |
+| 1.7        | Replace Playwright with httpx   | v20         | httpx validated; Playwright removed from all paths |
+| 7.1        | Playwright bundle size          | v20         | Backend now `python:3.12-slim`; ~300MB smaller    |
+| Tier 4 #27 | Playwright → httpx (table ref) | v20         | Same as 1.7                                       |
+
 ### ❌ Deliberately Skipped (dependency changes)
 
-| #          | Item                                                           | Reason deferred                                                                                                   | Section                 |
-| ---------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| 1.7        | Replace Playwright with httpx for PriceCharting                | Risk of silent Cloudflare block without Playwright's realistic browser headers; needs validation before switching | §1 Performance         |
-| 7.1        | Playwright bundle size                                         | Blocked on 1.7 — only worth removing once Playwright is no longer needed                                         | §7 Dependency / Bundle |
-| 7.2        | react-native-chart-kit replacement (Victory Native / Recharts) | Breaking API change; low priority while chart is functional                                                       | §7 Dependency / Bundle |
-| 7.3        | Drop axios in favor of `fetch`                               | Minor churn for no functional gain right now                                                                      | §7 Dependency / Bundle |
-| Tier 4 #27 | Playwright → httpx (prioritized table)                        | Same as 1.7 above                                                                                                 | Priority table          |
-| Tier 5 #32 | chart-kit replacement (prioritized table)                      | Same as 7.2 above                                                                                                 | Priority table          |
+| #          | Item                                                           | Reason deferred                                   | Section                 |
+| ---------- | -------------------------------------------------------------- | ------------------------------------------------- | ----------------------- |
+| 7.2        | react-native-chart-kit replacement (Victory Native / Recharts) | Breaking API change; low priority while functional | §7 Dependency / Bundle |
+| 7.3        | Drop axios in favor of `fetch`                               | Minor churn for no functional gain right now       | §7 Dependency / Bundle |
+| Tier 5 #32 | chart-kit replacement (prioritized table)                      | Same as 7.2 above                                 | Priority table          |
 
 ### Not Yet Addressed
 
 | #            | Item                                                                                  | Description                   | Section         |
 | ------------ | ------------------------------------------------------------------------------------- | ----------------------------- | --------------- |
 | §6 stubs    | `pop_higher` field on PSA scraper                                                   | Scaffold left unimplemented   | §6 Unused Code |
-| R2.10–R2.13 | Cache base64 wrapper, scanStream parse complexity, per-crop DB sessions, dedupe cache | Low-impact cleanups, deferred | Round 2         |
+| R2.10        | Cache base64-wrapped gzip wastes ~33% Redis memory                                   | Low-impact, deferred          | Round 2         |
+| R2.11        | `_dedupe_and_rank` rebuilds `matching_set_codes` per call                           | Low-impact, deferred          | Round 2         |
+| R2.12        | `scanStream responseText.slice` is O(n) per onprogress                              | Negligible at current scale   | Round 2         |
+| R2.13        | `_vector_search` opens new session per crop                                          | Marginal with asyncpg pooling | Round 2         |
 
 ### ✅ Round 2 (2026-05-21) — implemented
 
@@ -108,13 +116,10 @@ Each finding lists:
 - **Recommendation**: Pre-compute all phashes in parallel via `await asyncio.gather(*[asyncio.to_thread(compute_phash, b) for _, b in to_embed])` before the search gather.
 - **Benefit**: Phash computation overlaps with embedding, freeing the event loop.
 
-### ❌ 1.7 Playwright opens a fresh browser context per scrape (skipped — dependency change)
+### ✅ 1.7 Replace Playwright with httpx for PriceCharting (resolved v20)
 
-- **File**: `backend/app/scrapers/base.py:71-82`
-- **Current**: Every `fetch_page` call creates a context, opens a page, waits 800–1500ms random delay, then closes the page and context.
-- **Issue**: For PriceCharting pages that don't require JS-rendered content, this is ~3× slower than `httpx` and burns ~50–100MB extra RAM per concurrent fetch.
-- **Recommendation**: Try `httpx.AsyncClient` with realistic headers for PriceCharting first; fall back to Playwright only on 403/Cloudflare challenge. If PriceCharting fully accepts `httpx`, drop Playwright entirely from PriceCharting path.
-- **Benefit**: 1–2s faster per uncached price lookup; significant RAM reduction; smaller backend container possible (Playwright bundles are ~300MB).
+- **File**: `backend/app/scrapers/base.py`
+- **Resolution**: `httpx.AsyncClient` with brotli decompression (`brotlicffi`) validated against PriceCharting — no Cloudflare block. Playwright removed from entire backend. Rate limit dropped 3.0s → 0.5s. Per-card fetch improved from ~5–7s to ~1s. Backend image switched to `python:3.12-slim` (~300MB smaller).
 
 ### ✅ 1.8 `ScanHistory.scanned_at` is not indexed
 
@@ -192,13 +197,10 @@ Each finding lists:
 - **Recommendation**: Rename to `compute_full_phash` and `compute_art_phash` in one shared module; hoist all `imagehash` imports to module scope.
 - **Benefit**: No more ambiguity; faster cold call (no per-call import).
 
-### 2.3 OpenCV detector ~150 lines of dead-on-arrival fallback code
+### ✅ 2.3 OpenCV detector deleted (resolved v16)
 
-- **File**: `backend/app/services/card_detector.py:100-242`
-- **Current**: When `card_detector.pt` is absent, falls back to OpenCV contour + NMS + recursive splitting.
-- **Issue**: YOLO is deployed and the `.pt` is checked in — OpenCV branch is unreachable in normal use. The file is 243 lines, ~60% of it for the dead branch.
-- **Recommendation**: Move `_detect_opencv`, `_try_split_box`, `_nms`, `_iou`, `_containment`, and OpenCV-specific constants to `card_detector_opencv.py`. Or delete it entirely — the dataset is robust enough that YOLO failure means "no cards present" and falling back to the broken OpenCV approach won't help.
-- **Benefit**: Smaller, focused module; less surface area for bugs.
+- **File**: `backend/app/services/card_detector.py`
+- **Resolution**: `_detect_opencv`, `_try_split_box`, `_nms`, `_iou`, `_containment` and all OpenCV-specific constants deleted. File shrank from 249 → 87 lines. YOLO v2 (mAP50-95: 0.964) is reliable enough that zero boxes means no cards present — OpenCV fallback was unreachable and unhelpful. `opencv-python-headless` removed from `requirements.txt`; `cv2.imdecode` replaced with `PIL.Image.open`.
 
 ### ✅ 2.4 Single-card scan path is fully dead but still wired
 
@@ -431,11 +433,9 @@ Each finding lists:
 
 ## 7. Dependency and bundle hygiene
 
-### ❌ 7.1 Playwright is heavy and may be unnecessary for PriceCharting (skipped — see Playwright assessment in commit notes)
+### ✅ 7.1 Playwright bundle removed (resolved v20)
 
-- **Issue**: ~300MB browser bundle + ~50–100MB RAM per concurrent fetch.
-- **Recommendation**: Test if `httpx` with a realistic User-Agent can fetch PriceCharting pages successfully. If yes, remove Playwright from PriceCharting path. Keep it only for TCGCollector scraping (offline build step, not request path).
-- **Benefit**: Smaller backend image; faster cold starts; lower per-request memory.
+- **Resolution**: Validated httpx works for PriceCharting (see 1.7). Playwright removed from `requirements.txt`. Backend image switched from Playwright image to `python:3.12-slim` — ~300MB smaller. Cold starts faster. TCGCollector scraping is an offline build step that still uses direct HTTP; Playwright was never needed there either.
 
 ### ❌ 7.2 `react-native-chart-kit` ships ~30KB+ with SVG runtime (skipped — dependency change)
 
@@ -488,7 +488,7 @@ Each finding lists:
 | Status | #  | Item                                                               | Section |
 | ------ | -- | ------------------------------------------------------------------ | ------- |
 | ✅     | 18 | Extract `saleLinkLabel` to shared util                           | 2.10    |
-|        | 19 | Move OpenCV detector to a separate module or delete it             | 2.3     |
+| ✅     | 19 | Delete OpenCV detector (YOLO v2 trusted; file 249→87 lines)        | 2.3     |
 | ✅     | 20 | Combine `_VALID_GAMES`/`_VALID_LANGUAGES` into shared module   | 2.8     |
 | ✅     | 21 | Refactor `get_prices` into helper methods                        | 2.9     |
 | ⚠️   | 22 | Add proper error logging in place of silent `except`             | 5.1     |
@@ -501,7 +501,7 @@ Each finding lists:
 
 | Status | #  | Item                                                             | Section  |
 | ------ | -- | ---------------------------------------------------------------- | -------- |
-| ❌     | 27 | Replace Playwright with `httpx` for PriceCharting (test first) | 1.7, 7.1 |
+| ✅     | 27 | Replace Playwright with `httpx` — validated and shipped (v20)   | 1.7, 7.1 |
 | ✅     | 28 | Add `POST /cards/prices` batch price endpoint                  | 4.3      |
 | ✅     | 29 | Cap total backend scrape time to match mobile XHR timeout        | 5.5      |
 
@@ -536,6 +536,7 @@ Reviewed after the original audit was largely implemented and YOLO v2 was confir
 - **Issue**: With 47K vectors across 100 lists, default probes=1 scans only ~470 vectors → mediocre recall. Real matches sometimes fall outside the probed cluster.
 - **Recommendation**: `await db.execute(text("SET LOCAL ivfflat.probes = 10"))` before the vector query.
 - **Benefit**: Materially better top-K recall (especially for CLIP fine-tuned embeddings near cluster boundaries) at +5–10ms per query.
+- **v22.1 update**: Raised further to `probes = 20` after accuracy testing revealed marginal cross-language cases (JP/EN borderline similarity) were falling through. ~5ms extra latency, better recall on cluster-boundary matches.
 
 ##### ✅ R2.2 Partial IVFFlat indices per language
 
@@ -594,6 +595,7 @@ Reviewed after the original audit was largely implemented and YOLO v2 was confir
 - **Issue**: phash re-ranking only promotes existing rows; the extra 5 are wasted.
 - **Recommendation**: `LIMIT 5`.
 - **Benefit**: Smaller payloads, fewer scored rows.
+- **v22.1 update**: Reversed to `LIMIT 10`. Accuracy testing showed the wider candidate pool is needed so the correct card survives to RRF merge, especially for image-only and combined mode scans where the right card was being cut before ranking. The 5-row saving was negligible; the recall loss was not.
 
 ##### ✅ R2.9 Mobile: overlap JPEG re-encode with name-region OCR
 
@@ -645,5 +647,9 @@ Reviewed after the original audit was largely implemented and YOLO v2 was confir
 
 - Original audit was read-only. Findings cite line numbers based on the audit-time `HEAD` (commit `bc1f387`) — line numbers may have shifted in subsequent commits.
 - Implementation applied across commits `1a00032` → `1f4786d` plus follow-up commits addressing the remaining "Not Yet Addressed" items (1.10, 1.14, 3.6, 4.3, 4.5, 4.6, 5.2, 5.3, 5.5, 23, 28, 29, 31, 33, plus `get_by_number`/`search_by_number` removal).
-- Skipped intentionally (dependency considerations): 1.7, 7.1 (Playwright), 7.2 (chart-kit), 7.3 (axios), 27 (Playwright replacement), 32 (chart-kit replacement).
-- Still deferred by design: 2.3 (OpenCV module split — left as safety net behind YOLO) and 19 (same), plus `pop_higher` (PSA scaffolding).
+- 1.7 / 7.1 / #27 (Playwright): Originally skipped due to Cloudflare risk. Validated and shipped in v20 — httpx works cleanly, Playwright fully removed.
+- 2.3 / #19 (OpenCV): Originally left as safety net. Deleted in v16 once YOLO v2 (mAP50-95: 0.964) was confirmed reliable.
+- R2.1 (probes): Set to 10 in Round 2, raised to 20 in v22.1 after accuracy testing.
+- R2.8 (LIMIT 5): Applied in Round 2, reversed to LIMIT 10 in v22.1 — recall loss outweighed the payload saving.
+- Still skipped by design: 7.2 (chart-kit replacement), 7.3 (axios), 32 (chart-kit prioritized table).
+- Still deferred: `pop_higher` (PSA scaffolding), R2.10–R2.13 (low-impact cleanups).
