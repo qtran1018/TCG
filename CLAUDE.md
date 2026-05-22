@@ -8,10 +8,6 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 
 ### Priority 1 — Recognition improvements
 
-#### JP trainer card name extraction ✅ COMPLETED (v24, 2026-05-22)
-
-`_find_jp_trainer_name()` added to `card_matcher.py`. Finds グッズ/サポート/スタジアム/ポケモンのどうぐ type keyword, takes name 1–2 lines above, strips JP parenthetical subtitles. `_search_db_ja_trainer()` searches `Card.name_ja` directly for trainer names that have no kana→EN translation. Falls through from `_find_kana_name` in `extract_card_hints` when no Pokémon kana name is found.
-
 #### CLIP similarity threshold tuning
 
 `_SIM_THRESHOLD = 0.65` and `_SIM_FLOOR = 0.50` were set before the fine-tuned CLIP model. Now that the YOLO v2 model produces tighter crops (mAP50-95: 0.964 vs 0.904), real scan similarity scores may have shifted.
@@ -697,11 +693,6 @@ docker exec tcg_backend python /scripts/migrate_partial_ivfflat.py
 
 Subsequent `scripts/build_embeddings.py` runs (with or without `--force`) automatically use `rebuild_ivfflat_indices()` to maintain both partial indices.
 
-### v19 — Reload cache bypass + TFLite on-device YOLO (2026-05-21)
-
-- **Reload cache bypass**: `GET /api/v1/cards/{id}` now accepts `?force_refresh=true` (FastAPI `Query` param). Passes through to `get_prices(..., force_refresh=True)` which skips the Redis `get()` call entirely when set — bypasses both the positive 24h cache and the 1h negative (not-found) cache. Backend still writes back after scraping. Mobile `api.getCard()` has new `forceRefresh?: boolean` param; the reload button in `card/[id].tsx` passes `refresh=true` so `loadCard(true)` → `forceRefresh=true`.
-- **TFLite on-device YOLO**: Export chain: `YOLO.export(format='onnx')` + `onnx2tf` (direct, not via ultralytics — ultralytics TFLite export segfaults in this container). Output: `card_detector_float16.tflite` (5.1MB, float32 I/O, output `[1, 5, 8400]`). `metro.config.js` created with `tflite` in `assetExts`. `mobile/utils/yoloDetector.ts` implemented: jpeg-js JPEG decode → float32 NHWC input → TFLite inference → greedy NMS → stretched (not letterboxed) 640×640 un-projection → box sort matching backend. Output layout auto-detected from `model.outputs[0].shape`. Try-catch returns `null` (falls back to backend `/detect`). Model loaded lazily, cached module-level.
-
 ### v17 — Language detection hardening + UX fixes (2026-05-21)
 
 - **Name-region sub-crop as primary language source**: `useMultiCardScan.ts` now always runs the name-region OCR (top 18%, 5–95% width) for language detection, regardless of scan mode or confidence result. Previously, the name-region override only ran in combined/OCR mode when `confidence.isCard` was true — meaning image-only mode and low-confidence crops always used the noisy full-crop text. Type symbols, energy icons, and flavor text on EN cards produced 2–3 consecutive kana misreads that flipped `cropLang` to `'ja'`, sending the wrong language to the backend. `KANA_RE` raised to `{3,}` as a secondary defense.
@@ -710,6 +701,11 @@ Subsequent `scripts/build_embeddings.py` runs (with or without `--force`) automa
 - **JP PriceCharting URL fix**: `_JP_PC_SET_SLUG` dict maps TCGCollector set names that `_slugify` would mangle to pre-slugified PriceCharting slugs (e.g. "Pokémon Card 151" → `scarlet-&-violet-151`). `/console/` link filter added to `_parse_prices` — prevents set-listing disambiguation page links from being stored as sale URLs. Guard: if `price_loose is None` and all sale URLs are None, clears `recent_sales` to avoid bogus rows.
 - **"Complete" row removed** from `PriceDisplay.tsx`: `price_cib` is PriceCharting's "Complete In Box" game tier — never populated for trading cards.
 - **Reload button on card details page**: `loadCard(refresh?)` extracted from `useEffect`. Error state → accent "Retry" button. No-price state → "Retry" inside the box. Price loaded → "↻ Refresh price" link below `PriceDisplay` with spinner. Re-fetch hits backend which checks Redis cache (24h price TTL, 1h negative TTL).
+
+### v19 — Reload cache bypass + TFLite on-device YOLO (2026-05-21)
+
+- **Reload cache bypass**: `GET /api/v1/cards/{id}` now accepts `?force_refresh=true` (FastAPI `Query` param). Passes through to `get_prices(..., force_refresh=True)` which skips the Redis `get()` call entirely when set — bypasses both the positive 24h cache and the 1h negative (not-found) cache. Backend still writes back after scraping. Mobile `api.getCard()` has new `forceRefresh?: boolean` param; the reload button in `card/[id].tsx` passes `refresh=true` so `loadCard(true)` → `forceRefresh=true`.
+- **TFLite on-device YOLO**: Export chain: `YOLO.export(format='onnx')` + `onnx2tf` (direct, not via ultralytics — ultralytics TFLite export segfaults in this container). Output: `card_detector_float16.tflite` (5.1MB, float32 I/O, output `[1, 5, 8400]`). `metro.config.js` created with `tflite` in `assetExts`. `mobile/utils/yoloDetector.ts` implemented: jpeg-js JPEG decode → float32 NHWC input → TFLite inference → greedy NMS → stretched (not letterboxed) 640×640 un-projection → box sort matching backend. Output layout auto-detected from `model.outputs[0].shape`. Try-catch returns `null` (falls back to backend `/detect`). Model loaded lazily, cached module-level.
 
 ### v20 — httpx scraper, speed benchmark mode, OCR optimization (2026-05-22)
 
