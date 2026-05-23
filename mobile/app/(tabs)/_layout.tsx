@@ -1,40 +1,91 @@
+import React, { useState } from "react";
+import { TouchableOpacity, View } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "@/constants";
+import { GameDrawer } from "@/components/UI/GameDrawer";
+import { useScanStore } from "@/store/scanStore";
+import { useColors } from "@/hooks/useColors";
+
+function GameDot() {
+  const game = useScanStore((s) => s.game);
+  const C = useColors();
+  const color = game === "pokemon" ? C.pokemon : C.onepiece;
+  return (
+    <View
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: color,
+        position: "absolute",
+        bottom: -1,
+        right: -1,
+      }}
+    />
+  );
+}
 
 export default function TabLayout() {
-  return (
-    <Tabs
-      screenOptions={{
-        headerStyle: { backgroundColor: COLORS.bg },
-        headerTintColor: COLORS.text,
-        headerShadowVisible: false,
-        tabBarStyle: {
-          backgroundColor: COLORS.surface,
-          borderTopColor: COLORS.border,
-        },
-        tabBarActiveTintColor: COLORS.accent,
-        tabBarInactiveTintColor: COLORS.textMuted,
-      }}
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const C = useColors();
+
+  const hamburger = () => (
+    <TouchableOpacity
+      onPress={() => setDrawerOpen(true)}
+      style={{ marginRight: 16, position: "relative" }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Scan",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="scan-outline" size={size} color={color} />
-          ),
+      <Ionicons name="menu-outline" size={24} color={C.text} />
+      <GameDot />
+    </TouchableOpacity>
+  );
+
+  return (
+    <>
+      <Tabs
+        screenOptions={{
+          headerStyle: { backgroundColor: C.bg },
+          headerTintColor: C.text,
+          headerShadowVisible: false,
+          headerRight: hamburger,
+          tabBarStyle: {
+            backgroundColor: C.surface,
+            borderTopColor: C.border,
+          },
+          tabBarActiveTintColor: C.accent,
+          tabBarInactiveTintColor: C.textMuted,
         }}
-      />
-      <Tabs.Screen
-        name="history"
-        options={{
-          title: "History",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time-outline" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "Scan",
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="scan-outline" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="saved"
+          options={{
+            title: "Saved",
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="bookmark-outline" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="history"
+          options={{
+            title: "History",
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="time-outline" size={size} color={color} />
+            ),
+          }}
+        />
+      </Tabs>
+
+      <GameDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
+    </>
   );
 }

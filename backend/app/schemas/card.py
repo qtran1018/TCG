@@ -131,6 +131,9 @@ class ScanHistoryCreate(BaseModel):
     resolved_card_name: str | None = None
     price_loose: float | None = None
     price_graded_10: float | None = None
+    image_url: str | None = None
+    set_name: str | None = None
+    card_number: str | None = None
 
 
 class HistoryEntry(BaseModel):
@@ -141,6 +144,9 @@ class HistoryEntry(BaseModel):
     resolved_card_name: str | None = None
     price_loose: float | None = None
     price_graded_10: float | None = None
+    image_url: str | None = None
+    set_name: str | None = None
+    card_number: str | None = None
     scanned_at: datetime
 
     model_config = {"from_attributes": True}

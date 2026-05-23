@@ -5,15 +5,15 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { CameraScanner } from "@/components/Scanner/CameraScanner";
-import { GameToggle } from "@/components/UI/GameToggle";
 import { ScanTypeToggle } from "@/components/UI/ScanTypeToggle";
 import { ScanModeToggle } from "@/components/UI/ScanModeToggle";
 import type { ScanMode } from "@/hooks/useMultiCardScan";
 import { useCardSearch } from "@/hooks/useCardSearch";
 import { useMultiCardScan } from "@/hooks/useMultiCardScan";
 import { useScanStore } from "@/store/scanStore";
-import { COLORS } from "@/constants";
+import { useColors } from "@/hooks/useColors";
 
 type Mode = "multi-camera" | "settings";
 
@@ -24,19 +24,21 @@ export default function ScanScreen() {
   const [scanMode, setScanMode] = useState<ScanMode>("ocr");
   const [speedTestMode, setSpeedTestMode] = useState(false);
 
-  const { game, scanType, setGame, setScanType, clearMultiScan, setMultiScanLoading } =
+  const { game, scanType, setScanType, clearMultiScan, setMultiScanLoading } =
     useScanStore();
+  const C = useColors();
 
   const { searchByCert, isSearching } = useCardSearch();
-  const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress, error: multiError } = useMultiCardScan();
+  const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress } = useMultiCardScan();
 
   const isLoading = isSearching || isMultiProcessing;
+
+  const gameLabel = game === "pokemon" ? "Pokémon" : "One Piece";
+  const gameColor = game === "pokemon" ? C.pokemon : C.onepiece;
 
   const handleMultiCapture = useCallback(
     async (uri: string) => {
       clearMultiScan();
-      // Mark loading before navigating so the results screen never sees the
-      // empty state while the scan is in progress.
       setMultiScanLoading(true);
       setMode("settings");
       router.push("/multi-results");
@@ -63,7 +65,7 @@ export default function ScanScreen() {
   }, [certInput, searchByCert, game, router]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
       {mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
           <CameraScanner onCapture={handleMultiCapture} isProcessing={isLoading} />
@@ -86,72 +88,99 @@ export default function ScanScreen() {
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
           >
-            <Text style={styles.title}>TCG Scanner</Text>
+            {/* Game title */}
+            <View style={styles.titleRow}>
+              <Text style={[styles.gameTitle, { color: gameColor }]}>{gameLabel}</Text>
+              <View style={[styles.gameTitleAccent, { backgroundColor: gameColor }]} />
+            </View>
+            <Text style={[styles.subtitle, { color: C.textMuted }]}>Card Scanner &amp; Price Tracker</Text>
 
-            <Section label="Game">
-              <GameToggle value={game} onChange={setGame} />
-            </Section>
+            {/* Settings card */}
+            <View style={[styles.settingsCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+              <SettingRow label="Scan Type" colors={C}>
+                <ScanTypeToggle value={scanType} onChange={setScanType} />
+              </SettingRow>
 
-            <Section label="Scan Type">
-              <ScanTypeToggle value={scanType} onChange={setScanType} />
-            </Section>
+              <View style={[styles.settingDivider, { backgroundColor: C.border }]} />
 
-            <Section label="Recognition Mode">
-              <ScanModeToggle value={scanMode} onChange={setScanMode} />
-            </Section>
+              <SettingRow label="Recognition Mode" colors={C}>
+                <ScanModeToggle value={scanMode} onChange={setScanMode} />
+              </SettingRow>
 
-            <Section label="Speed Test">
-              <TouchableOpacity
-                style={[styles.speedTestBtn, speedTestMode && styles.speedTestBtnActive]}
-                onPress={() => setSpeedTestMode((v) => !v)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.speedTestBtnText, speedTestMode && styles.speedTestBtnTextActive]}>
-                  {speedTestMode ? "⚡ Speed Test ON" : "⚡ Speed Test OFF"}
-                </Text>
-              </TouchableOpacity>
+              <View style={[styles.settingDivider, { backgroundColor: C.border }]} />
+
+              <SettingRow label="Speed Test" colors={C}>
+                <TouchableOpacity
+                  style={[
+                    styles.speedTestPill,
+                    { borderColor: C.border },
+                    speedTestMode && { borderColor: C.accent, backgroundColor: `${C.accent}18` },
+                  ]}
+                  onPress={() => setSpeedTestMode((v) => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="flash-outline"
+                    size={13}
+                    color={speedTestMode ? C.accent : C.textMuted}
+                  />
+                  <Text style={[
+                    styles.speedTestPillText,
+                    { color: C.textMuted },
+                    speedTestMode && { color: C.accent },
+                  ]}>
+                    {speedTestMode ? "ON" : "OFF"}
+                  </Text>
+                </TouchableOpacity>
+              </SettingRow>
               {speedTestMode && (
-                <Text style={styles.speedTestHint}>
+                <Text style={[styles.speedTestHint, { color: C.textMuted }]}>
                   Times scan pipeline only — skips price fetch on card detail
                 </Text>
               )}
-            </Section>
+            </View>
 
+            {/* PSA cert input or hero scan button */}
             {scanType === "psa" ? (
-              <Section label="PSA Cert Number">
+              <View style={[styles.psaCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+                <Text style={[styles.psaLabel, { color: C.textMuted }]}>PSA Cert Number</Text>
                 <View style={styles.certRow}>
                   <TextInput
-                    style={styles.certInput}
+                    style={[styles.certInput, { backgroundColor: C.bg, color: C.text, borderColor: C.border }]}
                     value={certInput}
                     onChangeText={setCertInput}
                     placeholder="e.g. 12345678"
-                    placeholderTextColor={COLORS.textMuted}
+                    placeholderTextColor={C.textMuted}
                     keyboardType="number-pad"
                     returnKeyType="search"
                     onSubmitEditing={handlePSALookup}
                   />
                   <TouchableOpacity
-                    style={[styles.lookupBtn, isLoading && styles.btnDisabled]}
+                    style={[styles.lookupBtn, { backgroundColor: C.accent }, isLoading && styles.btnDisabled]}
                     onPress={handlePSALookup}
                     disabled={isLoading}
                   >
                     <Text style={styles.lookupBtnText}>{isLoading ? "..." : "Look Up"}</Text>
                   </TouchableOpacity>
                 </View>
-              </Section>
+              </View>
             ) : (
               <TouchableOpacity
-                style={[styles.scanBtn, isLoading && styles.btnDisabled]}
+                style={[styles.heroScanBtn, { borderColor: `${gameColor}40` }, isLoading && styles.btnDisabled]}
                 onPress={() => setMode("multi-camera")}
                 disabled={isLoading}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <Text style={styles.scanBtnText}>📷  Scan Cards</Text>
+                <View style={[styles.heroIconWrap, { backgroundColor: `${gameColor}22` }]}>
+                  <Ionicons name="camera" size={36} color={gameColor} />
+                </View>
+                <Text style={[styles.heroScanLabel, { color: C.text }]}>Scan Cards</Text>
+                <Text style={[styles.heroScanSub, { color: C.textMuted }]}>Point camera at your cards</Text>
               </TouchableOpacity>
             )}
 
             {isLoading && (
-              <Text style={styles.loadingText}>
+              <Text style={[styles.loadingText, { color: C.textMuted }]}>
                 {isMultiProcessing ? multiProgress || "Processing..." : "Searching database..."}
               </Text>
             )}
@@ -162,17 +191,23 @@ export default function ScanScreen() {
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingRow({
+  label, children, colors,
+}: {
+  label: string;
+  children: React.ReactNode;
+  colors: ReturnType<typeof useColors>;
+}) {
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{label}</Text>
-      {children}
+    <View style={styles.settingRow}>
+      <Text style={[styles.settingLabel, { color: colors.textMuted }]}>{label}</Text>
+      <View style={styles.settingControl}>{children}</View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.bg },
+  safe: { flex: 1 },
   cameraContainer: { flex: 1 },
   backBtn: {
     position: "absolute",
@@ -185,57 +220,102 @@ const styles = StyleSheet.create({
   },
   backBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   scroll: { flex: 1 },
-  content: { padding: 20, gap: 6, paddingBottom: 40 },
-  title: {
-    color: COLORS.text,
-    fontSize: 26,
-    fontWeight: "800",
-    marginBottom: 8,
-    letterSpacing: -0.5,
+  content: { padding: 24, paddingBottom: 48, gap: 16 },
+
+  titleRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, marginBottom: 2 },
+  gameTitle: {
+    fontSize: 44,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+    lineHeight: 48,
   },
-  section: { gap: 8, marginTop: 16 },
-  sectionLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600", letterSpacing: 0.8, textTransform: "uppercase" },
+  gameTitleAccent: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginBottom: 10,
+  },
+  subtitle: { fontSize: 13, fontWeight: "500", marginBottom: 8 },
+
+  settingsCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+  },
+  settingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    gap: 12,
+  },
+  settingLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    width: 120,
+    flexShrink: 0,
+  },
+  settingControl: { flex: 1, alignItems: "flex-end" },
+  settingDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: -16 },
+
+  speedTestPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  speedTestPillText: { fontSize: 12, fontWeight: "700" },
+  speedTestHint: { fontSize: 11, paddingBottom: 10, marginTop: -4, fontStyle: "italic" },
+
+  psaCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  psaLabel: { fontSize: 12, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" },
   certRow: { flexDirection: "row", gap: 10 },
   certInput: {
     flex: 1,
-    backgroundColor: COLORS.surface,
-    color: COLORS.text,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: COLORS.border,
   },
   lookupBtn: {
-    backgroundColor: COLORS.accent,
     paddingHorizontal: 18,
     borderRadius: 10,
     justifyContent: "center",
   },
   lookupBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  scanBtn: {
-    backgroundColor: COLORS.accent,
-    borderRadius: 14,
-    paddingVertical: 18,
+
+  heroScanBtn: {
+    borderRadius: 20,
+    borderWidth: 2,
+    paddingVertical: 28,
     alignItems: "center",
-    marginTop: 24,
+    gap: 8,
+    marginTop: 4,
   },
-  scanBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  heroIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  heroScanLabel: { fontSize: 20, fontWeight: "800", letterSpacing: -0.3 },
+  heroScanSub: { fontSize: 13, fontWeight: "500" },
+
   btnDisabled: { opacity: 0.5 },
-  loadingText: { color: COLORS.textMuted, textAlign: "center", marginTop: 16, fontSize: 14 },
-  speedTestBtn: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignSelf: "flex-start",
-  },
-  speedTestBtnActive: { borderColor: COLORS.accent, backgroundColor: `${COLORS.accent}18` },
-  speedTestBtnText: { color: COLORS.textMuted, fontSize: 13, fontWeight: "600" },
-  speedTestBtnTextActive: { color: COLORS.accent },
-  speedTestHint: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
+  loadingText: { textAlign: "center", marginTop: 8, fontSize: 14 },
+
   multiProgressBanner: {
     position: "absolute",
     bottom: 120,

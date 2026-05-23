@@ -38,7 +38,7 @@ Implemented in `mobile/utils/yoloDetector.ts`. Eliminates the `/detect` network 
 | Round-trip latency    | 1000–3000ms                      | 100–200ms (post-warmup)                            |
 | Works offline         | No                                | Yes (detection only — OCR/CLIP still need backend) |
 | Backend load per scan | 1 detect call                     | 0                                                   |
-| Data uploaded         | Full 2400px image (~500KB–2MB)   | One full image + box coords (server-side crop)     |
+| Data uploaded         | Full 2400px image (~500KB–2MB)   | One full image + box coords (server-side crop)      |
 
 **How it works (v22):**
 
@@ -66,6 +66,164 @@ docker exec tcg_backend onnx2tf -i /app/models/card_detector.onnx -o /app/models
 **Validation:** Compare box count/coords between backend `/detect` and on-device for the same test photo. Drift >5px indicates preprocessing bug (normalization, NHWC order, scale factor). Backend `/detect` fallback still active if TFLite returns 0 boxes.
 
 **Known risks:** GPU delegate needs Expo config plugin; iOS needs Core ML re-export; model updates require full app rebuild.
+
+---
+
+### Future — Live Scan Mode (VisionCamera frame processors)
+
+**Use case:** Vendor or collector working through a card lot one at a time. Cards are held or placed close-up in front of the camera; the app auto-detects and identifies each card without any button press, accumulating a running list of results. Optimized for throughput, not batch photography.
+
+#### What this is
+
+A separate scan mode (new screen, accessible from the main scan page or hamburger menu) where:
+
+1. Camera is always live — no capture button
+2. On-device YOLO runs on every frame via a frame processor, drawing a real-time bounding box when a card is detected
+3. When the bounding box is stable for ~800ms the app auto-captures a high-quality still frame and sends it through the existing `/scan` backend
+4. Result (card name, set, number) appears as a card in a growing list below the viewfinder
+5. Prices fill in progressively as they resolve (background scrape queue), or are fetched in a final batch at session end
+
+#### Why VisionCamera (Option B) over periodic auto-capture (Option A)
+
+| Factor                       | Option A (periodic timer)    | Option B (VisionCamera frame processors) |
+| ---------------------------- | ---------------------------- | ---------------------------------------- |
+| Bounding box overlay         | No — blind between captures | Yes — real-time, YOLO on every frame    |
+| Stability detection accuracy | Poor (1–2 samples/trigger)  | High (30+ samples/second)                |
+| Auto-trigger timing          | Fixed interval, often wrong  | Fires exactly when card is still         |
+| UX feel                      | Choppy, unpredictable        | Continuous, like SKANIT/DeckTradr        |
+| Backend reuse                | Full                         | Full                                     |
+| Implementation effort        | ~1 week                      | ~2–3 weeks                              |
+
+#### Library migration
+
+**Current:** `expo-camera` (CameraView) — managed Expo, no frame access
+**Required:** `react-native-vision-camera` v4 — frame processors via JSI worklets
+
+VisionCamera works with Expo SDK 51+ via a config plugin (`react-native-vision-camera` plugin entry in `app.json`). Requires `expo prebuild` (bare workflow) or Expo's managed build with the plugin. This is the biggest single-step cost — migrating the existing `CameraScanner.tsx` capture path to VisionCamera while keeping the multi-card scan mode working.
+
+Additional dependency: `react-native-worklets-core` (JSI worklet runtime for frame processors).
+
+#### Frame processor design
+
+```
+┌──────────────────────────────────────────────────────┐
+│  VisionCamera frame (every frame, native thread)     │
+│  → resize frame to 640×640                           │
+│  → run TFLite YOLO (existing card_detector.tflite)   │
+│  → if conf > 0.25 and box area > min_area:           │
+│      → push box coords to JS via JSI                 │
+└──────────────────────────────────────────────────────┘
+           ↓ (JS thread, ~30fps callbacks)
+┌──────────────────────────────────────────────────────┐
+│  Stability tracker (JS)                              │
+│  → rolling buffer of last 20 box positions           │
+│  → if stddev(center_x, center_y) < 8px for 800ms:   │
+│      → trigger high-quality capture                  │
+│  → reset buffer on box disappearance or large jump   │
+└──────────────────────────────────────────────────────┘
+           ↓
+┌──────────────────────────────────────────────────────┐
+│  Dedup gate                                          │
+│  → compute phash of captured crop                    │
+│  → if hamming(phash, last_scanned_phash) < 15:       │
+│      → skip (same card still in frame)               │
+│  → OR: require card to leave frame before next scan  │
+└──────────────────────────────────────────────────────┘
+           ↓
+┌──────────────────────────────────────────────────────┐
+│  Backend /scan (existing, unchanged)                 │
+│  → OCR + CLIP → NDJSON result                        │
+│  → append to session card list                       │
+└──────────────────────────────────────────────────────┘
+```
+
+#### Dedup strategy (hardest UX problem)
+
+Three options, each with a tradeoff:
+
+| Strategy                       | How it works                                                                            | Risk                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Motion gate**          | Next scan only arms after box disappears from frame for ≥0.5s                          | Natural for flip-and-place; fails if user slides cards without lifting        |
+| **Phash cooldown**       | After scan, compute crop phash; skip if next capture phash is within Hamming 15 of last | Reliable dedup; phash is ~20ms; fails for two visually similar cards in a row |
+| **Hybrid (recommended)** | Motion gate first; phash as secondary check                                             | Handles both edge cases                                                       |
+
+#### Price retrieval during live scan (the hard part)
+
+PriceCharting scraping adds 0.5–3s per card (httpx, 0.5s rate limit). Options:
+
+**Option 1 — Immediate, blocking**
+After each card is identified, fetch its price before proceeding. UX halts at each card. Completely unusable for bulk scanning.
+
+**Option 2 — Background queue (recommended for current scraper)**A background worker pulls cards from an async queue (concurrency=1 to respect rate limiter). While the user scans card N+1, prices for cards 1..N are fetching. By the time a 20-card session ends, most prices are already filled in. Cards show a spinner in the list until their price resolves.
+
+- Queue implemented in `useEffect` / `useRef` in the live scan screen
+- Uses existing `api.streamPrices()` or batches every 5 cards
+- UI: row shows `$—` with a small spinner; price replaces it when resolved
+- Session "End" button waits for any in-flight fetches before showing final totals
+
+**Option 3 — Batch at session end**
+Scan all cards, no price fetching until user taps "Done". Fastest camera experience, but delays value visibility. Suitable if lot is large (50+ cards) and the user prefers to scan uninterrupted.
+
+**Recommended default:** Option 2 (background queue). A 10-card session at 0.5s rate limit = 5s of background fetching, which easily overlaps with the scanning time. Show price status per card in the list (⏳ → $X.XX).
+
+#### UI layout
+
+```
+┌─────────────────────────────────┐
+│                                 │
+│    [live camera viewfinder]     │
+│                                 │
+│    ┌─────────────────────┐      │
+│    │  bounding box (YOLO) │     │
+│    │  [████████░░] 800ms  │     │  ← stability progress ring/bar
+│    └─────────────────────┘      │
+│                                 │
+├─────────────────────────────────┤
+│  12 cards · $143.20 total   [✕] │  ← running total, end session
+├─────────────────────────────────┤
+│  Charizard VMAX  sv3  #125      │
+│  $48.00 ✓                       │
+│  Pikachu ex  sv1  #58           │
+│  ⏳ fetching price...           │
+│  ...                            │
+└─────────────────────────────────┘
+```
+
+Viewfinder takes 55–65% of screen height. Card list scrolls below. Running total visible at all times. "End Session" closes camera and triggers final price flush.
+
+#### New files required
+
+- `mobile/app/live-scan.tsx` — screen, stability tracker, session state
+- `mobile/hooks/useLiveScan.ts` — frame processor logic, dedup, capture trigger
+- `mobile/components/Scanner/LiveBoundingBox.tsx` — Reanimated overlay drawn over viewfinder
+- `mobile/components/Scanner/StabilityRing.tsx` — animated progress indicator
+- `CameraScanner.tsx` may need to be refactored or replaced with a VisionCamera version
+
+#### What reuses existing backend without changes
+
+- `POST /api/v1/scan` — unchanged, still accepts single image + boxes
+- `POST /api/v1/cards/prices/stream` — unchanged, works for background queue
+- On-device YOLO (`card_detector.tflite`) — same model, same output format
+- All OCR hint extraction logic
+
+#### Known risks and open questions
+
+- **VisionCamera + Expo managed workflow**: requires `expo prebuild` or EAS build with plugin; cannot use Expo Go for testing
+- **TFLite inside frame processor**: `react-native-fast-tflite` v2 runs on the JS thread; calling it from a VisionCamera JSI worklet requires either the worklet to call JS (acceptable latency ~16ms) or a separate native TFLite frame processor plugin. The simpler path is: frame processor extracts the raw frame, posts it to JS thread at 10fps (not 30fps), JS runs TFLite inference there. Saves the worklet-TFLite integration complexity.
+- **Battery/thermal**: Continuous YOLO at 10fps + live camera = significant power draw. Should auto-pause inference when app is backgrounded and limit to 10fps (not 30fps) to reduce thermal load.
+- **Two similar cards back to back**: phash dedup could skip a legitimate second copy of the same card. Solution: tap-to-confirm mode as override, or a "scan again" button per row.
+- **VisionCamera migration breaks existing multi-card flow**: CameraScanner.tsx (used in the current tab scan mode) must be ported. Plan: port the existing capture path to VisionCamera first, validate, then add frame processor on top.
+
+#### Implementation order
+
+1. **Port CameraScanner to VisionCamera** (prerequisite — affects existing scan mode)
+2. **Validate existing multi-card scan still works** with VisionCamera
+3. **Add frame processor** with 10fps YOLO inference + bounding box overlay
+4. **Stability tracker + auto-trigger**
+5. **Dedup gate** (phash + motion gate)
+6. **Live scan screen** with session list + running total
+7. **Background price queue** (Option 2)
+8. **End-session flow** (flush remaining prices, show totals, optionally export)
 
 ---
 
@@ -150,14 +308,89 @@ Cards nobody scans for 30 days fall out of the hot set automatically and stop be
 
 ---
 
+### Future — One Piece (multi-TCG expansion)
+
+#### App architecture: one app vs separate apps
+
+**Recommendation: one app, game selector.**
+
+| Factor                | One app                                      | Separate apps                         |
+| --------------------- | -------------------------------------------- | ------------------------------------- |
+| Shared infrastructure | Reuses scanner, OCR, CLIP pipeline, price UI | Duplicated across codebases           |
+| Maintenance           | One codebase to update                       | Bug fixes must be applied N times     |
+| User experience       | Switch games without reinstalling            | Simpler per-app, no context switching |
+| Store presence        | One listing (easier discovery)               | Separate listings (cleaner branding)  |
+| Backend               | One container,`game` column already in DB  | Separate deploys                      |
+
+The `cards` table already has a `game` column. OCR search already filters by `Card.game`. The scanner and price UI are game-agnostic. A game selector dropdown or tab on the main screen is the only UI addition needed.
+
+#### CLIP model: one shared model vs separate models
+
+**Recommendation: one shared model, trained on combined pairs.**
+
+The domain gap being closed is the same for both games — JPEG compression artifacts, perspective warp, color cast, real background clutter vs clean digital art. The visual encoder learning to handle this for Pokémon cards transfers directly to One Piece cards. Separate models would double memory usage and require switching models at scan time.
+
+**Cross-game contamination risk:** Vector search currently filters by `language` only, not `game`. Without a fix, a One Piece scan could return Pokémon candidates if their embeddings are nearby. **Fix needed before shipping One Piece:** add `Card.game == game` to the WHERE clause in `_vector_search` in `backend/app/api/v1/scan.py` (game is already available from OCR hints at line ~274). One line.
+
+#### Catastrophic forgetting when adding One Piece
+
+Training the CLIP visual encoder on One Piece pairs alone after Pokémon fine-tuning will cause **knowledge drift** — gradient updates driven entirely by One Piece data will shift the weights away from Pokémon-specific adaptations. In practice the drift is mild (the domain gap type is the same; base CLIP weights act as a strong prior), but it cannot be assumed safe.
+
+**Correct approach: train on combined Pokémon + One Piece pairs simultaneously.**
+
+Since pairs are saved to disk via `--generate-pairs`, they can be merged before training:
+
+```bash
+# 1. Generate Pokémon pairs (already done — training/clip_pairs/pokemon/)
+
+# 2. Generate One Piece pairs
+python scripts/fine_tune_clip.py \
+    --generate-pairs training/clip_pairs/one_piece \
+    --dataset "/one_piece_cards" --backgrounds "/backgrounds" --pairs-per-card 4
+
+# 3. Merge both into a single flat dataset (renumbers files, updates manifest)
+python scripts/merge_clip_pairs.py \
+    training/clip_pairs/pokemon \
+    training/clip_pairs/one_piece \
+    training/clip_pairs/combined
+
+# 4. Train once on the merged set, resuming from existing checkpoint
+python scripts/fine_tune_clip.py \
+    --pairs-dir training/clip_pairs/combined \
+    --output backend/models/clip_finetuned.pt \
+    --resume backend/models/clip_finetuned.pt \
+    --epochs 10
+```
+
+`scripts/merge_clip_pairs.py` does not exist yet — needs to be written (~30 lines: copy files, renumber, merge manifests).
+
+**Game ratio is automatic:** If Pokémon has ~80k pairs and One Piece has ~20k, training naturally weights Pokémon 4:1. Adjust `--pairs-per-card` at generation time to tune the ratio.
+
+#### One Piece OCR gaps (not yet implemented)
+
+- `_find_trainer_name` covers EN Pokémon trainer/item/supporter keywords — One Piece has different card types (Event, Stage, Leader, Character, Don!!). Needs OP-specific keyword list.
+- `_find_kana_name` / `_find_jp_trainer_name` would cover JP One Piece cards if loaded as `language='ja'` DB records.
+- Card number format differs (e.g. `OP01-001`) — `_search_db` number extraction regex may need updating.
+- PriceCharting URL slug patterns for One Piece sets need verification before the price scraper can be used.
+
+#### One Piece data sources
+
+- **Card images/metadata**: onepiece-cardgame.com official card database, or community APIs (e.g. op-tcg-data)
+- **EN cards**: direct pokemontcg.io equivalent does not exist; may need community dataset or scraping
+- **JP cards**: TCGCollector may cover One Piece — check `https://www.tcgcollector.com/cards/jp` for OP sets
+- **Prices**: PriceCharting covers One Piece — URL pattern `pricecharting.com/game/one-piece-{set-slug}/{card-slug}`
+
+---
+
 ### Known Limitations (no fix planned)
 
-| Issue                                     | Notes                                                                                                                                      |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Older JP sets price 404 on PriceCharting  | Pre-2003 JP sets use Pokédex number not set position (e.g. Gastly #92 not #49). Would need a lookup table or scrape-based URL discovery.  |
-| JP Abra (kana-heavy cards) not detected   | OCR confidence < 3 + image sim < 0.50 floor → 0 candidates. Fundamental limitation — scan separately with better conditions.             |
-| Holofoil image AI unreliable              | Reflective surfaces produce visual appearances impossible to synthesize. CLIP fine-tuning didn't close this gap. Use OCR or Combined mode. |
-| Items with digits in name (Pokégear 3.0) | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case.                                                         |
+| Issue                                           | Notes                                                                                                                                                                                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Older JP sets price 404 on PriceCharting        | Pre-2003 JP sets use Pokédex number not set position (e.g. Gastly #92 not #49). Would need a lookup table or scrape-based URL discovery.                                                                                                        |
+| JP Abra (kana-heavy cards) not detected         | OCR confidence < 3 + image sim < 0.50 floor → 0 candidates. Fundamental limitation — scan separately with better conditions.                                                                                                                   |
+| Holofoil image AI unreliable                    | Reflective surfaces produce visual appearances impossible to synthesize. CLIP fine-tuning didn't close this gap. Use OCR or Combined mode.                                                                                                       |
+| Items with digits in name (Pokégear 3.0)       | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case.                                                                                                                                                               |
+| Badge boxes too tall on Android (multi-results) | Android `includeFontPadding: true` default adds extra vertical space to all `Text` inside badge pills (emoji, card number, rarity). Workaround `includeFontPadding: false` applied but may not fully resolve on all devices. Low priority. |
 
 ---
 
@@ -555,6 +788,23 @@ A chronological record of major technical decisions, for portfolio and reference
 - Training on RTX 3080 (GPU); ~6-9s/batch with 4 DataLoader workers, ~1.5hr/epoch, ~15hr total
 - **Monitor training:** `docker exec -it tcg_backend tail -f /tmp/finetune.log`
 - **After training:** run `python scripts/build_embeddings.py --dataset /en_cards --force` to re-embed all 20k cards with fine-tuned weights
+- **Offline pair generation** (recommended for reproducibility and multi-game support):
+  ```bash
+  # 1. Generate pairs once per game (CPU, no GPU needed, saves to disk)
+  python scripts/fine_tune_clip.py \
+      --generate-pairs training/clip_pairs/pokemon \
+      --dataset "/en_cards" --backgrounds "/backgrounds" --pairs-per-card 4
+  # Saves: training/clip_pairs/pokemon/anchors/{i:06d}.jpg + positives/ + manifest.json
+
+  # 2. Train from saved pairs (deterministic, reproducible)
+  python scripts/fine_tune_clip.py \
+      --pairs-dir training/clip_pairs/pokemon \
+      --output backend/models/clip_finetuned.pt \
+      --resume backend/models/clip_finetuned.pt \
+      --epochs 10
+  ```
+
+  For a second game (e.g. One Piece): generate pairs to `training/clip_pairs/one_piece/`, then train resuming from the existing checkpoint so the model doesn't forget Pokémon.
 - ✅ **Training complete** — 2026-05-18, ~13 hours total
 - ✅ **Re-embedding complete** — 20,187 cards re-embedded with fine-tuned weights, IVFFlat index rebuilt, backend restarted and serving fine-tuned embeddings
 - 50 unembeddable (McDonald's promos CDN 404), 63 embed_failed (same as before), 1 download_failed — no new failures
@@ -835,14 +1085,14 @@ Note: in dim lighting CLIP scores typically sit at 0.55–0.75 regardless of ima
 
 #### Speed test results — Samsung S22+, 12 cards (post-v22)
 
-| Run | First card | All cards | YOLO bucket | OCR prep | Notes |
-|---|---|---|---|---|---|
-| Pre-v21 baseline | 13.97s | 14.36s | 6806ms | 6406ms | v20 reference |
-| v21 (parallel attempt) | 8.15s | 8.59s | 7105ms | 365ms | NNAPI crashed, fell back to backend |
-| v21 (sequential, PNG resize) | 5.91s | 6.28s | 4683ms | 333ms | On-device YOLO working but resize=3000ms |
-| **v22 run 1** | **2.97s** | **3.39s** | **2047ms** | **46ms** | JPEG resize + on-device YOLO |
-| **v22 run 2** | **3.14s** | **3.56s** | **2096ms** | **56ms** | Stable repeat |
-| **v22 post-PIL** | **3.12s** | **3.51s** | **2156ms** | **37ms** | After PIL-direct embedder change |
+| Run                          | First card      | All cards       | YOLO bucket      | OCR prep       | Notes                                    |
+| ---------------------------- | --------------- | --------------- | ---------------- | -------------- | ---------------------------------------- |
+| Pre-v21 baseline             | 13.97s          | 14.36s          | 6806ms           | 6406ms         | v20 reference                            |
+| v21 (parallel attempt)       | 8.15s           | 8.59s           | 7105ms           | 365ms          | NNAPI crashed, fell back to backend      |
+| v21 (sequential, PNG resize) | 5.91s           | 6.28s           | 4683ms           | 333ms          | On-device YOLO working but resize=3000ms |
+| **v22 run 1**          | **2.97s** | **3.39s** | **2047ms** | **46ms** | JPEG resize + on-device YOLO             |
+| **v22 run 2**          | **3.14s** | **3.56s** | **2096ms** | **56ms** | Stable repeat                            |
+| **v22 post-PIL**       | **3.12s** | **3.51s** | **2156ms** | **37ms** | After PIL-direct embedder change         |
 
 `yolo bucket` breakdown (post-v22): resize ~580ms + on-device YOLO ~1050ms (incl. JS preprocessing) + full-image OCR ~600ms.
 
@@ -886,14 +1136,14 @@ Variant picker on card detail screen — horizontal pills that re-fetch prices f
 
 **URL pattern** (verified against real PriceCharting pages): variant suffix inserts between name slug and card number in the card slug; game slug unchanged.
 
-| Variant | Card slug example |
-|---|---|
+| Variant     | Card slug example           |
+| ----------- | --------------------------- |
 | 1st Edition | `charizard-1st-edition-4` |
-| Shadowless | `charizard-shadowless-4` |
-| Poké Ball | `umbreon-poke-ball-59` |
-| Master Ball | `gengar-master-ball-94` |
+| Shadowless  | `charizard-shadowless-4`  |
+| Poké Ball  | `umbreon-poke-ball-59`    |
+| Master Ball | `gengar-master-ball-94`   |
 
-**EN variants**: Normal / 1st Edition / Shadowless / Poké Ball  
+**EN variants**: Normal / 1st Edition / Shadowless / Poké Ball
 **JP variants**: Normal / Poké Ball / Master Ball
 
 **When variant has no price data**: shows "Variant not found on PriceCharting" with a "Search on PriceCharting →" link (opens browser to pre-populated search). URL construction is heuristic — PriceCharting may use different slugs for some cards; the search link lets the user verify manually.

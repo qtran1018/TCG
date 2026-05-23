@@ -1,7 +1,7 @@
 import React from "react";
 import { View, TouchableOpacity, Text, StyleSheet } from "react-native";
-import { COLORS } from "@/constants";
 import type { ScanMode } from "@/hooks/useMultiCardScan";
+import { useColors } from "@/hooks/useColors";
 
 interface Props {
   value: ScanMode;
@@ -9,22 +9,25 @@ interface Props {
 }
 
 const OPTIONS: { key: ScanMode; label: string }[] = [
-  { key: "ocr", label: "OCR Text" },
+  { key: "ocr", label: "OCR" },
   { key: "image", label: "Image AI" },
   { key: "combined", label: "Combined" },
 ];
 
 export function ScanModeToggle({ value, onChange }: Props) {
+  const C = useColors();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: C.bg }]}>
       {OPTIONS.map((o) => (
         <TouchableOpacity
           key={o.key}
-          style={[styles.btn, value === o.key && styles.active]}
+          style={[styles.btn, value === o.key && { backgroundColor: C.accent }]}
           onPress={() => onChange(o.key)}
           activeOpacity={0.75}
         >
-          <Text style={[styles.label, value === o.key && styles.activeLabel]}>{o.label}</Text>
+          <Text style={[styles.label, { color: C.textMuted }, value === o.key && styles.activeLabel]}>
+            {o.label}
+          </Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -32,20 +35,8 @@ export function ScanModeToggle({ value, onChange }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: "row",
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 3,
-    gap: 3,
-  },
-  btn: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  active: { backgroundColor: COLORS.accent },
-  label: { color: COLORS.textMuted, fontSize: 13, fontWeight: "600" },
+  container: { flexDirection: "row", borderRadius: 10, padding: 3, gap: 3 },
+  btn: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 8 },
+  label: { fontSize: 12, fontWeight: "600" },
   activeLabel: { color: "#fff" },
 });

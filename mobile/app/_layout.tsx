@@ -19,6 +19,10 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
+          name="multi-results"
+          options={{ title: "Scan Results", headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
           name="card/[id]"
           options={{ title: "Card Detail", headerBackTitle: "Back" }}
         />

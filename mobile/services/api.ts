@@ -121,6 +121,9 @@ export interface HistoryEntry {
   resolved_card_name?: string;
   price_loose?: number;
   price_graded_10?: number;
+  image_url?: string;
+  set_name?: string;
+  card_number?: string;
   scanned_at: string;
 }
 
@@ -165,6 +168,9 @@ export const api = {
     resolved_card_name?: string;
     price_loose?: number;
     price_graded_10?: number;
+    image_url?: string;
+    set_name?: string;
+    card_number?: string;
   }): Promise<{ id: number }> {
     const { data } = await client.post<{ id: number }>("/cards/history", entry);
     return data;

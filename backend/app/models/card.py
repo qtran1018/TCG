@@ -47,4 +47,7 @@ class ScanHistory(Base):
     resolved_card_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     price_loose: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_graded_10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    set_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    card_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     scanned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

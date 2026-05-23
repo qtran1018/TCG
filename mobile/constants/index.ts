@@ -38,3 +38,20 @@ export const COLORS = {
   pokemon: "#ffcb05",
   onepiece: "#d4151a",
 } as const;
+
+export const LIGHT_COLORS = {
+  bg: "#f2f2f7",
+  surface: "#ffffff",
+  border: "#d8d8e8",
+  accent: "#5a52e0",
+  accentDim: "#e0deff",
+  text: "#0f0f14",
+  textMuted: "#666677",
+  success: "#2a8c56",
+  warning: "#b08000",
+  error: "#c04040",
+  pokemon: "#c49a00",
+  onepiece: "#b01015",
+} as const;
+
+export type ColorSet = typeof COLORS;

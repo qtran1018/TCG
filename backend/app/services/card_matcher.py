@@ -661,7 +661,7 @@ class CardMatcherService:
                     return None
                 return cached
 
-        prices = await self.pc_scraper.get_prices(pc_url)
+        prices = await self.pc_scraper.get_prices(pc_url, recent_sales_limit=100)
         if self._is_empty_prices(prices):
             # Negative result — card not listed on PriceCharting (404 or empty page).
             # Cache so we don't repeatedly hammer the scraper for the same miss.

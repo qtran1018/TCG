@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl,
-  ActivityIndicator,
+  ActivityIndicator, Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -88,15 +88,20 @@ export default function HistoryScreen() {
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <View style={styles.row}>
+            {item.image_url ? (
+              <Image source={{ uri: item.image_url }} style={styles.thumb} resizeMode="contain" />
+            ) : (
+              <View style={[styles.thumb, styles.thumbPlaceholder]} />
+            )}
             <View style={styles.rowLeft}>
               <Text style={styles.cardName} numberOfLines={1}>
                 {item.resolved_card_name ?? "Unknown Card"}
               </Text>
-              <Text style={styles.meta}>
-                {item.game === "pokemon" ? "Pokémon" : "One Piece"} ·{" "}
-                {item.scan_type === "psa" ? "PSA" : "Raw"} ·{" "}
-                {item.language.toUpperCase()} · {timeAgo(item.scanned_at)}
+              <Text style={styles.meta} numberOfLines={1}>
+                {item.set_name ?? (item.game === "pokemon" ? "Pokémon" : "One Piece")}
+                {item.card_number ? ` · ${item.card_number}` : ""}
               </Text>
+              <Text style={styles.metaMuted}>{timeAgo(item.scanned_at)}</Text>
             </View>
             <View style={styles.rowRight}>
               {item.scan_type === "psa" ? (
@@ -128,15 +133,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: COLORS.surface,
     borderRadius: 12,
-    padding: 14,
-    justifyContent: "space-between",
+    padding: 10,
     alignItems: "center",
     borderWidth: 1,
     borderColor: COLORS.border,
+    gap: 10,
   },
-  rowLeft: { flex: 1, gap: 4, paddingRight: 12 },
-  cardName: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
+  thumb: { width: 44, height: 62, borderRadius: 4 },
+  thumbPlaceholder: { backgroundColor: COLORS.border },
+  rowLeft: { flex: 1, gap: 3 },
+  cardName: { color: COLORS.text, fontSize: 14, fontWeight: "600" },
   meta: { color: COLORS.textMuted, fontSize: 11 },
+  metaMuted: { color: COLORS.textMuted, fontSize: 11, opacity: 0.7 },
   rowRight: { alignItems: "flex-end", gap: 2 },
   price: { color: COLORS.success, fontSize: 16, fontWeight: "700" },
   priceLabel: { color: COLORS.textMuted, fontSize: 10 },

@@ -1,11 +1,38 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Linking, ActivityIndicator } from "react-native";
 import { COLORS } from "@/constants";
-import type { PriceOut } from "@/services/api";
+import type { PriceOut, SaleRecord } from "@/services/api";
 import { PriceChart } from "./PriceChart";
 import { saleLinkLabel } from "@/utils/saleLink";
 import { useCurrencyStore } from "@/store/currencyStore";
 import { fmtPrice } from "@/utils/currency";
+
+type SaleFilter = "raw" | "7" | "8" | "9" | "10";
+
+const SALE_FILTERS: { key: SaleFilter; label: string }[] = [
+  { key: "raw", label: "Raw" },
+  { key: "7", label: "G7" },
+  { key: "8", label: "G8" },
+  { key: "9", label: "G9" },
+  { key: "10", label: "PSA 10" },
+];
+
+// Any grading agency keyword — used to exclude from Raw
+const GRADED_RE = /\b(PSA|BGS|CGC|SGC|graded?)\b/i;
+
+const GRADE_RE: Record<string, RegExp> = {
+  "7":  /\b(PSA|BGS|CGC|SGC)[\s\-]?7\b|grade[d]?\s*7\b|\b7\.0\b/i,
+  "8":  /\b(PSA|BGS|CGC|SGC)[\s\-]?8\b|grade[d]?\s*8\b|\b8\.0\b/i,
+  "9":  /\b(PSA|BGS|CGC|SGC)[\s\-]?9\b|grade[d]?\s*9\b|\b9\.0\b/i,
+  "10": /\b(PSA|BGS|CGC|SGC)[\s\-]?10\b|grade[d]?\s*10\b|\b10\.0\b|gem[\s\-]?mint/i,
+};
+
+function filterSales(sales: SaleRecord[], filter: SaleFilter): SaleRecord[] {
+  const filtered = filter === "raw"
+    ? sales.filter((s) => !GRADED_RE.test(s.title))
+    : sales.filter((s) => GRADE_RE[filter].test(s.title));
+  return filtered.slice(0, 10);
+}
 
 interface Props {
   price: PriceOut;
@@ -14,21 +41,24 @@ interface Props {
 
 export function PriceDisplay({ price, scanType }: Props) {
   const { currency, jpyRate, fetching, setCurrency } = useCurrencyStore();
+  const [saleFilter, setSaleFilter] = useState<SaleFilter>("raw");
 
-  const rows =
-    scanType === "psa"
-      ? [
-          { label: "PSA 7", value: price.price_graded_7 },
-          { label: "PSA 8", value: price.price_graded_8 },
-          { label: "PSA 9", value: price.price_graded_9 },
-          { label: "PSA 10", value: price.price_graded_10, highlight: true },
-        ]
-      : [
-          { label: "Market (Raw)", value: price.price_loose, highlight: true },
-        ];
+  const filteredSales = useMemo(
+    () => filterSales(price.recent_sales ?? [], saleFilter),
+    [price.recent_sales, saleFilter],
+  );
+
+  const priceRows = [
+    { label: "Market (Raw)", value: price.price_loose, highlight: scanType === "raw" },
+    { label: "PSA 7",  value: price.price_graded_7,  highlight: false },
+    { label: "PSA 8",  value: price.price_graded_8,  highlight: false },
+    { label: "PSA 9",  value: price.price_graded_9,  highlight: false },
+    { label: "PSA 10", value: price.price_graded_10, highlight: scanType === "psa" },
+  ];
 
   return (
     <View style={styles.container}>
+      {/* Heading + currency toggle */}
       <View style={styles.headingRow}>
         <Text style={styles.heading}>Pricing</Text>
         <View style={styles.toggle}>
@@ -51,7 +81,8 @@ export function PriceDisplay({ price, scanType }: Props) {
         </View>
       </View>
 
-      {rows.map((row) => (
+      {/* Price rows — always show all grades */}
+      {priceRows.map((row) => (
         <View key={row.label} style={styles.row}>
           <Text style={styles.label}>{row.label}</Text>
           <Text style={[styles.value, row.highlight && styles.highlight]}>
@@ -59,34 +90,62 @@ export function PriceDisplay({ price, scanType }: Props) {
           </Text>
         </View>
       ))}
-      <Text style={styles.source}>Source: PriceCharting · {currency === "JPY" ? `1 USD = ¥${jpyRate?.toFixed(0) ?? "…"}` : "USD"}</Text>
+      <Text style={styles.source}>
+        Source: PriceCharting · {currency === "JPY" ? `1 USD = ¥${jpyRate?.toFixed(0) ?? "…"}` : "USD"}
+      </Text>
 
-      {price.recent_sales && price.recent_sales.length > 0 && (
-        <View style={styles.salesSection}>
-          <Text style={styles.salesHeading}>Recent Sales</Text>
-          {price.recent_sales.map((sale, i) => (
-            <View key={i} style={styles.saleRow}>
-              <View style={styles.saleMeta}>
-                <Text style={styles.saleDate}>{sale.date}</Text>
-                <Text style={styles.saleTitle} numberOfLines={1}>{sale.title}</Text>
-              </View>
-              <View style={styles.salePriceWrap}>
-                <Text style={styles.salePrice}>{fmtPrice(sale.price, currency, jpyRate)}</Text>
-                {sale.url && (
-                  <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch((e) => console.warn("[price-display] openURL failed:", sale.url, e))}>
-                    <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-
+      {/* Trend chart — above recent sales */}
       {scanType === "psa"
         ? <PriceChart history={price.price_history_graded ?? []} label="Graded Price Trend" currency={currency} jpyRate={jpyRate} />
         : <PriceChart history={price.price_history_ungraded ?? []} label="Ungraded Price Trend" currency={currency} jpyRate={jpyRate} />
       }
+
+      {/* Recent sales with grade filter */}
+      {price.recent_sales && price.recent_sales.length > 0 && (
+        <View style={styles.salesSection}>
+          <View style={styles.salesHeaderRow}>
+            <Text style={styles.salesHeading}>Recent Sales</Text>
+          </View>
+
+          {/* Filter tabs */}
+          <View style={styles.filterRow}>
+            {SALE_FILTERS.map((f) => (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.filterTab, saleFilter === f.key && styles.filterTabActive]}
+                onPress={() => setSaleFilter(f.key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.filterTabText, saleFilter === f.key && styles.filterTabTextActive]}>
+                  {f.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {filteredSales.length === 0 ? (
+            <Text style={styles.noSales}>No recent {saleFilter === "raw" ? "raw" : `PSA ${saleFilter}`} sales found.</Text>
+          ) : (
+            filteredSales.map((sale, i) => (
+              <View key={i} style={styles.saleRow}>
+                <View style={styles.saleMeta}>
+                  <Text style={styles.saleDate}>{sale.date}</Text>
+                  <Text style={styles.saleTitle} numberOfLines={1}>{sale.title}</Text>
+                </View>
+                <View style={styles.salePriceWrap}>
+                  <Text style={styles.salePrice}>{fmtPrice(sale.price, currency, jpyRate)}</Text>
+                  {sale.url && (
+                    <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch(() => {})}>
+                      <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
     </View>
   );
 }
@@ -106,11 +165,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-  heading: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: "700",
-  },
+  heading: { color: COLORS.text, fontSize: 16, fontWeight: "700" },
   toggle: {
     flexDirection: "row",
     backgroundColor: COLORS.bg,
@@ -126,17 +181,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  toggleBtnActive: {
-    backgroundColor: COLORS.accent,
-  },
-  toggleText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  toggleTextActive: {
-    color: "#fff",
-  },
+  toggleBtnActive: { backgroundColor: COLORS.accent },
+  toggleText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  toggleTextActive: { color: "#fff" },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -147,24 +194,47 @@ const styles = StyleSheet.create({
   label: { color: COLORS.textMuted, fontSize: 14 },
   value: { color: COLORS.text, fontSize: 14, fontWeight: "600" },
   highlight: { color: COLORS.success, fontSize: 15, fontWeight: "700" },
-  source: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 8,
-    textAlign: "right",
-  },
+  source: { color: COLORS.textMuted, fontSize: 11, marginTop: 8, textAlign: "right" },
+
   salesSection: {
     marginTop: 16,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     paddingTop: 12,
   },
-  salesHeading: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 8,
+  salesHeaderRow: {
+    marginBottom: 10,
   },
+  salesHeading: { color: COLORS.text, fontSize: 14, fontWeight: "700" },
+
+  filterRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 10,
+    flexWrap: "wrap",
+  },
+  filterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
+  },
+  filterTabActive: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  filterTabText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  filterTabTextActive: { color: "#fff" },
+
+  noSales: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontStyle: "italic",
+    paddingVertical: 8,
+  },
+
   saleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -174,30 +244,10 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
     gap: 8,
   },
-  saleMeta: {
-    flex: 1,
-  },
-  saleDate: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-  },
-  saleTitle: {
-    color: COLORS.text,
-    fontSize: 12,
-  },
-  salePriceWrap: {
-    alignItems: "flex-end",
-    gap: 2,
-    flexShrink: 0,
-  },
-  salePrice: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  saleLink: {
-    color: COLORS.accent,
-    fontSize: 11,
-    fontWeight: "600",
-  },
+  saleMeta: { flex: 1 },
+  saleDate: { color: COLORS.textMuted, fontSize: 11 },
+  saleTitle: { color: COLORS.text, fontSize: 12 },
+  salePriceWrap: { alignItems: "flex-end", gap: 2, flexShrink: 0 },
+  salePrice: { color: COLORS.text, fontSize: 13, fontWeight: "600" },
+  saleLink: { color: COLORS.accent, fontSize: 11, fontWeight: "600" },
 });

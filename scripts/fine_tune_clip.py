@@ -11,8 +11,30 @@ art CLIP was originally trained on. Each training pair is:
 InfoNCE contrastive loss pulls (anchor, positive) together and pushes apart non-matching
 pairs within the same batch.
 
-Usage (inside Docker container or locally with GPU):
-    # Resume from existing fine-tuned weights (default — recommended for incremental retrains):
+Workflows:
+
+1. Generate pairs offline (run once per game, CPU-friendly, saves to disk):
+    python scripts/fine_tune_clip.py \
+        --generate-pairs training/clip_pairs/pokemon \
+        --dataset "/en_cards" \
+        --backgrounds "/backgrounds" \
+        --pairs-per-card 4
+
+   Saves anchors to training/clip_pairs/pokemon/anchors/{i:06d}.jpg
+   and positives to training/clip_pairs/pokemon/positives/{i:06d}.jpg.
+   Also writes training/clip_pairs/pokemon/manifest.json with metadata.
+   For multiple games, run separately (e.g. --generate-pairs training/clip_pairs/one_piece).
+
+2. Train from saved pairs (GPU, deterministic and reproducible):
+    python scripts/fine_tune_clip.py \
+        --pairs-dir training/clip_pairs/pokemon \
+        --output backend/models/clip_finetuned.pt \
+        --resume backend/models/clip_finetuned.pt \
+        --epochs 10
+
+   Multiple games: merge directories or pass multiple --pairs-dir (run twice, resuming).
+
+3. On-the-fly training (original mode, non-deterministic):
     python scripts/fine_tune_clip.py \
         --dataset "/en_cards" \
         --backgrounds "/backgrounds" \
@@ -38,6 +60,7 @@ After training, re-run build_embeddings.py --force to re-embed all cards with th
 
 import argparse
 import io
+import json
 import logging
 import math
 import random
@@ -255,6 +278,134 @@ def collect_card_paths(dataset_root: Path) -> list[Path]:
 
 
 # ---------------------------------------------------------------------------
+# Offline pair generation + dataset
+# ---------------------------------------------------------------------------
+
+def generate_pairs(
+    dataset_root: Path,
+    bg_root: Path,
+    output_dir: Path,
+    pairs_per_card: int = 4,
+) -> None:
+    """
+    Generate anchor+positive pairs and save them to disk as JPEG files.
+
+    Directory layout:
+        output_dir/anchors/{i:06d}.jpg   — art-region crop of clean card
+        output_dir/positives/{i:06d}.jpg — augmented composite (simulated photo)
+        output_dir/manifest.json         — metadata (card count, pairs, backgrounds)
+
+    Run once per game. Subsequent training runs load from --pairs-dir instead of
+    re-generating on the fly, making training fully deterministic and reproducible.
+    """
+    card_paths = collect_card_paths(dataset_root)
+    if not card_paths:
+        logger.error("No card images found in %s", dataset_root)
+        sys.exit(1)
+
+    bg_paths = [p for p in bg_root.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+    if not bg_paths:
+        logger.error("No background images found in %s", bg_root)
+        sys.exit(1)
+
+    bgs = []
+    for p in bg_paths:
+        try:
+            bgs.append(Image.open(p).convert("RGB"))
+        except Exception as e:
+            logger.warning("Could not load background %s: %s", p, e)
+    if not bgs:
+        raise RuntimeError("No background images loaded")
+
+    anchor_dir = output_dir / "anchors"
+    positive_dir = output_dir / "positives"
+    anchor_dir.mkdir(parents=True, exist_ok=True)
+    positive_dir.mkdir(parents=True, exist_ok=True)
+
+    total = len(card_paths) * pairs_per_card
+    logger.info(
+        "Generating %d pairs (%d cards × %d) → %s",
+        total, len(card_paths), pairs_per_card, output_dir,
+    )
+
+    idx = 0
+    skipped = 0
+    for card_path in card_paths:
+        try:
+            card_img = Image.open(card_path).convert("RGB")
+        except Exception as e:
+            logger.debug("Skipping %s: %s", card_path, e)
+            skipped += 1
+            continue
+
+        anchor_img = _crop_art(card_img)
+
+        for _ in range(pairs_per_card):
+            bg = random.choice(bgs)
+            positive_img = augment(card_img, bg)
+            positive_cropped = _crop_art(positive_img)
+
+            anchor_img.save(anchor_dir / f"{idx:06d}.jpg", format="JPEG", quality=95)
+            positive_cropped.save(positive_dir / f"{idx:06d}.jpg", format="JPEG", quality=95)
+            idx += 1
+
+        if idx % 1000 == 0 and idx > 0:
+            logger.info("  %d / %d pairs written", idx, total)
+
+    manifest = {
+        "total_pairs": idx,
+        "cards": len(card_paths),
+        "skipped_cards": skipped,
+        "pairs_per_card": pairs_per_card,
+        "dataset_root": str(dataset_root),
+        "backgrounds": [str(p) for p in bg_paths],
+    }
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    logger.info("Done. %d pairs written, %d cards skipped. Manifest: %s/manifest.json", idx, skipped, output_dir)
+
+
+class GeneratedPairDataset(Dataset):
+    """
+    Reads pre-generated anchor+positive pairs from disk and applies CLIP preprocess at load time.
+
+    Expects:
+        pairs_dir/anchors/{i:06d}.jpg
+        pairs_dir/positives/{i:06d}.jpg
+    """
+
+    def __init__(self, pairs_dir: Path, preprocess):
+        self.anchor_dir = pairs_dir / "anchors"
+        self.positive_dir = pairs_dir / "positives"
+
+        manifest_path = pairs_dir / "manifest.json"
+        if manifest_path.exists():
+            meta = json.loads(manifest_path.read_text())
+            self.length = meta["total_pairs"]
+            logger.info(
+                "GeneratedPairDataset: %d pairs from %s (%d cards)",
+                self.length, pairs_dir, meta["cards"],
+            )
+        else:
+            self.length = len(list(self.anchor_dir.glob("*.jpg")))
+            logger.info("GeneratedPairDataset: %d pairs (no manifest)", self.length)
+
+        self.preprocess = preprocess
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        try:
+            anchor = self.preprocess(Image.open(self.anchor_dir / f"{idx:06d}.jpg").convert("RGB"))
+            positive = self.preprocess(Image.open(self.positive_dir / f"{idx:06d}.jpg").convert("RGB"))
+            return anchor, positive
+        except Exception as e:
+            logger.debug("Failed to load pair %d: %s — returning zeros", idx, e)
+            dummy = torch.zeros(3, 224, 224)
+            return dummy, dummy
+
+
+# ---------------------------------------------------------------------------
 # InfoNCE loss
 # ---------------------------------------------------------------------------
 
@@ -291,6 +442,7 @@ def train(
     temperature: float,
     checkpoint_every: int,
     resume_from: Path | None = None,
+    pairs_dir: Path | None = None,
 ):
     import open_clip
 
@@ -315,18 +467,21 @@ def train(
     total = sum(p.numel() for p in model.parameters())
     logger.info("Trainable params: %d / %d (visual encoder only)", trainable, total)
 
-    card_paths = collect_card_paths(dataset_root)
-    if not card_paths:
-        logger.error("No card images found in %s", dataset_root)
-        sys.exit(1)
-    logger.info("Found %d card images", len(card_paths))
+    if pairs_dir is not None:
+        dataset = GeneratedPairDataset(pairs_dir, preprocess)
+    else:
+        card_paths = collect_card_paths(dataset_root)
+        if not card_paths:
+            logger.error("No card images found in %s", dataset_root)
+            sys.exit(1)
+        logger.info("Found %d card images", len(card_paths))
 
-    bg_paths = [p for p in bg_root.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
-    if not bg_paths:
-        logger.error("No background images found in %s", bg_root)
-        sys.exit(1)
+        bg_paths = [p for p in bg_root.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+        if not bg_paths:
+            logger.error("No background images found in %s", bg_root)
+            sys.exit(1)
 
-    dataset = CardPairDataset(card_paths, bg_paths, preprocess, pairs_per_card=pairs_per_card)
+        dataset = CardPairDataset(card_paths, bg_paths, preprocess, pairs_per_card=pairs_per_card)
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -446,7 +601,32 @@ if __name__ == "__main__":
         help="Path to existing fine-tuned visual encoder weights to resume from. "
              "Pass --resume '' to force training from base CLIP.",
     )
+    parser.add_argument(
+        "--generate-pairs",
+        type=Path,
+        default=None,
+        metavar="OUTPUT_DIR",
+        help="Generate anchor+positive pairs and save to OUTPUT_DIR, then exit. "
+             "Requires --dataset and --backgrounds. Does not train.",
+    )
+    parser.add_argument(
+        "--pairs-dir",
+        type=Path,
+        default=None,
+        metavar="INPUT_DIR",
+        help="Use pre-generated pairs from this directory instead of on-the-fly augmentation. "
+             "Generated by --generate-pairs. Makes training deterministic and reproducible.",
+    )
     args = parser.parse_args()
+
+    if args.generate_pairs is not None:
+        generate_pairs(
+            dataset_root=args.dataset,
+            bg_root=args.backgrounds,
+            output_dir=args.generate_pairs,
+            pairs_per_card=args.pairs_per_card,
+        )
+        sys.exit(0)
 
     train(
         dataset_root=args.dataset,
@@ -459,4 +639,5 @@ if __name__ == "__main__":
         temperature=args.temperature,
         checkpoint_every=args.checkpoint_every,
         resume_from=args.resume if args.resume else None,
+        pairs_dir=args.pairs_dir,
     )

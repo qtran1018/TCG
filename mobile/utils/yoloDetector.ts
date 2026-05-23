@@ -20,6 +20,7 @@ const ANCHORS = 8400;
 
 let _model: TfliteModel | null = null;
 let _modelPromise: Promise<TfliteModel | null> | null = null;
+let _modelUri: string | null = null;
 
 // Try delegates in preference order. On Android, NNAPI routes to whatever
 // accelerator is available (Hexagon DSP / NPU / GPU) — on Snapdragon 8 Gen 1
@@ -43,6 +44,7 @@ async function getModel(): Promise<TfliteModel | null> {
       await asset.downloadAsync();
       localUri = asset.localUri ?? asset.uri;
       console.log('[YOLO] loading model from:', localUri);
+      _modelUri = localUri;
     } catch (e) {
       console.error('[YOLO] asset resolve failed:', e);
       _modelPromise = null;
@@ -111,14 +113,28 @@ export async function detectCardsWithYolo(
     } catch (runErr) {
       // NNAPI can throw "Value is undefined, expected an Object" when the cached native
       // model handle goes stale (fast refresh, app backgrounding, GC of native side).
-      // Reset the module cache and retry once with a fresh load — second call usually
-      // succeeds because the reload picks up a valid handle.
+      // Reset cache and retry — if NNAPI is fully gone, force CPU delegate as last resort.
       console.warn('[YOLO] run failed, resetting model cache and retrying:', runErr);
       _model = null;
       _modelPromise = null;
-      const fresh = await getModel();
+      let fresh = await getModel();
       if (!fresh) return null;
-      outputs = await fresh.run([input]);
+      try {
+        outputs = await fresh.run([input]);
+      } catch (retryErr) {
+        // NNAPI fully invalidated — force CPU delegate as last resort
+        console.warn('[YOLO] retry failed, forcing CPU delegate:', retryErr);
+        _model = null;
+        _modelPromise = null;
+        if (!_modelUri) return null;
+        try {
+          const cpu = await loadTensorflowModel({ url: _modelUri }, 'default');
+          _model = cpu;
+          outputs = await cpu.run([input]);
+        } catch {
+          return null;
+        }
+      }
     }
     const output = outputs[0] instanceof Float32Array ? outputs[0] : new Float32Array(outputs[0]!);
 

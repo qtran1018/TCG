@@ -5,8 +5,10 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import { useScanStore } from "@/store/scanStore";
+import { useSavedCardsStore } from "@/store/savedCardsStore";
 import { COLORS } from "@/constants";
 import type { CardOut } from "@/services/api";
 import type { BatchPriceCard, DetectedCard } from "@/types/scan";
@@ -23,7 +25,31 @@ export default function MultiResultsScreen() {
     multiScanTotalRegions,
     scanTiming,
     setBatchPriceCards,
+    game,
   } = useScanStore();
+
+  const { cards: savedCards, save: saveCard, remove: removeCard } = useSavedCardsStore();
+  const savedIds = useMemo(() => new Set(savedCards.map((c) => c.id)), [savedCards]);
+
+  const handleToggleSave = useCallback(
+    (card: CardOut) => {
+      if (savedIds.has(card.id)) {
+        removeCard(card.id);
+      } else {
+        saveCard({
+          id: card.id,
+          name: card.name,
+          set_name: card.set_name ?? "",
+          card_number: card.card_number ?? "",
+          image_url: card.image_url ?? null,
+          language: card.language,
+          game,
+          savedAt: new Date().toISOString(),
+        });
+      }
+    },
+    [savedIds, saveCard, removeCard, game],
+  );
 
   const cards = multiScanResult?.cards ?? [];
 
@@ -107,23 +133,28 @@ export default function MultiResultsScreen() {
   // forces CellRenderer re-renders. Without this, VirtualizedList skips updating
   // visible cells because the `cards` array reference is stable after the scan.
   const flatListExtraData = useMemo(
-    () => ({ selections, checkedIndices }),
-    [selections, checkedIndices],
+    () => ({ selections, checkedIndices, savedIds }),
+    [selections, checkedIndices, savedIds],
   );
 
   const renderItem = useCallback(
-    ({ item: dc, index }: { item: DetectedCard; index: number }) => (
-      <ResultRow
-        dc={dc}
-        index={index}
-        isChecked={checkedIndices.has(dc.regionIndex)}
-        selected={getSelected(dc)}
-        onToggle={toggleCheck}
-        onView={handleViewCard}
-        onSwap={handleOpenSwap}
-      />
-    ),
-    [checkedIndices, getSelected, toggleCheck, handleViewCard, handleOpenSwap],
+    ({ item: dc, index }: { item: DetectedCard; index: number }) => {
+      const card = getSelected(dc);
+      return (
+        <ResultRow
+          dc={dc}
+          index={index}
+          isChecked={checkedIndices.has(dc.regionIndex)}
+          selected={card}
+          isSaved={card ? savedIds.has(card.id) : false}
+          onToggle={toggleCheck}
+          onView={handleViewCard}
+          onSwap={handleOpenSwap}
+          onToggleSave={handleToggleSave}
+        />
+      );
+    },
+    [checkedIndices, savedIds, getSelected, toggleCheck, handleViewCard, handleOpenSwap, handleToggleSave],
   );
 
   // Loading state — navigated here before scan completed, no cards yet
@@ -259,7 +290,7 @@ export default function MultiResultsScreen() {
                   <View style={styles.modalInfo}>
                     <Text style={styles.modalName} numberOfLines={2}>{c.name}</Text>
                     <Text style={styles.modalSet} numberOfLines={1}>{c.set_name}</Text>
-                    {c.card_number && <Text style={styles.badge}>#{c.card_number}</Text>}
+                    {c.card_number && <Text style={styles.badge}>{c.card_number}</Text>}
                   </View>
                 </TouchableOpacity>
               ))}
@@ -278,19 +309,18 @@ interface ResultRowProps {
   dc: DetectedCard;
   index: number;
   isChecked: boolean;
+  isSaved: boolean;
   selected: CardOut | undefined;
   onToggle: (regionIndex: number) => void;
   onView: (card: CardOut, dc: DetectedCard) => void;
   onSwap: (dc: DetectedCard) => void;
+  onToggleSave: (card: CardOut) => void;
 }
 
 const ResultRow = React.memo(function ResultRow({
-  dc, index, isChecked, selected, onToggle, onView, onSwap,
+  dc, index, isChecked, isSaved, selected, onToggle, onView, onSwap, onToggleSave,
 }: ResultRowProps) {
-  const displayCardNumber =
-    selected?.language === "ja" && dc.cardNumber
-      ? dc.setTotal ? `${dc.cardNumber}/${dc.setTotal}` : dc.cardNumber
-      : selected?.card_number;
+  const displayCardNumber = selected?.card_number;
   const hasAlternates = dc.searchResult.candidates.length > 1;
   return (
     <TouchableOpacity
@@ -318,6 +348,19 @@ const ResultRow = React.memo(function ResultRow({
           </Text>
         )}
         <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
+        {selected && (
+          <TouchableOpacity
+            onPress={(e) => { e.stopPropagation?.(); onToggleSave(selected); }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            style={styles.bookmarkBtn}
+          >
+            <Ionicons
+              name={isSaved ? "bookmark" : "bookmark-outline"}
+              size={18}
+              color={isSaved ? COLORS.accent : COLORS.textMuted}
+            />
+          </TouchableOpacity>
+        )}
       </View>
       <View style={styles.cardRow}>
         {selected?.image_url ? (
@@ -339,7 +382,7 @@ const ResultRow = React.memo(function ResultRow({
               </Text>
             )}
             {displayCardNumber && (
-              <Text style={styles.badge}>#{displayCardNumber}</Text>
+              <Text style={styles.badge}>{displayCardNumber}</Text>
             )}
             {selected?.rarity && (
               <Text style={styles.badge}>{selected.rarity}</Text>
@@ -427,6 +470,7 @@ const styles = StyleSheet.create({
   sourceImageLow: { color: "#94a3b8", backgroundColor: "rgba(148,163,184,0.15)" },
   sourceOcr: { color: "#f59e0b", backgroundColor: "rgba(245,158,11,0.15)" },
   queryUsed: { color: COLORS.textMuted, fontSize: 11, flex: 1, textAlign: "right", marginLeft: 8 },
+  bookmarkBtn: { marginLeft: 8 },
   cardRow: { flexDirection: "row", gap: 12 },
   image: { width: 72, height: 100, borderRadius: 6 },
   imagePlaceholder: {
@@ -443,6 +487,7 @@ const styles = StyleSheet.create({
     color: COLORS.accent, fontSize: 11,
     backgroundColor: "rgba(108,99,255,0.15)",
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    includeFontPadding: false,
   },
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   viewBtn: {

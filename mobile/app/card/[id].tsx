@@ -3,11 +3,12 @@ import {
   View, Text, ScrollView, StyleSheet, Image,
   ActivityIndicator, TouchableOpacity, Linking,
 } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PriceDisplay } from "@/components/Card/PriceDisplay";
 import { api, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
+import type { Game, Language } from "@/constants";
 import { COLORS } from "@/constants";
 
 const EN_VARIANTS = [
@@ -49,6 +50,22 @@ export default function CardDetailScreen() {
       .then((result) => {
         if (isSpeedTest) setDetailMs(Date.now() - t0);
         setData(result);
+        // Save to history only on the initial normal-variant load with a real price.
+        // Refreshes, variant switches, and speed tests are excluded.
+        if (!refresh && !isSpeedTest && variant === "normal" && result.price) {
+          api.saveHistory({
+            card_id: result.card.id,
+            game: result.card.game as Game,
+            scan_type: scanType,
+            language: result.card.language as Language,
+            resolved_card_name: result.card.name,
+            price_loose: result.price.price_loose ?? undefined,
+            price_graded_10: result.price.price_graded_10 ?? undefined,
+            image_url: result.card.image_url ?? undefined,
+            set_name: result.card.set_name ?? undefined,
+            card_number: result.card.card_number ?? undefined,
+          }).catch(() => {}); // fire-and-forget, don't surface history errors to user
+        }
       })
       .catch((e) => setError(e?.message ?? "Failed to load card"))
       .finally(() => { setIsLoading(false); setIsRefreshing(false); });
@@ -89,6 +106,23 @@ export default function CardDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() => loadCard(true)}
+              disabled={isRefreshing}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ marginRight: 4 }}
+            >
+              {isRefreshing
+                ? <ActivityIndicator size="small" color={COLORS.accent} />
+                : <Text style={styles.headerRefreshBtn}>↻ Refresh</Text>
+              }
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <ScrollView contentContainerStyle={styles.content}>
         {isSpeedTest && detailMs !== null && (
           <View style={styles.timingBanner}>
@@ -139,19 +173,7 @@ export default function CardDetailScreen() {
         </View>
 
         {price ? (
-          <>
-            <PriceDisplay price={price} scanType={scanType} />
-            <TouchableOpacity
-              style={styles.reloadBtn}
-              onPress={() => loadCard(true)}
-              disabled={isRefreshing}
-            >
-              {isRefreshing
-                ? <ActivityIndicator size="small" color={COLORS.accent} />
-                : <Text style={styles.reloadText}>↻ Refresh price</Text>
-              }
-            </TouchableOpacity>
-          </>
+          <PriceDisplay price={price} scanType={scanType} />
         ) : (
           <View style={styles.noPriceBox}>
             {selectedVariant !== "normal" ? (
@@ -254,6 +276,7 @@ const styles = StyleSheet.create({
   noPriceText: { color: COLORS.textMuted, fontSize: 14 },
   reloadBtn: { alignItems: "center", paddingVertical: 8 },
   reloadText: { color: COLORS.accent, fontSize: 13, fontWeight: "600" },
+  headerRefreshBtn: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
   retryBtn: {
     backgroundColor: COLORS.accent,
     paddingHorizontal: 24,
