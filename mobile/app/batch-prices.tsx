@@ -172,6 +172,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
         <Text style={styles.cardName} numberOfLines={2}>{data?.card?.name ?? card.name}</Text>
         {(data?.card?.set_name ?? card.set_name) && <Text style={styles.cardSet} numberOfLines={1}>{data?.card?.set_name ?? card.set_name}</Text>}
         <View style={styles.badges}>
+          <Text style={styles.badge}>{card.language === "ja" ? "🇯🇵" : "🇺🇸"}</Text>
           {(jaCardNumber ?? card.card_number) && (
             <Text style={styles.badge}>#{card.language === "ja" && jaCardNumber ? jaCardNumber : card.card_number}</Text>
           )}

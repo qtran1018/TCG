@@ -159,11 +159,22 @@ async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depend
             price=price_out,
         )
 
+    async def fetch_one_at(idx: int, card_id: int) -> tuple[int, BatchPricesItem]:
+        return (idx, await fetch_one(card_id))
+
     async def generate():
-        tasks = [asyncio.ensure_future(fetch_one(cid)) for cid in card_ids]
+        # All fetches run concurrently but results are emitted in the original
+        # request order — completed-out-of-order items are buffered until their
+        # predecessors have been yielded, so the client sees top-to-bottom loading.
+        tasks = [asyncio.ensure_future(fetch_one_at(i, cid)) for i, cid in enumerate(card_ids)]
+        pending: dict[int, str] = {}
+        next_emit = 0
         for fut in asyncio.as_completed(tasks):
-            item = await fut
-            yield item.model_dump_json() + "\n"
+            idx, item = await fut
+            pending[idx] = item.model_dump_json() + "\n"
+            while next_emit in pending:
+                yield pending.pop(next_emit)
+                next_emit += 1
         await db.commit()
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")

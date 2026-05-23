@@ -31,13 +31,13 @@ _(All previously partial items now resolved — see §1.12 and §5.1 below.)_
 
 ### Not Yet Addressed
 
-| #            | Item                                                                                  | Description                   | Section         |
-| ------------ | ------------------------------------------------------------------------------------- | ----------------------------- | --------------- |
-| §6 stubs    | `pop_higher` field on PSA scraper                                                   | Scaffold left unimplemented   | §6 Unused Code |
-| R2.10        | Cache base64-wrapped gzip wastes ~33% Redis memory                                   | Low-impact, deferred          | Round 2         |
-| R2.11        | `_dedupe_and_rank` rebuilds `matching_set_codes` per call                           | Low-impact, deferred          | Round 2         |
-| R2.12        | `scanStream responseText.slice` is O(n) per onprogress                              | Negligible at current scale   | Round 2         |
-| R2.13        | `_vector_search` opens new session per crop                                          | Marginal with asyncpg pooling | Round 2         |
+| #         | Item                                                              | Current assessment                                                                                   | Action          |
+| --------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------- |
+| §6 stubs  | `pop_higher` field on PSA scraper                                | Scraper correctly parses and sets the field; it is **not exposed** in `PSACertResult` schema or API — value is computed and silently dropped. Dead code in the meaningful sense. | Delete or add to schema |
+| R2.10     | Cache base64-wrapped gzip wastes ~33% Redis memory               | Still accurate. Requires a second `decode_responses=False` Redis client. Not a bottleneck at single-user scale. | Defer until multi-user |
+| R2.11     | `_dedupe_and_rank` rebuilds `matching_set_codes` per call        | Still accurate. Cost is microseconds (iterating a 172-entry dict on ~10 results). Not measurable.   | Keep deferred   |
+| R2.12     | `responseText.slice` is O(n) per `onprogress`                   | Now applies to both `scanStream` and `streamPrices`. Max payload ~100KB for either stream — O(n²) string slicing is sub-millisecond at this scale. | Keep deferred   |
+| R2.13     | `_vector_search` opens `AsyncSessionLocal()` per crop            | asyncpg pool makes this a pool-slot acquire (~0.1ms), not a real connection. 20 parallel crops = 20 acquires, well within normal operation. | Keep deferred   |
 
 ### ✅ Round 2 (2026-05-21) — implemented
 
