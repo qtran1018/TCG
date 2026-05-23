@@ -389,10 +389,10 @@ Scripts:
 
 ```
 # 1. Generate new synthetic batch
-py -3 scripts/generate_synthetic_yolo.py --cards assets/card_images/ --backgrounds assets/backgrounds/ --output training/datasets/synthetic_v2 --count 2000 --glass-fraction 0.13
+py -3 scripts/generate_synthetic_yolo.py --cards assets/card_images/ --backgrounds assets/backgrounds/ --output training/datasets/pokemon/synthetic/v2 --count 2000 --glass-fraction 0.13
 
-# 2. Merge all datasets (always include synthetic_v1 to avoid catastrophic forgetting)
-py -3 scripts/merge_yolo_datasets.py --src training/datasets/yolo_merged training/datasets/synthetic_v1 training/datasets/synthetic_v2 --dst training/datasets/yolo_v3_merged
+# 2. Merge all datasets (always include prior synthetic batches to avoid catastrophic forgetting)
+py -3 scripts/merge_yolo_datasets.py --src training/datasets/pokemon/merged/v2 training/datasets/pokemon/synthetic/v1 training/datasets/pokemon/synthetic/v2 --dst training/datasets/pokemon/merged/v3
 
 # 3. Copy into container, fix data.yaml path, fine-tune from card_detector.pt (not base yolo11n.pt)
 ```
@@ -640,8 +640,8 @@ py -3 scripts/scrape_tcgcollector.py --base-url "https://www.tcgcollector.com/ca
 ### v14 — YOLO11n synthetic augmentation retraining ✅ (2026-05-20)
 
 - **Dataset cleaning**: removed 27 set-symbol images (40×40px PNGs mislabeled as cards from 3rd party Roboflow export), 103 orphaned label files, all PSA slab images. Final cleaned real dataset: 1,225 train + 304 val.
-- **Synthetic dataset** (`synthetic_v1`): 2,000 images generated via `scripts/generate_synthetic_yolo.py` — 800 card images downloaded from DB (45% EN Pokémon, 40% JP, 15% EN Trainer/Item, 0.15s/request rate limit), pasted onto 15 backgrounds at avg 6.5 cards/scene. Glass fraction 13% matching 2/15 natural background ratio. Stored at `training/datasets/synthetic_v1/`.
-- **Merged dataset** (`yolo_v2_merged`): 2,823 train (13,798 annotations) + 706 val (3,375 annotations). Stored at `training/datasets/yolo_v2_merged/`.
+- **Synthetic dataset** (`synthetic/v1`): 2,000 images generated via `scripts/generate_synthetic_yolo.py` — 800 card images downloaded from DB (45% EN Pokémon, 40% JP, 15% EN Trainer/Item, 0.15s/request rate limit), pasted onto 15 backgrounds at avg 6.5 cards/scene. Glass fraction 13% matching 2/15 natural background ratio. Stored at `training/datasets/pokemon/synthetic/v1/`.
+- **Merged dataset** (`merged/v2`): 2,823 train (13,798 annotations) + 706 val (3,375 annotations). Stored at `training/datasets/pokemon/merged/v2/`.
 - **Training**: fine-tuned from `card_detector.pt` (not base `yolo11n.pt`) on RTX 3080, 30 epochs, batch=16, imgsz=640. ~1.5hr total.
 - **Convergence confirmed**: resumed training with `patience=15` early stopping — halted after 16 additional epochs with no mAP improvement, confirming epoch 30 was the converged optimum.
 
@@ -752,7 +752,7 @@ Times the scan pipeline (button press → first card result from backend) indepe
 
 Attempted to produce an INT8 TFLite model for faster ARM CPU inference.
 
-- Calibration: 225 real card photos from `training/datasets/my_photos/` (23 batch folders of 10), copied into container at `/calib_images`
+- Calibration: 225 real card photos from `training/datasets/pokemon/source/my_photos/` (23 batch folders of 10), copied into container at `/calib_images`
 - Script: `scripts/quantize_int8.py` — reads existing `card_detector_saved_model`, runs TFLiteConverter with `Optimize.DEFAULT` + `TFLITE_BUILTINS_INT8` + float32 I/O
 - Output: `card_detector_int8.tflite` (2853KB, down from 5.1MB float16) — written to `backend/models/`
 - **Result: slower than float16** — converter output `fully_quantize: 0` (incomplete quantization). YOLO has ops that don't map to INT8 in TFLite, so quantize/dequantize nodes were inserted at every float/INT8 boundary, adding overhead exceeding the INT8 speedup. YOLO went from ~5s → ~7–9s.
