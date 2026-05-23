@@ -5,7 +5,7 @@ local Kaggle images (fast), fall back to URL download when not found locally.
 
 Usage:
     python scripts/build_embeddings.py \
-        --dataset "Pokemon TCG" \
+        --dataset en_cards \
         --db-url postgresql://tcg:tcgpass@localhost:5432/tcgdb
 
 The script:

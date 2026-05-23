@@ -44,14 +44,17 @@ runs/
 # Numpy calibration / intermediate data files
 *.npy
 
-# Local card image datasets (too large for git)
-Pokemon TCG/
+# EN card image dataset — used for CLIP fine-tuning and embedding generation
+en_cards/
 
-# Background texture photos (only needed for CLIP fine-tuning)
+# Background textures — used for synthetic YOLO dataset generation
 assets/backgrounds/
 
 # Downloaded card image thumbnails for synthetic YOLO dataset generation
 assets/card_images/
+
+# YOLO and CLIP training datasets (images + labels, too large for git)
+training/
 
 # Process logs
 logs/

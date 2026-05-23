@@ -51,7 +51,7 @@ services:
     volumes:
       - ./backend:/app
       - ./scripts:/scripts
-      - ./Pokemon TCG:/pokemon-tcg:ro
+      - ./en_cards:/en_cards:ro
       - ./assets/backgrounds:/backgrounds:ro
     deploy:
       resources:

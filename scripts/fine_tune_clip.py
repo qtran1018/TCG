@@ -13,7 +13,7 @@ pairs within the same batch.
 
 Usage (inside Docker container or locally with GPU):
     python scripts/fine_tune_clip.py \
-        --dataset "/pokemon-tcg" \
+        --dataset "/en_cards" \
         --backgrounds "/backgrounds" \
         --output backend/models/clip_finetuned.pt \
         --epochs 10 \
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=Path("/pokemon-tcg"),
+        default=Path("/en_cards"),
         help="Path to card image folder (searched recursively)",
     )
     parser.add_argument(
