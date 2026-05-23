@@ -572,7 +572,14 @@ class CardMatcherService:
         so the Japanese URL must use the OCR number to reach the correct PC page.
         """
         if language_override == "ja" and card.set_name:
-            number = ja_card_number or card.card_number
+            # JP-first-class DB records (v11+): card.card_number IS the authoritative
+            # JP number — don't let an OCR misread override it.
+            # EN records scanned as JP: ja_card_number carries the JP number that the
+            # EN DB entry doesn't have, so the OCR value is needed there.
+            if card.language == "ja":
+                number = card.card_number
+            else:
+                number = ja_card_number or card.card_number
             if not number:
                 return None
             return self.pc_scraper.build_game_url(
