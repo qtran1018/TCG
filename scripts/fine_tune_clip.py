@@ -12,15 +12,28 @@ InfoNCE contrastive loss pulls (anchor, positive) together and pushes apart non-
 pairs within the same batch.
 
 Usage (inside Docker container or locally with GPU):
+    # Resume from existing fine-tuned weights (default — recommended for incremental retrains):
     python scripts/fine_tune_clip.py \
         --dataset "/en_cards" \
         --backgrounds "/backgrounds" \
         --output backend/models/clip_finetuned.pt \
-        --epochs 10 \
-        --batch-size 64
+        --resume backend/models/clip_finetuned.pt \
+        --epochs 5
+
+    # Start from base CLIP (first-ever training run, or intentional reset):
+    python scripts/fine_tune_clip.py \
+        --dataset "/en_cards" \
+        --backgrounds "/backgrounds" \
+        --output backend/models/clip_finetuned.pt \
+        --resume "" \
+        --epochs 10
+
+--resume defaults to backend/models/clip_finetuned.pt. If the file exists, the visual
+encoder is initialised from it before training begins, so the model builds on prior
+learning rather than starting over. Pass --resume '' to force a cold start from base CLIP.
 
 Only the visual encoder (image tower) is fine-tuned. The text encoder is frozen.
-After training, re-run build_embeddings.py to re-embed all 20k cards with the fine-tuned model.
+After training, re-run build_embeddings.py --force to re-embed all cards with the updated model.
 """
 
 import argparse
@@ -277,6 +290,7 @@ def train(
     pairs_per_card: int,
     temperature: float,
     checkpoint_every: int,
+    resume_from: Path | None = None,
 ):
     import open_clip
 
@@ -286,6 +300,13 @@ def train(
     logger.info("Loading CLIP ViT-B/32...")
     model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
     model = model.to(device)
+
+    if resume_from and resume_from.exists():
+        state = torch.load(resume_from, map_location=device)
+        model.visual.load_state_dict(state)
+        logger.info("Resumed visual encoder from %s", resume_from)
+    elif resume_from:
+        logger.warning("--resume path not found (%s) — starting from base CLIP", resume_from)
 
     # Freeze text encoder — only fine-tune visual encoder
     for name, param in model.named_parameters():
@@ -418,6 +439,13 @@ if __name__ == "__main__":
         default=0,
         help="Save epoch checkpoint every N epochs (0 = only save best)",
     )
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        default=Path("backend/models/clip_finetuned.pt"),
+        help="Path to existing fine-tuned visual encoder weights to resume from. "
+             "Pass --resume '' to force training from base CLIP.",
+    )
     args = parser.parse_args()
 
     train(
@@ -430,4 +458,5 @@ if __name__ == "__main__":
         pairs_per_card=args.pairs_per_card,
         temperature=args.temperature,
         checkpoint_every=args.checkpoint_every,
+        resume_from=args.resume if args.resume else None,
     )
