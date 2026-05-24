@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { PriceDisplay } from "@/components/Card/PriceDisplay";
 import { api, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
+import { useSavedCardsStore } from "@/store/savedCardsStore";
 import type { Game, Language } from "@/constants";
 import { COLORS } from "@/constants";
 
@@ -29,12 +30,34 @@ export default function CardDetailScreen() {
   }>();
   const isSpeedTest = speedTest === "1";
   const { scanType } = useScanStore();
+  const { save: saveCard, remove: removeCard, isSaved } = useSavedCardsStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailMs, setDetailMs] = useState<number | null>(null);
   const [selectedVariant, setSelectedVariant] = useState("normal");
+
+  const cardSaved = data ? isSaved(data.card.id) : false;
+
+  const toggleSave = useCallback(() => {
+    if (!data) return;
+    const { card } = data;
+    if (isSaved(card.id)) {
+      removeCard(card.id);
+    } else {
+      saveCard({
+        id: card.id,
+        name: card.name,
+        set_name: card.set_name ?? "",
+        card_number: card.card_number ?? "",
+        image_url: card.image_url ?? null,
+        language: card.language,
+        game: card.game as Game,
+        savedAt: new Date().toISOString(),
+      });
+    }
+  }, [data, isSaved, saveCard, removeCard]);
 
   const cardLanguage = data?.card.language ?? routeLanguage ?? "en";
   const variantOptions = cardLanguage === "ja" ? JP_VARIANTS : EN_VARIANTS;
@@ -109,17 +132,26 @@ export default function CardDetailScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <TouchableOpacity
-              onPress={() => loadCard(true)}
-              disabled={isRefreshing}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={{ marginRight: 4 }}
-            >
-              {isRefreshing
-                ? <ActivityIndicator size="small" color={COLORS.accent} />
-                : <Text style={styles.headerRefreshBtn}>↻ Refresh</Text>
-              }
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                onPress={toggleSave}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[styles.headerSaveBtn, cardSaved && styles.headerSaveBtnActive]}>
+                  {cardSaved ? "★" : "☆"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => loadCard(true)}
+                disabled={isRefreshing}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {isRefreshing
+                  ? <ActivityIndicator size="small" color={COLORS.accent} />
+                  : <Text style={styles.headerRefreshBtn}>↻</Text>
+                }
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
@@ -276,7 +308,10 @@ const styles = StyleSheet.create({
   noPriceText: { color: COLORS.textMuted, fontSize: 14 },
   reloadBtn: { alignItems: "center", paddingVertical: 8 },
   reloadText: { color: COLORS.accent, fontSize: 13, fontWeight: "600" },
-  headerRefreshBtn: { color: COLORS.accent, fontSize: 14, fontWeight: "600" },
+  headerButtons: { flexDirection: "row", alignItems: "center", gap: 14, marginRight: 4 },
+  headerSaveBtn: { color: COLORS.textMuted, fontSize: 22, lineHeight: 26 },
+  headerSaveBtnActive: { color: COLORS.warning },
+  headerRefreshBtn: { color: COLORS.accent, fontSize: 18, fontWeight: "600" },
   retryBtn: {
     backgroundColor: COLORS.accent,
     paddingHorizontal: 24,

@@ -10,12 +10,14 @@ from app.database import get_db
 from app.models.card import Card, ScanHistory
 from app.schemas.card import (
     BatchPricesItem,
+    BatchPricesItemSlim,
     BatchPricesRequest,
     BatchPricesResponse,
     CardOut,
     CardWithPrice,
     HistoryEntry,
     PriceOut,
+    PriceOutSlim,
     ScanHistoryCreate,
 )
 from app.services import matcher as _matcher
@@ -171,7 +173,22 @@ async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depend
         next_emit = 0
         for fut in asyncio.as_completed(tasks):
             idx, item = await fut
-            pending[idx] = item.model_dump_json() + "\n"
+            # Convert to slim schema: strip chart history, cap recent_sales at 3.
+            # The batch prices UI only shows the current price and the most recent
+            # sale — sending full history (60–100 entries) wastes 90–97% of bandwidth.
+            slim_price: PriceOutSlim | None = None
+            if item.price:
+                slim_price = PriceOutSlim(
+                    **item.price.model_dump(exclude={"price_history_ungraded", "price_history_graded", "recent_sales"}),
+                    recent_sales=item.price.recent_sales[:3],
+                )
+            slim = BatchPricesItemSlim(
+                card_id=item.card_id,
+                card=item.card,
+                price=slim_price,
+                error=item.error,
+            )
+            pending[idx] = slim.model_dump_json() + "\n"
             while next_emit in pending:
                 yield pending.pop(next_emit)
                 next_emit += 1

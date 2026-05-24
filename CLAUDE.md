@@ -6,6 +6,33 @@ A mobile app that scans TCG (Trading Card Game) cards and fetches pricing/sales 
 
 ## Open Tasks
 
+### Dependency Upgrades (do after live scan is complete)
+
+Run `expo upgrade` to handle the coordinated Expo + React Native bump. Check changelogs for breaking changes on the major-version packages before upgrading individually.
+
+| Package | Installed | Latest | Notes |
+|---|---|---|---|
+| `expo` | 54.0.x | 56.0.4 | Use `expo upgrade` — do not upgrade manually |
+| `expo-router` | 6.0.x | 56.2.6 | Comes with expo upgrade |
+| `react-native` | 0.81.5 | 0.85.3 | Comes with expo upgrade |
+| `react` | 19.1.0 | 19.2.6 | Minor |
+| `react-native-vision-camera` | 4.7.3 | 5.0.10 | Locked to v4 (v5 dropped Expo config plugin); check if v5 adds it back before upgrading |
+| `react-native-reanimated` | 4.1.1 | 4.3.1 | Minor |
+| `react-native-gesture-handler` | 2.28.0 | 2.31.2 | Minor |
+| `react-native-screens` | 4.16.0 | 4.25.2 | Minor |
+| `react-native-safe-area-context` | 5.6.0 | 5.8.0 | Minor |
+| `react-native-fast-tflite` | 2.0.0 | 3.0.1 | Major — check changelog, may affect on-device YOLO |
+| `react-native-worklets` | 0.5.1 | 0.8.3 | Minor |
+| `zustand` | 4.5.0 | 5.0.13 | Major — store API changed |
+| `axios` | 1.7.0 | 1.16.1 | Minor |
+| `react-native-svg` | 15.12.1 | 15.15.5 | Patch |
+| `@react-native-async-storage/async-storage` | 2.2.0 | 3.1.0 | Major |
+| `@react-native-ml-kit/text-recognition` | 1.0.0 | 2.0.0 | Major — likely breaking OCR API changes |
+| `react-native-nitro-modules` | 0.35.6 | 0.35.7 | Patch |
+| `typescript` | 5.4.0 | 6.0.3 | Major |
+
+---
+
 ### Priority 1 — Recognition improvements
 
 #### CLIP similarity threshold tuning
@@ -1159,3 +1186,38 @@ Replaced the wait-for-all batch prices request with an NDJSON stream — prices 
 **Mobile `api.ts`**: `api.streamPrices()` — XHR `onprogress` NDJSON parser (same pattern as `scanStream`). Accepts `onResult(item: BatchPricesItem)` callback and `AbortSignal` for cleanup.
 
 **Mobile `batch-prices.tsx`**: replaced `api.batchPrices()` + bulk `setEntries` with `api.streamPrices()` + per-result `setEntries`. Each card row's spinner resolves independently as its price arrives. `AbortController` cancels the stream on unmount.
+
+### v26 — Batch prices fixes + price UI improvements + save button (2026-05-24)
+
+#### Batch prices payload fix
+
+All cards beyond the first were failing to populate in the stream. Root cause: the full `PriceOut` payload per card (~14–18KB) included 60 recent sales + full chart history, causing Android XHR to drop or stall the NDJSON stream. Fixed by introducing `PriceOutSlim` / `BatchPricesItemSlim` schemas used exclusively by the stream endpoint — strips `price_history_ungraded`, `price_history_graded`, and caps `recent_sales` at 3. Payload dropped from ~69KB → ~8KB for 5 cards. Full data (100 sales cap, full chart history) is preserved in Redis and served to individual card pages unaffected.
+
+- `backend/app/schemas/card.py`: `PriceOutSlim` (no chart history, recent_sales capped at 3), `BatchPricesItemSlim`
+- `backend/app/api/v1/cards.py`: stream `generate()` converts to slim schema before serializing
+- Note on 100-sale limit: intentional — prevents raw sales from crowding out PSA entries on popular cards (e.g. Charizard). Applies to Redis cache / individual card pages. Stream trims to 3 at serialization only.
+
+#### Batch prices → card detail navigation
+
+Tapping a card row in batch-prices now navigates to `card/[id].tsx`. Back button returns to batch-prices. Header title fixed from "batch-prices" to "Batch Prices".
+
+- `mobile/app/_layout.tsx`: added explicit `Stack.Screen name="batch-prices"` with `title: "Batch Prices"`
+- `mobile/app/batch-prices.tsx`: `CardPriceRow` accepts `onPress` prop; outer `View` changed to `TouchableOpacity`; `renderItem` builds nav params from resolved card (uses `item.data?.card ?? item.card` so navigation uses the enriched card from the price response)
+
+#### Price trend chart follows grade filter
+
+The trend chart in `PriceDisplay.tsx` switches series based on the active sale filter tab: Raw tab → `price_history_ungraded`; any PSA grade tab → `price_history_graded`.
+
+**Note on per-grade chart data**: `VGPC.chart_data` embedded in PriceCharting pages only contains `used` (ungraded) and `graded` (one combined series covering all grades). There are no per-grade series (grade-7, grade-8, etc.) in the embedded JS — PriceCharting loads those via AJAX on grade toggle. Per-grade trend charts are not achievable from a single page scrape.
+
+- `mobile/components/Card/PriceDisplay.tsx`: `saleFilter` state defaults to `"10"` when `scanType === "psa"`, else `"raw"`; chart renders `price_history_ungraded` when `saleFilter === "raw"`, otherwise `price_history_graded`
+
+#### PSA grade filter labels
+
+Sale filter tabs updated from "G7"/"G8"/"G9" to "PSA 7"/"PSA 8"/"PSA 9" for clarity.
+
+#### Save button on card detail page
+
+Star icon (☆/★) added to header right of `card/[id].tsx` alongside the refresh button. Taps toggle saved state via `useSavedCardsStore`. Star is gold (`COLORS.warning`) when saved, muted when not.
+
+- `mobile/app/card/[id].tsx`: imports `useSavedCardsStore`; `toggleSave` callback; `headerButtons` row wraps save + refresh; `cardSaved` derived from `isSaved(data.card.id)`

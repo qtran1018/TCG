@@ -232,6 +232,7 @@ class PricechartingScraper(BaseScraper):
         if chart_match:
             try:
                 chart_data = json.loads(chart_match.group(1))
+                logger.info("VGPC.chart_data keys for %s: %s", pc_id, list(chart_data.keys()))
                 prices.price_history_ungraded = _parse_chart_series(chart_data.get("used", []))
                 prices.price_history_graded = _parse_chart_series(chart_data.get("graded", []))
             except json.JSONDecodeError:
@@ -277,6 +278,16 @@ class PricechartingScraper(BaseScraper):
                     _parse_price_cell(cells[3]),
                     sale_url,
                 ))
+        def _date_sort_key(row: tuple) -> str:
+            raw = row[0]
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    continue
+            return raw
+
+        all_rows.sort(key=_date_sort_key, reverse=True)
         for date, title, price, url in all_rows[:recent_sales_limit]:
             prices.recent_sales.append(SaleRecord(date=date, title=title, price=price, url=url))
 

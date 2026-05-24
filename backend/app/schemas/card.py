@@ -65,6 +65,33 @@ class PriceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PriceOutSlim(BaseModel):
+    """Slim price payload for batch stream — omits chart history (not shown in batch UI)
+    and caps recent_sales at 3 (only first is displayed). Reduces payload 90-97%."""
+    pricecharting_id: str
+    pricecharting_url: str | None = None
+    scan_type: str
+    price_loose: float | None = None
+    price_cib: float | None = None
+    price_graded_7: float | None = None
+    price_graded_8: float | None = None
+    price_graded_9: float | None = None
+    price_graded_10: float | None = None
+    currency: str = "USD"
+    fetched_at: datetime
+    recent_sales: list[SaleRecord] = []
+
+    model_config = {"from_attributes": True}
+
+
+class BatchPricesItemSlim(BaseModel):
+    """BatchPricesItem using PriceOutSlim — used by the streaming endpoint."""
+    card_id: int
+    card: CardOut | None = None
+    price: PriceOutSlim | None = None
+    error: str | None = None
+
+
 class CardWithPrice(BaseModel):
     card: CardOut
     price: PriceOut | None = None

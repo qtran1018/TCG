@@ -23,6 +23,10 @@ export default function RootLayout() {
           options={{ title: "Scan Results", headerBackTitle: "Back" }}
         />
         <Stack.Screen
+          name="batch-prices"
+          options={{ title: "Batch Prices", headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
           name="card/[id]"
           options={{ title: "Card Detail", headerBackTitle: "Back" }}
         />

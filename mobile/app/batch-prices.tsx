@@ -52,8 +52,11 @@ export default function BatchPricesScreen() {
       scanType,
       Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
       (item) => {
-        setEntries((prev) =>
-          prev.map((entry) => {
+        console.log(`[batch-prices] onResult card_id=${item.card_id} error=${item.error} has_price=${!!item.price}`);
+        setEntries((prev) => {
+          const entryIds = prev.map((e) => e.card.id);
+          console.log(`[batch-prices] entries=${JSON.stringify(entryIds)} matching=${entryIds.includes(item.card_id)}`);
+          return prev.map((entry) => {
             if (entry.card.id !== item.card_id) return entry;
             if (item.error) return { ...entry, loading: false, error: true };
             return {
@@ -61,8 +64,8 @@ export default function BatchPricesScreen() {
               data: { card: item.card ?? entry.card, price: item.price },
               loading: false,
             };
-          }),
-        );
+          });
+        });
       },
       controller.signal,
     ).catch((e) => {
@@ -77,10 +80,26 @@ export default function BatchPricesScreen() {
   }, []);
 
   const renderItem = useCallback(
-    ({ item }: { item: CardPriceEntry }) => (
-      <CardPriceRow entry={item} scanType={scanType} currency={currency} jpyRate={jpyRate} />
-    ),
-    [scanType, currency, jpyRate],
+    ({ item }: { item: CardPriceEntry }) => {
+      const card = item.data?.card ?? item.card;
+      return (
+        <CardPriceRow
+          entry={item}
+          scanType={scanType}
+          currency={currency}
+          jpyRate={jpyRate}
+          onPress={() => router.push({
+            pathname: "/card/[id]",
+            params: {
+              id: String(card.id),
+              language: card.language,
+              ...(card.language === "ja" && item.jaCardNumber && { card_number: item.jaCardNumber }),
+            },
+          })}
+        />
+      );
+    },
+    [scanType, currency, jpyRate, router],
   );
 
   if (batchPriceCards.length === 0) {
@@ -145,11 +164,13 @@ const CardPriceRow = React.memo(function CardPriceRow({
   scanType,
   currency,
   jpyRate,
+  onPress,
 }: {
   entry: CardPriceEntry;
   scanType: string;
   currency: "USD" | "JPY";
   jpyRate: number | null;
+  onPress: () => void;
 }) {
   const { card, jaCardNumber, data, loading, error } = entry;
   const price = data?.price;
@@ -157,7 +178,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
   const lastSale = price?.recent_sales?.[0];
 
   return (
-    <View style={styles.row}>
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.cardImageWrap}>
         {(data?.card?.image_url ?? card.image_url) ? (
           <Image source={{ uri: data?.card?.image_url ?? card.image_url! }} style={styles.cardImage} resizeMode="contain" />
@@ -214,7 +235,7 @@ const CardPriceRow = React.memo(function CardPriceRow({
           </View>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 });
 

@@ -11,9 +11,9 @@ type SaleFilter = "raw" | "7" | "8" | "9" | "10";
 
 const SALE_FILTERS: { key: SaleFilter; label: string }[] = [
   { key: "raw", label: "Raw" },
-  { key: "7", label: "G7" },
-  { key: "8", label: "G8" },
-  { key: "9", label: "G9" },
+  { key: "7", label: "PSA 7" },
+  { key: "8", label: "PSA 8" },
+  { key: "9", label: "PSA 9" },
   { key: "10", label: "PSA 10" },
 ];
 
@@ -41,7 +41,7 @@ interface Props {
 
 export function PriceDisplay({ price, scanType }: Props) {
   const { currency, jpyRate, fetching, setCurrency } = useCurrencyStore();
-  const [saleFilter, setSaleFilter] = useState<SaleFilter>("raw");
+  const [saleFilter, setSaleFilter] = useState<SaleFilter>(scanType === "psa" ? "10" : "raw");
 
   const filteredSales = useMemo(
     () => filterSales(price.recent_sales ?? [], saleFilter),
@@ -94,10 +94,10 @@ export function PriceDisplay({ price, scanType }: Props) {
         Source: PriceCharting · {currency === "JPY" ? `1 USD = ¥${jpyRate?.toFixed(0) ?? "…"}` : "USD"}
       </Text>
 
-      {/* Trend chart — above recent sales */}
-      {scanType === "psa"
-        ? <PriceChart history={price.price_history_graded ?? []} label="Graded Price Trend" currency={currency} jpyRate={jpyRate} />
-        : <PriceChart history={price.price_history_ungraded ?? []} label="Ungraded Price Trend" currency={currency} jpyRate={jpyRate} />
+      {/* Trend chart — follows the active grade filter */}
+      {saleFilter === "raw"
+        ? <PriceChart history={price.price_history_ungraded ?? []} label="Raw Price Trend" currency={currency} jpyRate={jpyRate} />
+        : <PriceChart history={price.price_history_graded ?? []} label="Graded Price Trend" currency={currency} jpyRate={jpyRate} />
       }
 
       {/* Recent sales with grade filter */}
