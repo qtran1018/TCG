@@ -203,11 +203,13 @@ export const api = {
 
       const flush = (text: string) => {
         const lines = text.split("\n");
+        console.log(`[streamPrices] flush lines=${lines.length} text=${text.length}b`);
         for (let i = 0; i < lines.length - 1; i++) {
           const line = lineBuffer + lines[i];
           lineBuffer = "";
           if (!line.trim()) continue;
-          try { onResult(JSON.parse(line) as BatchPricesItem); } catch { /* ignore bad lines */ }
+          try { onResult(JSON.parse(line) as BatchPricesItem); }
+          catch (e) { console.warn(`[streamPrices] JSON.parse failed len=${line.length} err=${e} preview=${line.slice(0, 100)}`); }
         }
         lineBuffer = lines[lines.length - 1];
       };
@@ -215,18 +217,22 @@ export const api = {
       xhr.onprogress = () => {
         const chunk = xhr.responseText.slice(processedLen);
         processedLen = xhr.responseText.length;
+        console.log(`[streamPrices] onprogress chunk=${chunk.length}b processedLen=${processedLen}`);
         if (chunk) flush(chunk);
       };
 
       xhr.onload = () => {
+        const remaining = xhr.responseText.slice(processedLen);
+        console.log(`[streamPrices] onload status=${xhr.status} totalLen=${xhr.responseText.length} remaining=${remaining.length}b lineBuffer="${lineBuffer.slice(0, 50)}"`);
+        if (remaining) flush(remaining);
         if (lineBuffer.trim()) {
           try { onResult(JSON.parse(lineBuffer) as BatchPricesItem); } catch { /* ignore */ }
         }
         resolve({ aborted: false });
       };
 
-      xhr.onerror = () => reject(new Error("Stream prices request failed"));
-      xhr.ontimeout = () => reject(new Error("Stream prices timed out"));
+      xhr.onerror = () => { console.log("[streamPrices] onerror"); reject(new Error("Stream prices request failed")); };
+      xhr.ontimeout = () => { console.log("[streamPrices] ontimeout"); reject(new Error("Stream prices timed out")); };
       xhr.onabort = () => resolve({ aborted: true });
 
       xhr.send(JSON.stringify({
@@ -323,7 +329,8 @@ export const api = {
       };
 
       xhr.onload = () => {
-        // Flush any remaining buffer after stream ends
+        const remaining = xhr.responseText.slice(processedLen);
+        if (remaining) flush(remaining);
         if (lineBuffer.trim()) {
           try { onResult(JSON.parse(lineBuffer) as ScanStreamResult); } catch { /* ignore */ }
         }

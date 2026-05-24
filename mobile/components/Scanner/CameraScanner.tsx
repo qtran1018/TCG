@@ -1,39 +1,31 @@
 import React, { useRef, useCallback } from "react";
 import { StyleSheet, View, TouchableOpacity, Text, ActivityIndicator, Alert } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "@/constants";
+
 interface Props {
   onCapture: (uri: string) => void;
   isProcessing: boolean;
 }
 
 export function CameraScanner({ onCapture, isProcessing }: Props) {
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef<CameraView>(null);
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice("back");
+  const cameraRef = useRef<Camera>(null);
 
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current || isProcessing) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 1,
-        base64: false,
-        skipProcessing: true,
-      });
-      if (photo?.uri) {
-        onCapture(photo.uri);
-      }
+      const photo = await cameraRef.current.takePhoto({ qualityPrioritization: "quality" });
+      onCapture("file://" + photo.path);
     } catch {
       Alert.alert("Error", "Failed to capture image. Please try again.");
     }
   }, [isProcessing, onCapture]);
 
-  if (!permission) {
-    return <View style={styles.container} />;
-  }
-
-  if (!permission.granted) {
+  if (!hasPermission) {
     return (
       <View style={styles.permContainer}>
         <Text style={styles.permText}>Camera permission is required to scan cards.</Text>
@@ -44,9 +36,19 @@ export function CameraScanner({ onCapture, isProcessing }: Props) {
     );
   }
 
+  if (!device) {
+    return <View style={styles.container} />;
+  }
+
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+      <Camera
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        photo={true}
+      />
       <View style={styles.footer}>
         <Text style={styles.hint}>Capture all cards in frame</Text>
         <TouchableOpacity

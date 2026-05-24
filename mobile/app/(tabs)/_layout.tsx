@@ -59,30 +59,24 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: "Scan",
+            title: "Multi Scan",
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="scan-outline" size={size} color={color} />
             ),
           }}
         />
         <Tabs.Screen
-          name="saved"
+          name="live-scan"
           options={{
-            title: "Saved",
+            title: "Live Scan",
             tabBarIcon: ({ color, size }) => (
-              <Ionicons name="bookmark-outline" size={size} color={color} />
+              <Ionicons name="radio-outline" size={size} color={color} />
             ),
           }}
         />
-        <Tabs.Screen
-          name="history"
-          options={{
-            title: "History",
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="time-outline" size={size} color={color} />
-            ),
-          }}
-        />
+        {/* Hidden tabs — still routable but not shown in tab bar */}
+        <Tabs.Screen name="saved" options={{ href: null }} />
+        <Tabs.Screen name="history" options={{ href: null }} />
       </Tabs>
 
       <GameDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />

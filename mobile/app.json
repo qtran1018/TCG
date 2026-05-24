@@ -30,7 +30,7 @@
     "plugins": [
       "expo-router",
       [
-        "expo-camera",
+        "react-native-vision-camera",
         {
           "cameraPermission": "Allow TCG Scanner to access your camera to scan cards."
         }
