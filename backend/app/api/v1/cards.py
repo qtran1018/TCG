@@ -43,12 +43,20 @@ async def search_cards(
     lang = "ja" if language == "ja" else "en"
     tokens = q_lower.split()
 
+    # Separate exclusion terms (e.g. "-detective" → exclude "detective" from name)
+    exclude_terms = [t[1:] for t in tokens if t.startswith("-") and len(t) > 1]
+    tokens = [t for t in tokens if not t.startswith("-")]
+
     # If last token is a pure number, treat it as a card number filter
     card_num: str | None = None
     if tokens and re.fullmatch(r"\d+", tokens[-1]):
         card_num = tokens[-1]
         tokens = tokens[:-1]
     q_lower = " ".join(tokens) if tokens else q_lower
+
+    # If the query is only exclusion terms, return empty (nothing to search for)
+    if not tokens and not card_num:
+        return []
 
     first_token = tokens[0] if tokens else q_lower
     set_hint = " ".join(tokens[1:]) if len(tokens) >= 2 else None
@@ -72,6 +80,8 @@ async def search_cards(
         base_where = [Card.game == game, Card.language == "en", or_(sim_name > 0.1, sim_set > 0.2)]
         if card_num:
             base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
+        for ex in exclude_terms:
+            base_where.append(~func.lower(Card.name).ilike(f"%{ex}%"))
         stmt = (
             select(Card)
             .where(*base_where)
@@ -100,6 +110,8 @@ async def search_cards(
         ]
         if card_num:
             base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
+        for ex in exclude_terms:
+            base_where.append(~func.lower(Card.name).ilike(f"%{ex}%"))
         stmt = (
             select(Card)
             .where(*base_where)
