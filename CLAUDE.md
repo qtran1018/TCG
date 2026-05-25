@@ -92,10 +92,10 @@ Instagram-style save flow. Tapping ★ on any card opens a bottom sheet instead 
 
 `useSavedCardsStore` is the master list — `isSaved(id)` drives the filled/empty star. `collectionsStore` is a separate layer storing only card IDs; card data is looked up from `savedCardsStore` for display. Removing from `savedCardsStore` (trash in saved screen or "Remove from saved" in sheet) purges from all collections atomically.
 
-#### Still to build
+#### All parts built
 
-- `saved.tsx` collection browser — currently still shows the flat card list; needs refactor to show collection index with `saved.tsx` → collection detail → card
-- `mobile/app/collection/[id].tsx` — cards within a named collection
+- `saved.tsx` → collection index (2×2 thumbnail grid per collection, long-press to delete custom)
+- `mobile/app/collection/[id].tsx` → card list/grid within a collection; remove from custom list only; remove from default = full unsave with confirmation; trash icon in header for non-default collections
 
 ---
 
