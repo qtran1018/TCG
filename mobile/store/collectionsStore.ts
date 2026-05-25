@@ -31,6 +31,7 @@ interface CollectionsState {
   addCard: (collectionId: string, cardId: number) => void;
   removeCard: (collectionId: string, cardId: number) => void;
   removeCardFromAll: (cardId: number) => void;
+  rename: (id: string, newName: string) => void;
   isInCollection: (collectionId: string, cardId: number) => boolean;
   getCardCollectionIds: (cardId: number, game: Game) => string[];
 }
@@ -105,6 +106,13 @@ export const useCollectionsStore = create<CollectionsState>()(
             ...c,
             cardIds: c.cardIds.filter((id) => id !== cardId),
           })),
+        })),
+
+      rename: (id, newName) =>
+        set((s) => ({
+          collections: s.collections.map((c) =>
+            c.id === id && !c.isDefault ? { ...c, name: newName.trim() } : c,
+          ),
         })),
 
       isInCollection: (collectionId, cardId) => {

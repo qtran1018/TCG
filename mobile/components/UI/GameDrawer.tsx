@@ -143,7 +143,7 @@ export function GameDrawer({ isOpen, onClose }: Props) {
             activeOpacity={0.7}
           >
             <Ionicons name="bookmark-outline" size={18} color={C.textMuted} />
-            <Text style={[styles.navLabel, { color: C.textMuted }]}>Saved Cards</Text>
+            <Text style={[styles.navLabel, { color: C.textMuted }]}>Saved Lists</Text>
             <Ionicons name="chevron-forward" size={14} color={C.border} style={styles.navChevron} />
           </TouchableOpacity>
 

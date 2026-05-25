@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -40,14 +41,40 @@ async def search_cards(
         return []
 
     lang = "ja" if language == "ja" else "en"
+    tokens = q_lower.split()
+
+    # If last token is a pure number, treat it as a card number filter
+    card_num: str | None = None
+    if tokens and re.fullmatch(r"\d+", tokens[-1]):
+        card_num = tokens[-1]
+        tokens = tokens[:-1]
+    q_lower = " ".join(tokens) if tokens else q_lower
+
+    first_token = tokens[0] if tokens else q_lower
+    set_hint = " ".join(tokens[1:]) if len(tokens) >= 2 else None
 
     if lang == "en":
         sim_name = func.similarity(func.lower(Card.name), q_lower)
         sim_set = func.similarity(func.lower(Card.set_name), q_lower)
-        score = func.greatest(sim_name, sim_set * 0.6)
+        if len(tokens) >= 2:
+            first_word_match = func.similarity(
+                first_token, func.split_part(func.lower(Card.name), " ", 1)
+            )
+            name_score = sim_name * first_word_match
+            # Additively boost cards whose set name matches the non-name tokens
+            # e.g. "suicune prism" → "prism" boosts Prismatic Evolutions cards
+            sim_set_hint = func.word_similarity(set_hint, func.lower(Card.set_name))
+            score = name_score + sim_set_hint * 0.5
+        else:
+            name_score = sim_name
+            score = name_score
+        score = func.greatest(score, sim_set * 0.6)
+        base_where = [Card.game == game, Card.language == "en", or_(sim_name > 0.1, sim_set > 0.2)]
+        if card_num:
+            base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
         stmt = (
             select(Card)
-            .where(Card.game == game, Card.language == "en", or_(sim_name > 0.1, sim_set > 0.2))
+            .where(*base_where)
             .order_by(score.desc())
             .limit(limit)
         )
@@ -55,14 +82,27 @@ async def search_cards(
         sim_en = func.similarity(func.lower(Card.name), q_lower)
         sim_ja = func.coalesce(func.similarity(Card.name_ja, q_lower), 0.0)
         sim_set = func.similarity(func.lower(Card.set_name), q_lower)
-        best = func.greatest(sim_en, sim_ja, sim_set * 0.6)
+        if len(tokens) >= 2:
+            first_word_match = func.similarity(
+                first_token, func.split_part(func.lower(Card.name), " ", 1)
+            )
+            name_score = func.greatest(sim_en, sim_ja) * first_word_match
+            sim_set_hint = func.word_similarity(set_hint, func.lower(Card.set_name))
+            best = name_score + sim_set_hint * 0.5
+        else:
+            name_score = func.greatest(sim_en, sim_ja)
+            best = name_score
+        best = func.greatest(best, sim_set * 0.6)
+        base_where = [
+            Card.game == game,
+            Card.language == "ja",
+            or_(sim_en > 0.1, sim_ja > 0.1, sim_set > 0.2),
+        ]
+        if card_num:
+            base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
         stmt = (
             select(Card)
-            .where(
-                Card.game == game,
-                Card.language == "ja",
-                or_(sim_en > 0.1, sim_ja > 0.1, sim_set > 0.2),
-            )
+            .where(*base_where)
             .order_by(best.desc())
             .limit(limit)
         )

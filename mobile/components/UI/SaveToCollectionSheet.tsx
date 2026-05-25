@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Animated,
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   StyleSheet,
@@ -29,20 +28,22 @@ interface Props {
 export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose }: Props) {
   const C = useColors();
   const slideAnim = useRef(new Animated.Value(500)).current;
+  const [kbHeight, setKbHeight] = useState(0);
   const [visible, setVisible] = useState(false);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [showNewList, setShowNewList] = useState(false);
   const [newListName, setNewListName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
 
   const { save: saveCard, remove: removeCard, isSaved } = useSavedCardsStore();
   const {
     ensureDefault,
     getByGame,
     create: createCollection,
+    rename: renameCollection,
     addCard,
     removeCard: removeFromCollection,
     removeCardFromAll,
-    getCardCollectionIds,
   } = useCollectionsStore();
 
   const alreadySaved = isSaved(cardId);
@@ -66,55 +67,46 @@ export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose 
     }
   }, [isOpen, slideAnim]);
 
-  // Refresh checked state whenever the sheet opens
+  // Save to default immediately when sheet opens for a new card
   useEffect(() => {
     if (!isOpen) return;
     const def = ensureDefault(game);
-    if (alreadySaved) {
-      const ids = getCardCollectionIds(cardId, game);
-      setCheckedIds(new Set(ids.length > 0 ? ids : [def.id]));
-    } else {
-      setCheckedIds(new Set([def.id]));
+    if (!alreadySaved) {
+      saveCard(cardData);
+      addCard(def.id, cardId);
     }
     setShowNewList(false);
     setNewListName("");
+    setRenamingId(null);
+    setRenameText("");
   }, [isOpen, game, cardId, alreadySaved]);
+
+  // Shift the sheet above the keyboard
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", (e) => {
+      setKbHeight(e.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setKbHeight(0);
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   const collections = getByGame(game);
 
-  const toggle = useCallback((colId: string, isDefault: boolean) => {
-    if (isDefault) return;
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(colId)) next.delete(colId);
-      else next.add(colId);
-      return next;
-    });
-  }, []);
-
-  const handleDone = useCallback(() => {
+  const toggle = useCallback((colId: string) => {
     const def = ensureDefault(game);
+    const col = collections.find((c) => c.id === colId);
+    if (!col || col.isDefault) return;
 
-    // Add to master saved store if not already there
-    if (!alreadySaved) {
-      saveCard(cardData);
+    const inCollection = col.cardIds.includes(cardId);
+    if (inCollection) {
+      removeFromCollection(colId, cardId);
+    } else {
+      addCard(def.id, cardId);
+      addCard(colId, cardId);
     }
-
-    // Default collection is always included
-    addCard(def.id, cardId);
-
-    // Sync custom collections: add newly checked, remove newly unchecked
-    for (const col of collections) {
-      if (col.isDefault) continue;
-      if (checkedIds.has(col.id)) {
-        addCard(col.id, cardId);
-      } else {
-        removeFromCollection(col.id, cardId);
-      }
-    }
-
-    onClose();
-  }, [game, alreadySaved, cardData, cardId, collections, checkedIds, ensureDefault, saveCard, addCard, removeFromCollection, onClose]);
+  }, [game, cardId, collections, ensureDefault, addCard, removeFromCollection]);
 
   const handleRemove = useCallback(() => {
     removeCard(cardId);
@@ -125,31 +117,45 @@ export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose 
   const handleCreateList = useCallback(() => {
     const name = newListName.trim();
     if (!name) return;
+    const def = ensureDefault(game);
     const col = createCollection(name, game);
-    setCheckedIds((prev) => new Set([...prev, col.id]));
+    // Immediately add the card to the new list
+    addCard(def.id, cardId);
+    addCard(col.id, cardId);
     setNewListName("");
     setShowNewList(false);
     Keyboard.dismiss();
-  }, [newListName, game, createCollection]);
+  }, [newListName, game, cardId, ensureDefault, createCollection, addCard]);
+
+  const handleRenameSubmit = useCallback(() => {
+    const name = renameText.trim();
+    if (name && renamingId) {
+      renameCollection(renamingId, name);
+    }
+    setRenamingId(null);
+    setRenameText("");
+    Keyboard.dismiss();
+  }, [renamingId, renameText, renameCollection]);
+
+  const startRename = useCallback((colId: string, currentName: string) => {
+    setRenamingId(colId);
+    setRenameText(currentName);
+    setShowNewList(false);
+  }, []);
 
   if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.root}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        {/* Backdrop */}
+      <View style={styles.root}>
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={styles.backdrop} />
         </TouchableWithoutFeedback>
 
-        {/* Sheet */}
         <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: C.surface, transform: [{ translateY: slideAnim }] },
+            { backgroundColor: C.surface, marginBottom: kbHeight, transform: [{ translateY: slideAnim }] },
           ]}
         >
           {/* Handle */}
@@ -159,39 +165,68 @@ export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose 
 
           {/* Header */}
           <View style={[styles.header, { borderBottomColor: C.border }]}>
-            <Text style={[styles.title, { color: C.text }]}>
-              {alreadySaved ? "Saved to..." : "Save to..."}
-            </Text>
-            <TouchableOpacity
-              onPress={handleDone}
-              hitSlop={{ top: 10, bottom: 10, left: 12, right: 8 }}
-            >
-              <Text style={[styles.doneText, { color: C.accent }]}>Done</Text>
+            <Text style={[styles.title, { color: C.text }]}>Save to...</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 12, right: 8 }}>
+              <Ionicons name="close" size={22} color={C.textMuted} />
             </TouchableOpacity>
           </View>
 
           {/* Collections */}
           {collections.map((col) => {
-            const checked = col.isDefault || checkedIds.has(col.id);
+            const inCollection = col.isDefault || col.cardIds.includes(cardId);
+            const isRenaming = renamingId === col.id;
+
             return (
-              <TouchableOpacity
-                key={col.id}
-                onPress={() => toggle(col.id, col.isDefault)}
-                style={[styles.row, { borderBottomColor: C.border }]}
-                activeOpacity={col.isDefault ? 1 : 0.65}
-              >
-                <View style={styles.rowLeft}>
-                  <Text style={[styles.rowName, { color: C.text }]}>{col.name}</Text>
-                  {col.isDefault && (
-                    <Text style={[styles.defaultLabel, { color: C.textMuted }]}>default</Text>
-                  )}
-                </View>
-                {checked ? (
-                  <Ionicons name="checkmark-circle" size={22} color={C.accent} />
+              <View key={col.id} style={[styles.row, { borderBottomColor: C.border }]}>
+                {isRenaming ? (
+                  <View style={styles.renameRow}>
+                    <TextInput
+                      style={[styles.renameInput, { color: C.text, borderColor: C.accent, backgroundColor: C.bg }]}
+                      value={renameText}
+                      onChangeText={setRenameText}
+                      autoFocus
+                      returnKeyType="done"
+                      onSubmitEditing={handleRenameSubmit}
+                      selectTextOnFocus
+                    />
+                    <TouchableOpacity onPress={handleRenameSubmit} style={[styles.renameConfirm, { backgroundColor: C.accent }]}>
+                      <Text style={styles.renameConfirmText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setRenamingId(null); Keyboard.dismiss(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={20} color={C.textMuted} />
+                    </TouchableOpacity>
+                  </View>
                 ) : (
-                  <Ionicons name="ellipse-outline" size={22} color={C.textMuted} />
+                  <TouchableOpacity
+                    onPress={() => toggle(col.id)}
+                    activeOpacity={col.isDefault ? 1 : 0.65}
+                    style={styles.rowInner}
+                  >
+                    <View style={styles.rowLeft}>
+                      <Text style={[styles.rowName, { color: C.text }]}>{col.name}</Text>
+                      {col.isDefault && (
+                        <Text style={[styles.defaultLabel, { color: C.textMuted }]}>default</Text>
+                      )}
+                    </View>
+                    <View style={styles.rowActions}>
+                      {!col.isDefault && (
+                        <TouchableOpacity
+                          onPress={() => startRename(col.id, col.name)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.editBtn}
+                        >
+                          <Ionicons name="pencil-outline" size={16} color={C.textMuted} />
+                        </TouchableOpacity>
+                      )}
+                      {inCollection ? (
+                        <Ionicons name="checkmark-circle" size={22} color={C.accent} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={22} color={C.textMuted} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </View>
             );
           })}
 
@@ -208,16 +243,13 @@ export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose 
                 returnKeyType="done"
                 onSubmitEditing={handleCreateList}
               />
-              <TouchableOpacity
-                onPress={handleCreateList}
-                style={[styles.createBtn, { backgroundColor: C.accent }]}
-              >
+              <TouchableOpacity onPress={handleCreateList} style={[styles.createBtn, { backgroundColor: C.accent }]}>
                 <Text style={styles.createBtnText}>Create</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity
-              onPress={() => setShowNewList(true)}
+              onPress={() => { setShowNewList(true); setRenamingId(null); }}
               style={[styles.newListBtn, { borderTopColor: C.border }]}
             >
               <Ionicons name="add-circle-outline" size={20} color={C.accent} />
@@ -225,17 +257,15 @@ export function SaveToCollectionSheet({ isOpen, cardId, cardData, game, onClose 
             </TouchableOpacity>
           )}
 
-          {/* Remove — only visible when already saved */}
-          {alreadySaved && (
-            <TouchableOpacity
-              onPress={handleRemove}
-              style={[styles.removeBtn, { borderTopColor: C.border }]}
-            >
-              <Text style={[styles.removeBtnText, { color: C.error }]}>Remove from saved</Text>
-            </TouchableOpacity>
-          )}
+          {/* Remove */}
+          <TouchableOpacity
+            onPress={handleRemove}
+            style={[styles.removeBtn, { borderTopColor: C.border }]}
+          >
+            <Text style={[styles.removeBtnText, { color: C.error }]}>Remove from saved</Text>
+          </TouchableOpacity>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -263,18 +293,40 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 16, fontWeight: "700" },
-  doneText: { fontSize: 15, fontWeight: "700" },
-  row: {
+  row: { borderBottomWidth: StyleSheet.hairlineWidth },
+  rowInner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 15,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowLeft: { flex: 1, gap: 2 },
   rowName: { fontSize: 15 },
   defaultLabel: { fontSize: 11 },
+  rowActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  editBtn: { padding: 2 },
+  renameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  renameInput: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    fontSize: 15,
+  },
+  renameConfirm: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  renameConfirmText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   newListRow: {
     flexDirection: "row",
     alignItems: "center",
