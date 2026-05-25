@@ -42,23 +42,26 @@ async def search_cards(
     lang = "ja" if language == "ja" else "en"
 
     if lang == "en":
-        score = func.similarity(func.lower(Card.name), q_lower)
+        sim_name = func.similarity(func.lower(Card.name), q_lower)
+        sim_set = func.similarity(func.lower(Card.set_name), q_lower)
+        score = func.greatest(sim_name, sim_set * 0.6)
         stmt = (
             select(Card)
-            .where(Card.game == game, Card.language == "en", score > 0.1)
+            .where(Card.game == game, Card.language == "en", or_(sim_name > 0.1, sim_set > 0.2))
             .order_by(score.desc())
             .limit(limit)
         )
     else:
         sim_en = func.similarity(func.lower(Card.name), q_lower)
         sim_ja = func.coalesce(func.similarity(Card.name_ja, q_lower), 0.0)
-        best = func.greatest(sim_en, sim_ja)
+        sim_set = func.similarity(func.lower(Card.set_name), q_lower)
+        best = func.greatest(sim_en, sim_ja, sim_set * 0.6)
         stmt = (
             select(Card)
             .where(
                 Card.game == game,
                 Card.language == "ja",
-                or_(sim_en > 0.1, sim_ja > 0.1),
+                or_(sim_en > 0.1, sim_ja > 0.1, sim_set > 0.2),
             )
             .order_by(best.desc())
             .limit(limit)
