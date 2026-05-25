@@ -1,7 +1,6 @@
-import React, { useState } from "react";
+import React from "react";
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity,
-  Image, Alert, TextInput, Keyboard,
+  View, Text, FlatList, StyleSheet, TouchableOpacity, Image,
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,9 +17,7 @@ export default function SavedScreen() {
   const router = useRouter();
   const C = useColors();
   const { cards: savedCards } = useSavedCardsStore();
-  const { collections, deleteCollection, rename } = useCollectionsStore();
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameText, setRenameText] = useState("");
+  const { collections } = useCollectionsStore();
 
   const activeCollections = collections.filter((c) => c.cardIds.length > 0);
 
@@ -28,43 +25,6 @@ export default function SavedScreen() {
     col.cardIds.slice(0, 4).map(
       (id) => savedCards.find((c) => c.id === id)?.image_url ?? null,
     );
-
-  const handleLongPress = (col: Collection) => {
-    if (col.isDefault) return;
-    Alert.alert(
-      `Delete "${col.name}"?`,
-      "Cards will remain in your other lists.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete List",
-          style: "destructive",
-          onPress: () => deleteCollection(col.id),
-        },
-      ],
-    );
-  };
-
-  const startRename = (col: Collection) => {
-    setRenamingId(col.id);
-    setRenameText(col.name);
-  };
-
-  const submitRename = () => {
-    const name = renameText.trim();
-    if (name && renamingId) {
-      rename(renamingId, name);
-    }
-    setRenamingId(null);
-    setRenameText("");
-    Keyboard.dismiss();
-  };
-
-  const cancelRename = () => {
-    setRenamingId(null);
-    setRenameText("");
-    Keyboard.dismiss();
-  };
 
   if (activeCollections.length === 0) {
     return (
@@ -88,42 +48,18 @@ export default function SavedScreen() {
         data={activeCollections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
         ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: C.border }]} />}
         renderItem={({ item }) => (
-          renamingId === item.id ? (
-            <View style={[styles.renameRow, { backgroundColor: C.bg }]}>
-              <View style={[styles.previewGrid, { backgroundColor: C.border }]} />
-              <TextInput
-                style={[styles.renameInput, { color: C.text, borderColor: C.accent, backgroundColor: C.surface }]}
-                value={renameText}
-                onChangeText={setRenameText}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={submitRename}
-                selectTextOnFocus
-              />
-              <TouchableOpacity onPress={submitRename} style={[styles.renameConfirm, { backgroundColor: C.accent }]}>
-                <Text style={styles.renameConfirmText}>Save</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={cancelRename} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="close-circle" size={22} color={C.textMuted} />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <CollectionRow
-              collection={item}
-              previewUrls={getPreviewUrls(item)}
-              onPress={() =>
-                router.push({
-                  pathname: "/collection/[id]",
-                  params: { id: item.id },
-                })
-              }
-              onLongPress={() => handleLongPress(item)}
-              onRename={() => startRename(item)}
-            />
-          )
+          <CollectionRow
+            collection={item}
+            previewUrls={getPreviewUrls(item)}
+            onPress={() =>
+              router.push({
+                pathname: "/collection/[id]",
+                params: { id: item.id },
+              })
+            }
+          />
         )}
       />
     </SafeAreaView>
@@ -134,14 +70,10 @@ function CollectionRow({
   collection,
   previewUrls,
   onPress,
-  onLongPress,
-  onRename,
 }: {
   collection: Collection;
   previewUrls: (string | null)[];
   onPress: () => void;
-  onLongPress: () => void;
-  onRename: () => void;
 }) {
   const C = useColors();
   const cells = [0, 1, 2, 3];
@@ -149,7 +81,6 @@ function CollectionRow({
   return (
     <TouchableOpacity
       onPress={onPress}
-      onLongPress={onLongPress}
       activeOpacity={0.7}
       style={[styles.row, { backgroundColor: C.bg }]}
     >
@@ -200,20 +131,8 @@ function CollectionRow({
         <Text style={[styles.count, { color: C.textMuted }]}>
           {collection.cardIds.length} card{collection.cardIds.length !== 1 ? "s" : ""}
         </Text>
-        {!collection.isDefault && (
-          <Text style={[styles.hint, { color: C.textMuted }]}>Long press to delete</Text>
-        )}
       </View>
 
-      {!collection.isDefault && (
-        <TouchableOpacity
-          onPress={onRename}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.editBtn}
-        >
-          <Ionicons name="pencil-outline" size={18} color={C.textMuted} />
-        </TouchableOpacity>
-      )}
       <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
     </TouchableOpacity>
   );
@@ -249,29 +168,6 @@ const styles = StyleSheet.create({
   },
   defaultBadgeText: { fontSize: 10, fontWeight: "700" },
   count: { fontSize: 13 },
-  hint: { fontSize: 11 },
-  editBtn: { padding: 4 },
-  renameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  renameInput: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 15,
-  },
-  renameConfirm: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  renameConfirmText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   empty: {
     flex: 1,
     alignItems: "center",

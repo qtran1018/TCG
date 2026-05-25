@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  Image, Alert, useWindowDimensions,
+  Image, Alert, useWindowDimensions, TextInput, Keyboard,
 } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,8 +24,12 @@ export default function CollectionScreen() {
   const { width } = useWindowDimensions();
   const [viewMode, setViewMode] = useState<ViewMode>("list");
 
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameText, setRenameText] = useState("");
+  const renameInputRef = useRef<TextInput>(null);
+
   const { cards: savedCards, remove: removeSaved } = useSavedCardsStore();
-  const { collections, removeCard, removeCardFromAll, deleteCollection } =
+  const { collections, removeCard, removeCardFromAll, deleteCollection, rename } =
     useCollectionsStore();
 
   const collection = collections.find((c) => c.id === id);
@@ -68,6 +72,25 @@ export default function CollectionScreen() {
     }
   };
 
+  const startRename = () => {
+    if (!collection) return;
+    setRenameText(collection.name);
+    setIsRenaming(true);
+    setTimeout(() => renameInputRef.current?.focus(), 50);
+  };
+
+  const submitRename = () => {
+    const name = renameText.trim();
+    if (name && collection) rename(id, name);
+    setIsRenaming(false);
+    Keyboard.dismiss();
+  };
+
+  const cancelRename = () => {
+    setIsRenaming(false);
+    Keyboard.dismiss();
+  };
+
   const handleDeleteCollection = () => {
     if (!collection) return;
     Alert.alert(
@@ -87,35 +110,69 @@ export default function CollectionScreen() {
     );
   };
 
+  const headerTitle = () =>
+    isRenaming ? (
+      <View style={styles.renameTitleRow}>
+        <TextInput
+          ref={renameInputRef}
+          style={[styles.renameTitleInput, { color: C.text, borderColor: C.accent }]}
+          value={renameText}
+          onChangeText={setRenameText}
+          returnKeyType="done"
+          onSubmitEditing={submitRename}
+          selectTextOnFocus
+          autoFocus
+        />
+        <TouchableOpacity onPress={submitRename} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+          <Ionicons name="checkmark" size={22} color={C.accent} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={cancelRename} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+          <Ionicons name="close" size={22} color={C.textMuted} />
+        </TouchableOpacity>
+      </View>
+    ) : null;
+
   const headerRight = () => (
     <View style={styles.headerRight}>
-      <TouchableOpacity
-        onPress={() => setViewMode("list")}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-      >
-        <Ionicons
-          name="list-outline"
-          size={20}
-          color={viewMode === "list" ? C.accent : C.textMuted}
-        />
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => setViewMode("grid")}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-      >
-        <Ionicons
-          name="grid-outline"
-          size={20}
-          color={viewMode === "grid" ? C.accent : C.textMuted}
-        />
-      </TouchableOpacity>
-      {collection && !collection.isDefault && (
-        <TouchableOpacity
-          onPress={handleDeleteCollection}
-          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        >
-          <Ionicons name="trash-outline" size={19} color={C.error} />
-        </TouchableOpacity>
+      {!isRenaming && (
+        <>
+          <TouchableOpacity
+            onPress={() => setViewMode("list")}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Ionicons
+              name="list-outline"
+              size={20}
+              color={viewMode === "list" ? C.accent : C.textMuted}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setViewMode("grid")}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Ionicons
+              name="grid-outline"
+              size={20}
+              color={viewMode === "grid" ? C.accent : C.textMuted}
+            />
+          </TouchableOpacity>
+          {collection && !collection.isDefault && (
+            <>
+              <TouchableOpacity
+                onPress={startRename}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name="pencil-outline" size={19} color={C.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDeleteCollection}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name="trash-outline" size={19} color={C.error} />
+              </TouchableOpacity>
+            </>
+          )}
+        </>
       )}
     </View>
   );
@@ -135,7 +192,8 @@ export default function CollectionScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["bottom"]}>
       <Stack.Screen
         options={{
-          title: collection.name,
+          title: isRenaming ? "" : collection.name,
+          headerTitle: isRenaming ? headerTitle : undefined,
           headerRight,
         }}
       />
@@ -307,6 +365,16 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 15 },
   emptyText: { fontSize: 14 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 16, marginRight: 4 },
+  renameTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  renameTitleInput: {
+    borderBottomWidth: 1.5,
+    fontSize: 17,
+    fontWeight: "600",
+    minWidth: 120,
+    maxWidth: 200,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+  },
 
   listContent: { paddingHorizontal: GRID_PADDING, paddingVertical: 12, paddingBottom: 40 },
   listRow: {
