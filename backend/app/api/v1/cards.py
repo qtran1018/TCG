@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.card import Card, ScanHistory
@@ -14,6 +14,7 @@ from app.schemas.card import (
     BatchPricesRequest,
     BatchPricesResponse,
     CardOut,
+    CardOutLite,
     CardWithPrice,
     HistoryEntry,
     PriceOut,
@@ -24,6 +25,47 @@ from app.services import matcher as _matcher
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+
+@router.get("/search", response_model=list[CardOutLite])
+async def search_cards(
+    q: str = Query(..., min_length=2, max_length=100),
+    language: str = Query("en"),
+    game: str = Query("pokemon"),
+    limit: int = Query(20, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    q_lower = q.strip().lower()
+    if not q_lower:
+        return []
+
+    lang = "ja" if language == "ja" else "en"
+
+    if lang == "en":
+        score = func.similarity(func.lower(Card.name), q_lower)
+        stmt = (
+            select(Card)
+            .where(Card.game == game, Card.language == "en", score > 0.1)
+            .order_by(score.desc())
+            .limit(limit)
+        )
+    else:
+        sim_en = func.similarity(func.lower(Card.name), q_lower)
+        sim_ja = func.coalesce(func.similarity(Card.name_ja, q_lower), 0.0)
+        best = func.greatest(sim_en, sim_ja)
+        stmt = (
+            select(Card)
+            .where(
+                Card.game == game,
+                Card.language == "ja",
+                or_(sim_en > 0.1, sim_ja > 0.1),
+            )
+            .order_by(best.desc())
+            .limit(limit)
+        )
+
+    rows = await db.execute(stmt)
+    return [CardOutLite.model_validate(c) for c in rows.scalars().all()]
 
 
 @router.get("/{card_id}", response_model=CardWithPrice)

@@ -6,6 +6,7 @@ import {
 import { Stack, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PriceDisplay } from "@/components/Card/PriceDisplay";
+import { SaveToCollectionSheet } from "@/components/UI/SaveToCollectionSheet";
 import { api, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
 import { useSavedCardsStore } from "@/store/savedCardsStore";
@@ -30,34 +31,21 @@ export default function CardDetailScreen() {
   }>();
   const isSpeedTest = speedTest === "1";
   const { scanType } = useScanStore();
-  const { save: saveCard, remove: removeCard, isSaved } = useSavedCardsStore();
+  const { isSaved } = useSavedCardsStore();
   const [data, setData] = useState<CardWithPrice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailMs, setDetailMs] = useState<number | null>(null);
   const [selectedVariant, setSelectedVariant] = useState("normal");
+  const [saveSheetOpen, setSaveSheetOpen] = useState(false);
 
   const cardSaved = data ? isSaved(data.card.id) : false;
 
-  const toggleSave = useCallback(() => {
+  const openSaveSheet = useCallback(() => {
     if (!data) return;
-    const { card } = data;
-    if (isSaved(card.id)) {
-      removeCard(card.id);
-    } else {
-      saveCard({
-        id: card.id,
-        name: card.name,
-        set_name: card.set_name ?? "",
-        card_number: card.card_number ?? "",
-        image_url: card.image_url ?? null,
-        language: card.language,
-        game: card.game as Game,
-        savedAt: new Date().toISOString(),
-      });
-    }
-  }, [data, isSaved, saveCard, removeCard]);
+    setSaveSheetOpen(true);
+  }, [data]);
 
   const cardLanguage = data?.card.language ?? routeLanguage ?? "en";
   const variantOptions = cardLanguage === "ja" ? JP_VARIANTS : EN_VARIANTS;
@@ -134,7 +122,7 @@ export default function CardDetailScreen() {
           headerRight: () => (
             <View style={styles.headerButtons}>
               <TouchableOpacity
-                onPress={toggleSave}
+                onPress={openSaveSheet}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Text style={[styles.headerSaveBtn, cardSaved && styles.headerSaveBtnActive]}>
@@ -250,6 +238,25 @@ export default function CardDetailScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+
+      {data && (
+        <SaveToCollectionSheet
+          isOpen={saveSheetOpen}
+          cardId={data.card.id}
+          cardData={{
+            id: data.card.id,
+            name: data.card.name,
+            set_name: data.card.set_name ?? "",
+            card_number: data.card.card_number ?? "",
+            image_url: data.card.image_url ?? null,
+            language: data.card.language,
+            game: data.card.game as Game,
+            savedAt: new Date().toISOString(),
+          }}
+          game={data.card.game as Game}
+          onClose={() => setSaveSheetOpen(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }

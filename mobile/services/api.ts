@@ -277,6 +277,18 @@ export const api = {
     return data;
   },
 
+  async searchCards(
+    query: string,
+    language: string,
+    game: Game,
+    limit = 20,
+  ): Promise<CardOut[]> {
+    const { data } = await client.get<CardOut[]>("/cards/search", {
+      params: { q: query, language, game, limit },
+    });
+    return data;
+  },
+
   async getExchangeRate(): Promise<ExchangeRate> {
     const { data } = await client.get<ExchangeRate>("/currency/rates");
     return data;

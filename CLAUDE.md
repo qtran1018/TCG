@@ -55,118 +55,47 @@ When retraining next:
 
 ---
 
-### Future — Manual Card Lookup
+### In-Progress / Testing — Manual Card Lookup
 
-**Use case:** User types a Pokémon name (and optionally set name or card number) to look up a card's price directly, without using the camera.
+Third tab "Search" in the tab bar (Multi Scan | Live Scan | Search). Fuzzy name search against the `cards` table using `pg_trgm similarity()`. EN/JP toggle; JP search checks both `name` (English name) and `name_ja`. Results show card thumbnail, set, number — tapping navigates to `card/[id].tsx`.
 
-#### Entry point
-
-A third tab on the bottom bar: **Search** (magnifying glass icon). Tab order: Multi Scan | Live Scan | Search.
-
-- `mobile/app/(tabs)/lookup.tsx` — new screen
-- `mobile/app/(tabs)/_layout.tsx` — add `lookup` tab (visible, not `href: null`)
-
-#### Screen layout
-
-```
-┌─────────────────────────────────┐
-│  [Search cards...          🔍]  │  ← TextInput, debounced 400ms
-│  [Set name (optional)      ]    │
-│  [Card number (optional)   ]    │
-│                                 │
-│  ── Results ──                  │
-│  [card image] Lotad              │
-│               Aquapolis #70     │
-│  ...                            │
-└─────────────────────────────────┘
-```
-
-Search fires when name field has ≥3 chars. Results tap → `card/[id].tsx`.
-
-#### Backend
-
-No new endpoint needed. Reuse the existing `POST /api/v1/scan` endpoint:
-
-```typescript
-// api.ts — new helper
-async searchCards(query: string, game: Game): Promise<CardOut[]> {
-  const results: CardOut[] = [];
-  await this.scanStream(
-    { image: "", boxes: [] },          // empty image
-    [{ raw_text: query, language: "en", game }],
-    "ocr",
-    (r) => { if (r.candidates?.length) results.push(...r.candidates); }
-  );
-  return results;
-}
-```
-
-Alternatively, expose `GET /api/v1/cards/search?name=...&number=...&set=...&game=...` as a dedicated read-only endpoint — cleaner contract, no empty image hack.
-
-#### Mobile files
-
-| File | Change |
-|---|---|
-| `mobile/app/(tabs)/lookup.tsx` | New screen: search inputs + results list |
-| `mobile/app/(tabs)/_layout.tsx` | Add 3rd visible tab `lookup` |
-| `mobile/services/api.ts` | Add `searchCards(query, game)` helper |
-
-#### Implementation order
-
-1. Add `GET /api/v1/cards/search` backend endpoint (or confirm `/scan` with empty image works)
-2. Add `lookup.tsx` screen with search input + debounced fetch
-3. Add tab to `_layout.tsx`
-4. Wire result rows to card detail navigation
-
----
-
-### Future — Custom Saved Lists (Collections)
-
-**Use case:** Users want to organize saved cards into named collections (e.g., "Holo Rares", "To Trade", "JP Pulls") rather than one flat "All Saves" list. Instagram-model: every save goes to the master "All Saves" automatically; user can optionally add to one or more named collections.
-
-#### Current state
-
-`mobile/store/savedCardsStore.ts` — flat `SavedCard[]` list persisted via AsyncStorage. Star button on card detail page saves/unsaves.
-
-#### New data model
-
-```typescript
-// mobile/store/collectionsStore.ts
-interface Collection {
-  id: string;          // uuid
-  name: string;
-  createdAt: string;
-  cardIds: number[];   // ordered, newest first
-}
-```
-
-`useSavedCardsStore` stays unchanged — it remains the master list. Collections are a separate layer. Deleting a card from "All Saves" should also purge it from all collections.
-
-#### UI changes
-
-**Saved screen** — Make `saved.tsx` visible. Shows collection list; tapping a collection → `mobile/app/collection/[id].tsx`.
-
-**Save flow** (card detail page `card/[id].tsx`):
-- Single tap on ★: saves to "All Saves" only
-- Long press on ★: opens `SaveToCollectionSheet` bottom sheet
-
-#### New files
+#### Files
 
 | File | Purpose |
 |---|---|
-| `mobile/store/collectionsStore.ts` | Zustand store, persisted via AsyncStorage key `tcg:collections` |
-| `mobile/app/saved-list.tsx` | All-saves flat card list |
-| `mobile/app/collection/[id].tsx` | Cards in a specific named collection |
-| `mobile/components/UI/SaveToCollectionSheet.tsx` | Bottom sheet for collection picker |
+| `backend/app/api/v1/cards.py` | `GET /api/v1/cards/search?q=&language=&game=&limit=` — similarity threshold 0.1, ordered by score desc |
+| `mobile/app/(tabs)/lookup.tsx` | Search screen: debounced input (400ms, min 2 chars), EN/JP toggle, results FlatList |
+| `mobile/app/(tabs)/_layout.tsx` | Third visible tab `lookup` with `search-outline` icon |
+| `mobile/services/api.ts` | `api.searchCards(query, language, game, limit)` |
 
-#### Implementation order
+#### Notes
 
-1. `collectionsStore.ts` — data model + AsyncStorage persistence
-2. Refactor `saved.tsx` into collection index; extract card list to `saved-list.tsx`
-3. `collection/[id].tsx` — collection detail screen
-4. `SaveToCollectionSheet.tsx` — bottom sheet component
-5. Wire long press on ★ in `card/[id].tsx`
-6. Wire `useSavedCardsStore.remove` to purge from collections
+- `name` column has a GIN trgm index; `name_ja` does not — JP searches are a full scan on ~27k rows (fast enough, index is a future optimization)
+- Searching "pikachu" on the JP tab matches via `name`; "ピカチュウ" matches via `name_ja`
+
+---
+
+### In-Progress / Testing — Custom Saved Lists (Collections)
+
+Instagram-style save flow. Tapping ★ on any card opens a bottom sheet instead of direct save/unsave. Cards always go into the default collection for their game ("Pokémon" / "One Piece") and can optionally be added to named custom lists. Cards can be in multiple lists simultaneously.
+
+#### Files
+
+| File | Purpose |
+|---|---|
+| `mobile/store/collectionsStore.ts` | Zustand store, persisted `tcg:collections`; stores `cardIds[]` per collection; `ensureDefault(game)` auto-creates the default |
+| `mobile/components/UI/SaveToCollectionSheet.tsx` | Slide-up bottom sheet (Modal + Animated, same pattern as GameDrawer); default always checked+locked; checkboxes for custom lists; inline new list creation; "Remove from saved" when already saved |
+| `mobile/app/card/[id].tsx` | Star tap opens sheet instead of direct toggle |
+| `mobile/app/(tabs)/saved.tsx` | Trash icon now also calls `removeCardFromAll` to keep collections in sync |
+
+#### Data model
+
+`useSavedCardsStore` is the master list — `isSaved(id)` drives the filled/empty star. `collectionsStore` is a separate layer storing only card IDs; card data is looked up from `savedCardsStore` for display. Removing from `savedCardsStore` (trash in saved screen or "Remove from saved" in sheet) purges from all collections atomically.
+
+#### Still to build
+
+- `saved.tsx` collection browser — currently still shows the flat card list; needs refactor to show collection index with `saved.tsx` → collection detail → card
+- `mobile/app/collection/[id].tsx` — cards within a named collection
 
 ---
 

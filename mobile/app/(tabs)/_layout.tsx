@@ -74,6 +74,15 @@ export default function TabLayout() {
             ),
           }}
         />
+        <Tabs.Screen
+          name="lookup"
+          options={{
+            title: "Search",
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="search-outline" size={size} color={color} />
+            ),
+          }}
+        />
         {/* Hidden tabs — still routable but not shown in tab bar */}
         <Tabs.Screen name="saved" options={{ href: null }} />
         <Tabs.Screen name="history" options={{ href: null }} />

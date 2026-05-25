@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, GAMES, type Game } from "@/constants";
 import { useSavedCardsStore, type SavedCard } from "@/store/savedCardsStore";
+import { useCollectionsStore } from "@/store/collectionsStore";
 
 type GameFilter = Game | "all";
 type ViewMode = "list" | "grid";
@@ -21,6 +22,7 @@ export default function SavedScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { cards, remove, clearAll } = useSavedCardsStore();
+  const { removeCardFromAll } = useCollectionsStore();
   const [gameFilter, setGameFilter] = useState<GameFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
 
@@ -37,7 +39,10 @@ export default function SavedScreen() {
     });
   };
 
-  const handleRemove = (id: number) => remove(id);
+  const handleRemove = (id: number) => {
+    remove(id);
+    removeCardFromAll(id);
+  };
 
   const handleClearAll = () => {
     Alert.alert(
