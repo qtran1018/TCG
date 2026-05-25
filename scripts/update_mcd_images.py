@@ -103,7 +103,7 @@ async def main():
                 skipped_no_match += 1
                 continue
 
-            if card.image_url == image_url:
+            if card.image_url == image_url and card.image_url_hi == image_url:
                 continue  # already up to date
 
             log.info(
@@ -112,6 +112,7 @@ async def main():
                 (card.image_url or "")[:60], image_url[:60],
             )
             card.image_url = image_url
+            card.image_url_hi = image_url  # TCGCollector has one res; clear the broken pokemontcg hi-res URL
             updated += 1
 
         await db.commit()
