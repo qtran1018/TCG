@@ -124,6 +124,13 @@ _JP_PC_SET_SLUG: dict[str, str] = {
     "Pokémon Card 151": "scarlet-&-violet-151",
 }
 
+# EN sets where pokemontcg.io set_name doesn't match PriceCharting's game slug.
+# PriceCharting drops "Collection" from McDonald's sets: "McDonald's Collection 2017" → "mcdonalds-2017".
+_EN_PC_SET_SLUG: dict[str, str] = {
+    f"McDonald's Collection {y}": f"mcdonalds-{y}"
+    for y in ["2011", "2012", "2014", "2015", "2016", "2017", "2018", "2019", "2021", "2022"]
+}
+
 
 class PricechartingScraper(BaseScraper):
 
@@ -143,7 +150,7 @@ class PricechartingScraper(BaseScraper):
             if language == "ja":
                 set_slug = _JP_PC_SET_SLUG.get(set_name) or _slugify(set_name)
                 return f"https://www.pricecharting.com/game/pokemon-japanese-{set_slug}/{name_slug}{suffix}-{num}"
-            set_slug = _slugify(set_name)
+            set_slug = _EN_PC_SET_SLUG.get(set_name) or _slugify(set_name)
             return f"https://www.pricecharting.com/game/pokemon-{set_slug}/{name_slug}{suffix}-{num}"
         set_slug = _slugify(set_name)
         return f"https://www.pricecharting.com/game/{set_slug}/{name_slug}{suffix}-{num}"
