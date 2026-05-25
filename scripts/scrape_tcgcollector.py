@@ -218,8 +218,8 @@ async def parse_image_page(page: Page) -> list[dict]:
     return cards
 
 
-async def run(output_dir: str, start_page: int, newest_first: bool = False, base_url: str | None = None):
-    output_path = Path(output_dir) / "tcgcollector_ja.json"
+async def run(output_dir: str, start_page: int, newest_first: bool = False, base_url: str | None = None, output_file: str | None = None):
+    output_path = Path(output_file) if output_file else Path(output_dir) / "tcgcollector_ja.json"
 
     if base_url:
         mode_label = "custom URL: " + base_url
@@ -411,11 +411,15 @@ def main():
     )
     parser.add_argument(
         "--base-url",
-        help="Custom TCGCollector base URL (without &page=N). Use to scrape a specific set. "
+        help="Custom TCGCollector base URL (without &page=N). Use to scrape a specific set or region. "
              "Example: pass a set-filtered URL from TCGCollector to scrape only that set."
     )
+    parser.add_argument(
+        "--output-file",
+        help="Override the output JSON file path (default: <output-dir>/tcgcollector_ja.json)."
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.output_dir, args.start_page, newest_first=args.newest_first, base_url=args.base_url))
+    asyncio.run(run(args.output_dir, args.start_page, newest_first=args.newest_first, base_url=args.base_url, output_file=args.output_file))
 
 
 if __name__ == "__main__":
