@@ -55,7 +55,7 @@ When retraining next:
 
 ---
 
-### In-Progress / Testing — Manual Card Lookup
+### Manual Card Lookup
 
 Third tab "Search" in the tab bar (Multi Scan | Live Scan | Search). Fuzzy name search against the `cards` table using `pg_trgm similarity()`. EN/JP toggle; JP search checks both `name` (English name) and `name_ja`. Results show card thumbnail, set, number — tapping navigates to `card/[id].tsx`.
 
@@ -63,10 +63,17 @@ Third tab "Search" in the tab bar (Multi Scan | Live Scan | Search). Fuzzy name 
 
 | File | Purpose |
 |---|---|
-| `backend/app/api/v1/cards.py` | `GET /api/v1/cards/search?q=&language=&game=&limit=` — similarity threshold 0.1, ordered by score desc |
+| `backend/app/api/v1/cards.py` | `GET /api/v1/cards/search?q=&language=&game=&limit=` — multi-signal scoring, card number filter, exclusion terms |
 | `mobile/app/(tabs)/lookup.tsx` | Search screen: debounced input (400ms, min 2 chars), EN/JP toggle, results FlatList |
 | `mobile/app/(tabs)/_layout.tsx` | Third visible tab `lookup` with `search-outline` icon |
 | `mobile/services/api.ts` | `api.searchCards(query, language, game, limit)` |
+
+#### Search scoring
+
+- First-word penalty: `sim_name × similarity(first_query_token, first_word_of_card_name)` — prevents "mew vstar" from surfacing Mewtwo above Mew
+- Set hint bonus: `word_similarity(non-first-tokens, set_name) × 0.5` added to name score — "suicune prism" boosts Prismatic Evolutions cards
+- Card number: last all-digit token extracted as hard filter on `card_number`
+- Exclusion terms: tokens starting with `-` excluded via `NOT ILIKE` on both `name` and `set_name` — e.g. `pikachu -detective` drops all Detective Pikachu set results
 
 #### Notes
 
@@ -75,7 +82,7 @@ Third tab "Search" in the tab bar (Multi Scan | Live Scan | Search). Fuzzy name 
 
 ---
 
-### In-Progress / Testing — Custom Saved Lists (Collections)
+### Custom Saved Lists (Collections)
 
 Instagram-style save flow. Tapping ★ on any card opens a bottom sheet instead of direct save/unsave. Cards always go into the default collection for their game ("Pokémon" / "One Piece") and can optionally be added to named custom lists. Cards can be in multiple lists simultaneously.
 
@@ -84,18 +91,21 @@ Instagram-style save flow. Tapping ★ on any card opens a bottom sheet instead 
 | File | Purpose |
 |---|---|
 | `mobile/store/collectionsStore.ts` | Zustand store, persisted `tcg:collections`; stores `cardIds[]` per collection; `ensureDefault(game)` auto-creates the default |
-| `mobile/components/UI/SaveToCollectionSheet.tsx` | Slide-up bottom sheet (Modal + Animated, same pattern as GameDrawer); default always checked+locked; checkboxes for custom lists; inline new list creation; "Remove from saved" when already saved |
+| `mobile/components/UI/SaveToCollectionSheet.tsx` | Slide-up bottom sheet; default always checked+locked; dynamic checkbox toggle (no Done button); inline new list creation and rename; "Remove from saved" at bottom |
 | `mobile/app/card/[id].tsx` | Star tap opens sheet instead of direct toggle |
-| `mobile/app/(tabs)/saved.tsx` | Trash icon now also calls `removeCardFromAll` to keep collections in sync |
+| `mobile/app/(tabs)/saved.tsx` | Collection index — 2×2 thumbnail grid per list, tap to open |
+| `mobile/app/collection/[id].tsx` | Card list/grid within a collection; pencil icon → inline header rename; trash icon → delete list with confirmation |
 
 #### Data model
 
-`useSavedCardsStore` is the master list — `isSaved(id)` drives the filled/empty star. `collectionsStore` is a separate layer storing only card IDs; card data is looked up from `savedCardsStore` for display. Removing from `savedCardsStore` (trash in saved screen or "Remove from saved" in sheet) purges from all collections atomically.
+`useSavedCardsStore` is the master list — `isSaved(id)` drives the filled/empty star. `collectionsStore` is a separate layer storing only card IDs; card data is looked up from `savedCardsStore` for display. Removing from `savedCardsStore` ("Remove from saved" in sheet) purges from all collections atomically.
 
-#### All parts built
+#### UX
 
-- `saved.tsx` → collection index (2×2 thumbnail grid per collection, long-press to delete custom)
-- `mobile/app/collection/[id].tsx` → card list/grid within a collection; remove from custom list only; remove from default = full unsave with confirmation; trash icon in header for non-default collections
+- Tapping ★ saves to default immediately and opens the sheet for optional list assignment — no Done button required
+- Custom list checkboxes toggle membership immediately
+- Rename a list: from the collection detail screen, tap pencil icon in header → title swaps to a TextInput → submit with checkmark or return key
+- Delete a list: trash icon in collection detail screen header (non-default only); cards remain in other lists
 
 ---
 
@@ -209,6 +219,8 @@ Run `expo upgrade` to handle the coordinated Expo + React Native bump.
 - **PriceCharting URL patterns**:
   - EN: `https://www.pricecharting.com/game/{set-slug}/{card-name}-{card-number}`
   - JP: `https://www.pricecharting.com/game/japanese-{set-slug}/{card-name}-{card-number}` (newer sets use set position; pre-2003 sets use Pokédex number — see Known Limitations)
+  - McDonald's EN: `_EN_PC_SET_SLUG` dict in `pricecharting.py` maps `"McDonald's Collection YYYY"` → `mcdonalds-YYYY` (pokemontcg.io includes "Collection"; PriceCharting drops it)
+- **McDonald's EN card images**: 136 cards (2011–2022 Collection sets) have `image_url` pointing to TCGCollector CDN instead of pokemontcg.io — scraped via `scripts/scrape_tcgcollector.py --base-url ... --output-file backend/app/data/tcgcollector_mcd_en.json`, then loaded by `scripts/update_mcd_images.py`
 
 ### PriceCharting JP card numbering — older vs newer sets
 
@@ -250,7 +262,7 @@ Synthetic datasets: `C:\Users\Quang\Desktop\TCG Training Data\` — keep permane
 ### Image AI — CLIP
 
 - Model: CLIP ViT-B/32, 512-dim L2-normalized; art-region crop `y=12%–52%`
-- Coverage: 47,442 embeddings — 20,187 EN + 27,255 JP; 50 unembeddable (McDonald's promos CDN 404)
+- Coverage: 47,442 embeddings — 20,187 EN + 27,255 JP; ~50 unembeddable (older McDonald's promos and obscure promos with broken CDN URLs)
 - Fine-tuned weights at `backend/models/clip_finetuned.pt` (auto-loaded at startup); best epoch 7, loss 0.0077
 - fp16 on CUDA; partial IVFFlat indices per language (`probes=20`, `LIMIT 10`)
 - Thresholds: `_SIM_THRESHOLD = 0.65` (confident); `_SIM_FLOOR = 0.50` (floor); `_IMAGE_MIN_SIM_WITH_OCR = 0.83` (combined gate)
@@ -361,7 +373,8 @@ Base, Holo, Full Art, Alolan/Galarian/Hisuian/Paldean, EX/ex/GX/V/VMAX/VSTAR/VUN
 - `backend/models/embedding_failures.json` — EN embedding state: 20,187 embedded, 50 unembeddable
 - `scripts/build_embeddings.py` — embedding pipeline; rebuilds IVFFlat index after completion
 - `scripts/load_jp_cards.py` — upserts TCGCollector JP cards into `cards` table; safe to re-run
-- `scripts/scrape_tcgcollector.py` — scrapes TCGCollector JP card image grid; `--newest-first` for delta updates
+- `scripts/scrape_tcgcollector.py` — scrapes TCGCollector card image grid (JP or EN via `--base-url`); `--newest-first` for delta updates; `--output-file` to write to a custom path instead of `tcgcollector_ja.json`
+- `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, matches by year+card_number, updates `image_url` for McDonald's EN cards in DB
 - `scripts/fine_tune_clip.py` — CLIP fine-tuning; `--generate-pairs` for offline pair generation
 - `scripts/generate_synthetic_yolo.py` — synthetic YOLO training data generation
 - `scripts/merge_yolo_datasets.py` — merges multiple YOLO datasets, remaps to single class 0 `card`

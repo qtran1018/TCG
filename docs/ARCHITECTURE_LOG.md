@@ -501,3 +501,60 @@ Fully new screen and hook for continuous card-by-card scanning without a capture
 **Files to change**:
 - `mobile/hooks/useLiveScan.ts`: `runOneCycle` — read snapshot → call `detectCardsWithYolo(snapshotUri, sw, sh)`; if null, base64-encode snapshot → call `api.detectCards(base64, sw, sh)` → use returned boxes; rest of stability logic unchanged
 - `mobile/services/api.ts`: `api.detectCards` already exists and accepts base64 + dimensions
+
+### v28 — Search improvements, JP name population, dynamic save lists (2026-05-25)
+
+#### Search ranking overhaul
+
+Multi-signal scoring in `GET /api/v1/cards/search`:
+
+- **First-word penalty**: `name_score = sim_name × similarity(first_query_token, first_word_of_card_name)`. Prevents "mew vstar" from ranking Mewtwo VSTAR (high full-name sim) above Mew V — Mewtwo's first word fails the first-token match hard.
+- **Set hint bonus**: for multi-token queries, `word_similarity(non-first-tokens, set_name) × 0.5` added additively to name score. "suicune prism" now boosts Prismatic Evolutions cards even when multiple Suicune cards have identical name similarity.
+- **Card number extraction**: last all-digit token stripped from query and applied as a hard `card_number` filter instead of diluting the similarity score.
+- **Exclusion terms**: tokens starting with `-` (e.g. `-detective`) removed before scoring and applied as `NOT ILIKE '%term%'` on both `name` and `set_name`. Multiple exclusions stack. Query of only exclusion terms returns empty. Primary use case: `pikachu -detective` to exclude the Detective Pikachu set.
+
+#### JP name population — Pass 6 (trainer cards)
+
+`scripts/populate_name_ja.py` Pass 6 added: ~80-entry `TRAINER_NAMES` dict mapping EN trainer names to katakana (e.g. `"Brock"` → `"タケシ"`, `"Professor Oak"` → `"オーキド博士"`). Applied as exact-match UPDATE on `name_ja IS NULL` rows. Updated 1,137 trainer rows; total JP name coverage reached 35,252 / 47,492.
+
+#### Encoding fixes
+
+- `scripts/scrape_tcgcollector.py`: added `fix_encoding(s)` helper (`s.encode('latin-1').decode('utf-8')`) applied to all scraped name and set_name fields — prevents future mojibake from HTML decoded as Latin-1.
+- `backend/app/data/tcgcollector_ja.json`: 387 double-encoded fields fixed in-place (`PokÃ©` → `Poké`).
+
+#### Dynamic save lists (SaveToCollectionSheet rewrite)
+
+- **No Done button**: tapping ★ saves to the default collection immediately; sheet opens for optional list assignment. Closing the sheet does not revert the save.
+- **Dynamic checkbox toggle**: each non-default list row immediately `addCard` / `removeFromCollection` on tap — no buffered state, no confirm step.
+- **Inline list rename**: pencil icon per non-default row → `renamingId` state swaps the row to a TextInput + Save/cancel.
+- **Keyboard avoidance (Android)**: `kbHeight` plain `useState(0)` + static `marginBottom: kbHeight`. Fabric renderer rejects `Animated.Value` on `marginBottom` — cannot use `useNativeDriver: false` for margin. `Keyboard.addListener` events update the state.
+- **`collectionsStore.rename`**: new action added; guards `!c.isDefault` to prevent renaming the default collection.
+
+#### Saved Lists screen
+
+- Long-press-to-delete removed from `saved.tsx`.
+- Pencil icon and inline rename row removed from `saved.tsx` (moved to collection detail).
+- `saved.tsx` now: tap only to navigate, `Stack.Screen title="Saved Lists"`, clean list with chevron.
+- GameDrawer nav link updated to "Saved Lists" (proper case).
+
+#### Collection detail screen — rename + delete in header
+
+- `collection/[id].tsx` header right now includes: list/grid toggle, pencil icon (non-default), trash icon (non-default).
+- Pencil tap: `isRenaming` state set; `headerTitle` swaps to a custom component rendering a `TextInput` + checkmark + X. Title row cleared; `headerRight` icons hidden during rename. Submit via checkmark or return key calls `rename(id, text)`.
+
+### v29 — McDonald's image and pricing fixes (2026-05-25)
+
+#### PriceCharting URL fix for McDonald's sets
+
+pokemontcg.io names these sets `"McDonald's Collection 2017"` but PriceCharting uses `mcdonalds-2017` (no "Collection"). The generic `_slugify` produced `mcdonalds-collection-2017` → 404 on every McDonald's price fetch.
+
+Fix: `_EN_PC_SET_SLUG` dict in `backend/app/scrapers/pricecharting.py` — dict comprehension covering all 10 EN sets (2011–2022), maps DB set name → pre-slugified PriceCharting game slug. Checked before `_slugify` in `build_game_url`, same pattern as existing `_JP_PC_SET_SLUG`.
+
+#### TCGCollector images for McDonald's EN cards
+
+pokemontcg.io images for McDonald's sets were low-quality or missing. TCGCollector has high-quality scans for all Collection sets (2011–2022).
+
+- **Scraper**: `scripts/scrape_tcgcollector.py` extended with `--output-file` param (previously always wrote to `tcgcollector_ja.json`). Run with `--base-url` pointing to the TCGCollector multi-expansion URL for 13 EN McDonald's expansions.
+- **Scraped**: 178 cards across 13 sets (includes 2013, Dragon Discovery 2024, Match Battle 2022/2023 which aren't in our DB — 42 skipped). 136 matched and updated.
+- **Update script**: `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, extracts year from TCGCollector set name via `\b(20\d\d)\b` regex, matches to `"McDonald's Collection {year}"` + card_number in DB, updates `image_url`. Idempotent (skips already-matching URLs).
+- **Result**: 136 McDonald's EN cards (2011–2022 Collection sets) now serve TCGCollector CDN images.
