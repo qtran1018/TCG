@@ -81,7 +81,7 @@ async def search_cards(
         if card_num:
             base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
         for ex in exclude_terms:
-            base_where.append(~func.lower(Card.name).ilike(f"%{ex}%"))
+            base_where.append(~or_(func.lower(Card.name).ilike(f"%{ex}%"), func.lower(Card.set_name).ilike(f"%{ex}%")))
         stmt = (
             select(Card)
             .where(*base_where)
@@ -111,7 +111,7 @@ async def search_cards(
         if card_num:
             base_where.append(or_(Card.card_number == card_num, Card.card_number.ilike(f"{card_num}/%")))
         for ex in exclude_terms:
-            base_where.append(~func.lower(Card.name).ilike(f"%{ex}%"))
+            base_where.append(~or_(func.lower(Card.name).ilike(f"%{ex}%"), func.lower(Card.set_name).ilike(f"%{ex}%")))
         stmt = (
             select(Card)
             .where(*base_where)
