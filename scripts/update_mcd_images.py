@@ -32,13 +32,15 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from app.config import settings
+from app.config import get_settings
 from app.models.card import Card
+
+settings = get_settings()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-DATA_FILE = Path("/app/backend/app/data/tcgcollector_mcd_en.json")
+DATA_FILE = Path("/app/app/data/tcgcollector_mcd_en.json")
 # Fallback path when running outside Docker
 if not DATA_FILE.exists():
     DATA_FILE = Path(__file__).parent.parent / "backend/app/data/tcgcollector_mcd_en.json"
