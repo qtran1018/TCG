@@ -23,6 +23,14 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeout
 
+
+def fix_encoding(s: str) -> str:
+    """Fix mojibake from UTF-8 bytes misread as Latin-1 (e.g. PokÃ© → Poké)."""
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -185,6 +193,9 @@ async def parse_image_page(page: Page) -> list[dict]:
                 continue
 
             name_en, set_name, card_number, set_total = parsed
+            name_en = fix_encoding(name_en)
+            if set_name:
+                set_name = fix_encoding(set_name)
             card_number_raw = card_number_raw = re.search(r"[0-9]+", alt_text)
             # Re-extract raw number for record-keeping
             raw_m = re.search(r"(\d+)(?:/[A-Za-z0-9\-]+)?\s*\)\s*$", alt_text)
