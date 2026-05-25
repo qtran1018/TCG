@@ -556,5 +556,11 @@ pokemontcg.io images for McDonald's sets were low-quality or missing. TCGCollect
 
 - **Scraper**: `scripts/scrape_tcgcollector.py` extended with `--output-file` param (previously always wrote to `tcgcollector_ja.json`). Run with `--base-url` pointing to the TCGCollector multi-expansion URL for 13 EN McDonald's expansions.
 - **Scraped**: 178 cards across 13 sets (includes 2013, Dragon Discovery 2024, Match Battle 2022/2023 which aren't in our DB — 42 skipped). 136 matched and updated.
-- **Update script**: `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, extracts year from TCGCollector set name via `\b(20\d\d)\b` regex, matches to `"McDonald's Collection {year}"` + card_number in DB, updates `image_url`. Idempotent (skips already-matching URLs).
+- **Update script**: `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, extracts year from TCGCollector set name via `\b(20\d\d)\b` regex, matches to `"McDonald's Collection {year}"` + card_number in DB, updates both `image_url` and `image_url_hi`. Idempotent (skips rows where both fields already match).
 - **Result**: 136 McDonald's EN cards (2011–2022 Collection sets) now serve TCGCollector CDN images.
+
+#### `image_url_hi` bug fix
+
+`card/[id].tsx` uses `card.image_url_hi ?? card.image_url` for display. pokemontcg.io originally set both fields for McDonald's cards; `image_url_hi` pointed to `_hires.png` URLs which are broken/404 for all McDonald's sets. The first run of `update_mcd_images.py` only updated `image_url`, leaving the stale broken `image_url_hi` — so card detail showed no image while search results (using `image_url` directly) worked fine.
+
+Fix: `update_mcd_images.py` now sets `card.image_url_hi = image_url` alongside `card.image_url`. Skip condition updated to `card.image_url == image_url and card.image_url_hi == image_url`. McDonald's EN is the only card category where `image_url_hi` is set but broken — EN cards from pokemontcg.io have valid hi-res URLs; JP cards from TCGCollector leave `image_url_hi` null (falling back correctly to `image_url`).

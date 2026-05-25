@@ -220,7 +220,7 @@ Run `expo upgrade` to handle the coordinated Expo + React Native bump.
   - EN: `https://www.pricecharting.com/game/{set-slug}/{card-name}-{card-number}`
   - JP: `https://www.pricecharting.com/game/japanese-{set-slug}/{card-name}-{card-number}` (newer sets use set position; pre-2003 sets use Pokédex number — see Known Limitations)
   - McDonald's EN: `_EN_PC_SET_SLUG` dict in `pricecharting.py` maps `"McDonald's Collection YYYY"` → `mcdonalds-YYYY` (pokemontcg.io includes "Collection"; PriceCharting drops it)
-- **McDonald's EN card images**: 136 cards (2011–2022 Collection sets) have `image_url` pointing to TCGCollector CDN instead of pokemontcg.io — scraped via `scripts/scrape_tcgcollector.py --base-url ... --output-file backend/app/data/tcgcollector_mcd_en.json`, then loaded by `scripts/update_mcd_images.py`
+- **McDonald's EN card images**: 136 cards (2011–2022 Collection sets) have both `image_url` and `image_url_hi` pointing to TCGCollector CDN instead of pokemontcg.io — scraped via `scripts/scrape_tcgcollector.py --base-url ... --output-file backend/app/data/tcgcollector_mcd_en.json`, then loaded by `scripts/update_mcd_images.py`. Both fields must be updated because `card/[id].tsx` prefers `image_url_hi`; pokemontcg.io's original `_hires.png` URLs are broken for McDonald's sets.
 
 ### PriceCharting JP card numbering — older vs newer sets
 
@@ -310,6 +310,7 @@ docker restart tcg_backend
 
 - Image AI mode similarity scores for some cards (e.g. Lotad) are around 0.43 — below `_SIM_FLOOR = 0.50`. Combined/OCR mode reliably identifies these cards.
 - **Live Scan YOLO detection broken**: `detectCardsWithYolo` always returns null in the continuous loop context. Fix in progress (see Priority 1 in Open Tasks). Multi scan (one-shot) is unaffected.
+- **Variant sales filtering — needs review**: Normal variant excludes sales whose title matches `pok[eé][\s-]?ball` or `master[\s-]?ball`; Poké Ball / Master Ball variants show all sales unfiltered (PriceCharting already scopes them). Needs real-device testing across several cards to confirm: (1) Normal no longer shows variant sales, (2) Poké Ball / Master Ball pages show expected sales, (3) no edge-case titles are missed or over-excluded. File: `mobile/components/Card/PriceDisplay.tsx` (`filterSales`).
 
 ---
 
@@ -374,7 +375,7 @@ Base, Holo, Full Art, Alolan/Galarian/Hisuian/Paldean, EX/ex/GX/V/VMAX/VSTAR/VUN
 - `scripts/build_embeddings.py` — embedding pipeline; rebuilds IVFFlat index after completion
 - `scripts/load_jp_cards.py` — upserts TCGCollector JP cards into `cards` table; safe to re-run
 - `scripts/scrape_tcgcollector.py` — scrapes TCGCollector card image grid (JP or EN via `--base-url`); `--newest-first` for delta updates; `--output-file` to write to a custom path instead of `tcgcollector_ja.json`
-- `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, matches by year+card_number, updates `image_url` for McDonald's EN cards in DB
+- `scripts/update_mcd_images.py` — reads `tcgcollector_mcd_en.json`, matches by year+card_number, updates both `image_url` and `image_url_hi` for McDonald's EN cards in DB
 - `scripts/fine_tune_clip.py` — CLIP fine-tuning; `--generate-pairs` for offline pair generation
 - `scripts/generate_synthetic_yolo.py` — synthetic YOLO training data generation
 - `scripts/merge_yolo_datasets.py` — merges multiple YOLO datasets, remaps to single class 0 `card`

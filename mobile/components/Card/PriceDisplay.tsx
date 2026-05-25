@@ -27,25 +27,38 @@ const GRADE_RE: Record<string, RegExp> = {
   "10": /\b(PSA|BGS|CGC|SGC)[\s\-]?10\b|grade[d]?\s*10\b|\b10\.0\b|gem[\s\-]?mint/i,
 };
 
-function filterSales(sales: SaleRecord[], filter: SaleFilter): SaleRecord[] {
+// Variant keyword patterns — matched against sale titles to partition sales by variant
+const POKE_BALL_RE = /pok[eé][\s\-]?ball/i;
+const MASTER_BALL_RE = /master[\s\-]?ball/i;
+
+function filterSales(sales: SaleRecord[], filter: SaleFilter, variant: string): SaleRecord[] {
+  let pool = sales;
+
+  // On the Normal page, exclude variant sales that leaked in from PriceCharting's combined listing.
+  // On variant pages the sales are already scoped by PriceCharting — no keyword filtering needed.
+  if (variant === "normal") {
+    pool = pool.filter((s) => !POKE_BALL_RE.test(s.title) && !MASTER_BALL_RE.test(s.title));
+  }
+
   const filtered = filter === "raw"
-    ? sales.filter((s) => !GRADED_RE.test(s.title))
-    : sales.filter((s) => GRADE_RE[filter].test(s.title));
+    ? pool.filter((s) => !GRADED_RE.test(s.title))
+    : pool.filter((s) => GRADE_RE[filter].test(s.title));
   return filtered.slice(0, 10);
 }
 
 interface Props {
   price: PriceOut;
   scanType: "raw" | "psa";
+  variant?: string;
 }
 
-export function PriceDisplay({ price, scanType }: Props) {
+export function PriceDisplay({ price, scanType, variant = "normal" }: Props) {
   const { currency, jpyRate, fetching, setCurrency } = useCurrencyStore();
   const [saleFilter, setSaleFilter] = useState<SaleFilter>(scanType === "psa" ? "10" : "raw");
 
   const filteredSales = useMemo(
-    () => filterSales(price.recent_sales ?? [], saleFilter),
-    [price.recent_sales, saleFilter],
+    () => filterSales(price.recent_sales ?? [], saleFilter, variant),
+    [price.recent_sales, saleFilter, variant],
   );
 
   const priceRows = [

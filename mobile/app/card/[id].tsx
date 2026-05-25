@@ -193,7 +193,7 @@ export default function CardDetailScreen() {
         </View>
 
         {price ? (
-          <PriceDisplay price={price} scanType={scanType} />
+          <PriceDisplay price={price} scanType={scanType} variant={selectedVariant} />
         ) : (
           <View style={styles.noPriceBox}>
             {selectedVariant !== "normal" ? (
