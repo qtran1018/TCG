@@ -165,6 +165,7 @@ class ScanHistoryCreate(BaseModel):
 
 class HistoryEntry(BaseModel):
     id: int
+    card_id: int | None = None
     game: str
     scan_type: str
     language: str

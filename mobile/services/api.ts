@@ -115,6 +115,7 @@ export interface ExchangeRate {
 
 export interface HistoryEntry {
   id: number;
+  card_id?: number;
   game: string;
   scan_type: string;
   language: string;
