@@ -8,15 +8,15 @@ For full version history and technical decisions, see [docs/ARCHITECTURE_LOG.md]
 
 ## Open Tasks
 
-### Priority 1 — Live Scan mode ✓ Done (v30)
+### Priority 1 — Live Scan mode ✓ Done (v30–v31)
 
-Fully functional. Decktradr-style single-roundtrip architecture: continuous `takeSnapshot` → backend auto-detects + recognizes in one `/scan` call → result appears in ~700-900ms. No stability gate. Deduplication by card ID (5s cooldown). See v30 in Architecture Log for full details.
+Fully functional. Decktradr-style single-roundtrip architecture: continuous `takeSnapshot` → backend auto-detects + recognizes in one `/scan` call → result appears in ~700-900ms. No stability gate. Deduplication by card ID (30s cooldown) plus consecutive-frame confirmation gate. See v30–v31 in Architecture Log for full details.
 
 #### What's shipped
 
-- `mobile/app/(tabs)/live-scan.tsx` — viewfinder, Start/Stop, session list, running total, Done → batch-prices, swap modal, per-card delete
-- `mobile/hooks/useLiveScan.ts` — sequential scan loop, single-roundtrip `/scan`, time-based dedup, `removeCard`/`swapCard` actions
-- `backend/app/api/v1/scan.py` — `elif req.image:` auto-detect branch: YOLO finds largest card, crops it, runs CLIP+OCR in one pass
+- `mobile/app/(tabs)/live-scan.tsx` — viewfinder, Start/Stop, **EN/JP language toggle** (pill, top-left of viewfinder), session list, running total, Done → batch-prices (deduped by card ID), swap modal, per-card delete
+- `mobile/hooks/useLiveScan.ts` — sequential scan loop, single-roundtrip `/scan`, time-based dedup (30s), **consecutive-frame confirmation gate** (card must be top match on two consecutive scans before adding), `removeCard`/`swapCard` actions
+- `backend/app/api/v1/scan.py` — `elif req.image:` auto-detect branch; `is_live_scan` mode supports manual language lock (`cross_lang=False`) and `language="auto"` dual-EN/JA parallel search
 - Tab bar: Multi Scan | Live Scan | Search
 
 ---
@@ -230,12 +230,15 @@ Camera capture (`quality: 1, skipProcessing: true`) → JPEG resize to 2400px + 
 
 ### Scan Pipeline (live scan, single-card continuous)
 
-`takeSnapshot({ quality: 80 })` → resize to 640px → `POST /api/v1/scan` with `{ image, no boxes }` → backend YOLO auto-detects largest card, crops it, runs CLIP+OCR in one pass → result streamed back → deduplicated by card ID (5s cooldown per card) → added to session list with background price fetch.
+`takeSnapshot({ quality: 80 })` → resize to 640px → `POST /api/v1/scan` with `{ image, no boxes }` → backend YOLO auto-detects largest card, crops it, runs CLIP in one pass → result streamed back → consecutive-frame confirmation → deduplicated by card ID (30s cooldown) → added to session list with background price fetch.
 
 - Cycle time: ~700-900ms (natural pacing — next scan starts immediately after previous completes)
 - No stability gate, no on-device YOLO, no separate detect roundtrip
+- **Consecutive-frame confirmation gate** (`pendingMatchRef`): card must be the top match on two consecutive scans before being added. Filters transient phantoms during physical card transitions (dropping one card to reveal the next). Adds ~1 cycle of latency (~700-900ms) for the first card in a run.
+- **Language toggle**: EN/JP pill in viewfinder top-left hard-locks the CLIP search to the chosen language (`cross_lang=False` in backend). An `"auto"` code path (searches both EN and JA in parallel, picks higher sim) is wired through the full stack but not exposed in the UI yet.
 - Swap dedup: `swapCard` records the new card ID in `seenCardTimesRef` to prevent immediate re-add
-- Files: `mobile/hooks/useLiveScan.ts`, `backend/app/api/v1/scan.py` (`elif req.image:` branch)
+- **Batch-prices dedup**: session cards deduplicated by card ID before navigating to batch-prices; duplicate count shown in a dismissible banner on the batch-prices screen
+- Files: `mobile/hooks/useLiveScan.ts`, `mobile/app/(tabs)/live-scan.tsx`, `backend/app/api/v1/scan.py` (`elif req.image:` branch)
 
 ### Card Detection — YOLO
 

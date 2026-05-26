@@ -615,3 +615,58 @@ Time-based per card ID: `seenCardTimesRef` (Map<string, number>) records when ea
 - Viewfinder shows a purple border pulse while a scan is in progress (`isScanning`)
 - Status badge: "Scanning..." with spinner (during scan) / pulsing green "Live" dot (between scans)
 - Per-card row: X delete button + swap button (when `candidates.length > 1`) → swap modal lists all candidates with current selection highlighted
+
+---
+
+### v31 — Live Scan language lock + phantom-card confirmation gate (2026-05-26)
+
+Two quality-of-life fixes for live scan following v30 deployment.
+
+#### Problem 1: wrong language returned
+
+Live scan runs pure-CLIP (no OCR — frontend sends `raw_text: ""`). The backend used `hints[0].language = "en"` for the CLIP search. The existing cross-language fallback in `_image_search_one` only probes the other language when `best_sim < _SIM_THRESHOLD (0.65)`. JP cards that score ≥ 0.65 in the EN embedding index (common for cards with near-identical EN/JP art) were returned as EN versions, never triggering the fallback.
+
+**Fix**: manual EN/JP language toggle in the live scan viewfinder (pill, top-left). Locks the CLIP search to the chosen language. Per-session — user sets it to match the deck language. Zero added latency; fully reliable when set correctly.
+
+**Backend changes** (`scan.py` + `card_detector.py`):
+- `card_detector.py`: each returned box now includes a `"confidence"` field (YOLO `box.conf[0]`).
+- Live scan calls `detect_card_rectangles(..., max_boxes=1)` — only the top detection returned, no sorting overhead.
+- Best-box selection is confidence-weighted: `area_frac × confidence` instead of pure area. Logged at `INFO` level with area_frac, confidence, and detection count.
+- When YOLO finds no card, live scan now falls back to the **full image** (passed to CLIP+OCR as-is) rather than skipping the cycle (`num_items=0`). `num_items` is always 1 for the live scan path.
+- `_image_search_one` gained a `cross_lang: bool = True` parameter. When `cross_lang=False`, the internal cross-language fallback is suppressed — the caller is responsible for language choice (prevents double-search when the caller handles language explicitly).
+- Live scan `per_crop` now checks `hints[i].language`:
+  - `"en"` or `"ja"` (manual lock): calls `_image_search_one(..., cross_lang=False)` — hard lock, no fallback.
+  - `"auto"` (not yet exposed in UI): searches EN and JA in parallel via two `asyncio.create_task` calls (both with `cross_lang=False`), returns the result with the higher `best_sim`.
+- Multi-scan path is unchanged — `cross_lang=True` default preserves existing behavior.
+
+**Frontend changes**:
+- `UseLiveScanOptions` gained a `language: LiveScanLang` field (`LiveScanLang = Language | "auto"`).
+- `runOneScan` sends `[{ raw_text: "", language, game }]` (single hint) instead of two hints.
+- `live-scan.tsx` holds `liveLang: Language` state (default `"en"`), renders a pill toggle (`🇺🇸 EN | 🇯🇵 JP`) in the viewfinder, passes it to the hook.
+- `RESCAN_COOLDOWN_MS` raised from 5,000 → **30,000ms**. With the confirmation gate adding one cycle of latency, a 5s cooldown was too short — the same card could re-trigger as soon as the gate cleared. 30s matches a natural deck-scanning cadence.
+
+#### Problem 2: phantom cards during physical card transitions
+
+When dropping one card to reveal the next in a deck, the camera captures several transitional frames: motion blur, overlapping cards, partially visible cards. The v30 architecture (no stability gate) sends every snapshot to the backend. YOLO may detect a shape in the blur; CLIP matches it to some random card; that phantom gets added to the session list.
+
+**Fix**: consecutive-frame confirmation gate in `useLiveScan.ts`. A `pendingMatchRef: string | null` tracks the top-match card ID from the previous scan. A card is only added when it is the top match on **two consecutive scans**. A physical card transition produces a different random match each frame (or no match), so it never gets two in a row. A steady card matches consistently and confirms in one extra cycle (~700-900ms added to first-add latency).
+
+Implementation:
+- On `allCandidates.length === 0`: reset `pendingMatchRef = null`.
+- On `allCandidates[0].id !== pendingMatchRef`: set `pendingMatchRef = cardId`, return.
+- On match confirmed (same ID twice): proceed to cooldown check and add.
+- `pendingMatchRef` cleared in `stopDetection` and `clearSession`.
+
+#### Batch-prices dedup
+
+Live scan sessions can accumulate the same card twice (e.g. user holds the same card across two 30s cooldown windows, or swaps back to a previously-seen card). `live-scan.tsx` deduplicates by `card.id` before pushing to batch-prices, keeping the first occurrence (newest-first list order = most recently scanned/swapped). If any duplicates were removed, `setBatchPriceCards(cards, duplicatesRemoved)` stores the count in `scanStore.liveSessionDuplicatesRemoved`. A dismissible yellow banner in `batch-prices.tsx` shows "N duplicate(s) removed — the most recent scan was kept for each card."
+
+#### Minor fixes
+
+- `multi-results.tsx`: added `style={styles.flatList}` (`flex: 1`) to the results `FlatList` — prevents the list from overflowing on some Android layouts.
+
+#### Smoke tests
+
+All 17 API endpoints and features verified healthy post-deployment: currency rates, card search (EN/JA/kana/set-hint/exclusion/card-number filter), card detail + price, PSA grade price, variant pricing, Redis cache hit (~10ms), streaming batch prices, history pagination, `/detect`, `/scan` with `lang=en/ja/auto`, PSA cert error handling.
+
+**Known remaining limitation**: static-background false positives (e.g. a blue desk matching water energy when no card is held) are reduced by the confirmation gate (a consistent background match could still confirm after two frames) but not fully eliminated. If this resurfaces after the gate is deployed, the fix is raising `_SIM_FLOOR` for the live scan path (e.g. 0.60) or requiring the full-frame fallback to be gated on YOLO detection confidence.

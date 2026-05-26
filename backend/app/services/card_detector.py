@@ -74,7 +74,8 @@ def detect_card_rectangles(
             area_frac = (bw * bh) / total_area
             if area_frac < _MIN_AREA_FRAC:
                 continue
-            boxes.append({"left": int(x1), "top": int(y1), "width": bw, "height": bh})
+            conf = float(box.conf[0])
+            boxes.append({"left": int(x1), "top": int(y1), "width": bw, "height": bh, "confidence": conf})
 
     logger.info("YOLO detect: image=%dx%d boxes=%d", w, h, len(boxes))
     boxes = _sort_boxes(boxes, h)

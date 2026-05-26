@@ -19,13 +19,15 @@ interface ScanState {
 
   // Cards selected for batch price lookup (with optional JP metadata)
   batchPriceCards: BatchPriceCard[];
+  // Number of duplicate card IDs removed when a live scan session ended
+  liveSessionDuplicatesRemoved: number;
 
   setGame: (game: Game) => void;
   setScanType: (scanType: ScanType) => void;
   setPsaCertInput: (cert: string) => void;
   setMultiScanResult: (result: MultiScanResult | null) => void;
   setScanTiming: (timing: ScanTiming | null) => void;
-  setBatchPriceCards: (cards: BatchPriceCard[]) => void;
+  setBatchPriceCards: (cards: BatchPriceCard[], duplicatesRemoved?: number) => void;
 
   // Progressive multi-scan actions
   clearMultiScan: () => void;
@@ -46,13 +48,15 @@ export const useScanStore = create<ScanState>((set) => ({
   multiScanError: null,
   scanTiming: null,
   batchPriceCards: [],
+  liveSessionDuplicatesRemoved: 0,
 
   setGame: (game) => set({ game }),
   setScanType: (scanType) => set({ scanType }),
   setPsaCertInput: (psaCertInput) => set({ psaCertInput }),
   setMultiScanResult: (multiScanResult) => set({ multiScanResult, multiScanLoading: false }),
   setScanTiming: (scanTiming) => set({ scanTiming }),
-  setBatchPriceCards: (batchPriceCards) => set({ batchPriceCards }),
+  setBatchPriceCards: (batchPriceCards, duplicatesRemoved = 0) =>
+    set({ batchPriceCards, liveSessionDuplicatesRemoved: duplicatesRemoved }),
 
   clearMultiScan: () => set({
     multiScanResult: null,
@@ -99,5 +103,6 @@ export const useScanStore = create<ScanState>((set) => ({
       multiScanError: null,
       scanTiming: null,
       batchPriceCards: [],
+      liveSessionDuplicatesRemoved: 0,
     }),
 }));

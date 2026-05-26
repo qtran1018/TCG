@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, Image,
-  ActivityIndicator, TouchableOpacity, Linking,
+  ActivityIndicator, TouchableOpacity, Linking, Pressable,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -29,8 +29,9 @@ const openUrl = (url: string) => {
 
 export default function BatchPricesScreen() {
   const router = useRouter();
-  const { batchPriceCards, scanType } = useScanStore();
+  const { batchPriceCards, scanType, liveSessionDuplicatesRemoved } = useScanStore();
   const { currency, jpyRate, fetching: rateFetching, setCurrency } = useCurrencyStore();
+  const [dupBannerVisible, setDupBannerVisible] = useState(liveSessionDuplicatesRemoved > 0);
   const [entries, setEntries] = useState<CardPriceEntry[]>(
     batchPriceCards.map(({ card, jaCardNumber }) => ({
       card, jaCardNumber, data: null, loading: true, error: false,
@@ -146,6 +147,14 @@ export default function BatchPricesScreen() {
           {totalLoading > 0 ? ` · fetching ${totalLoading}...` : ""}
           {currency === "JPY" && jpyRate != null ? ` · 1 USD = ¥${jpyRate.toFixed(0)}` : ""}
         </Text>
+        {dupBannerVisible && (
+          <Pressable style={styles.dupBanner} onPress={() => setDupBannerVisible(false)}>
+            <Text style={styles.dupBannerText}>
+              {liveSessionDuplicatesRemoved} duplicate{liveSessionDuplicatesRemoved !== 1 ? "s" : ""} removed — the most recent scan was kept for each card.
+            </Text>
+            <Text style={styles.dupBannerDismiss}>✕</Text>
+          </Pressable>
+        )}
       </View>
 
       <FlatList
@@ -245,6 +254,20 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   title: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: COLORS.textMuted, fontSize: 13 },
+  dupBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,200,0,0.12)",
+    borderColor: "rgba(255,200,0,0.35)",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 6,
+    gap: 8,
+  },
+  dupBannerText: { flex: 1, color: "#c8a600", fontSize: 12, lineHeight: 17 },
+  dupBannerDismiss: { color: "#c8a600", fontSize: 13, fontWeight: "700" },
   toggle: {
     flexDirection: "row",
     backgroundColor: COLORS.bg,

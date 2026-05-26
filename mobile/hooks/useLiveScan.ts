@@ -4,7 +4,11 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Camera } from "react-native-vision-camera";
 import { api } from "@/services/api";
 import type { CardOut, PriceOut } from "@/services/api";
-import type { Game, ScanType } from "@/constants";
+import type { Game, Language, ScanType } from "@/constants";
+
+// "auto" searches both languages and picks the higher CLIP similarity (less
+// reliable for identical-art EN/JA prints); en/ja hard-lock the search.
+export type LiveScanLang = Language | "auto";
 
 export interface LiveSessionCard {
   tempId: string;
@@ -18,14 +22,15 @@ export interface LiveSessionCard {
 interface UseLiveScanOptions {
   game: Game;
   scanType: ScanType;
+  language: LiveScanLang;
 }
 
 // Resize snapshot before upload — 640px is plenty for CLIP (224px input) + OCR
 const SCAN_SIZE = 640;
 // Suppress duplicate adds for the same card within this window
-const RESCAN_COOLDOWN_MS = 5000;
+const RESCAN_COOLDOWN_MS = 30000;
 
-export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
+export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
   const cameraRef = useRef<Camera>(null);
 
   const [sessionCards, setSessionCards] = useState<LiveSessionCard[]>([]);
@@ -37,6 +42,9 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
   const loopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // card.id → timestamp of last successful add; reset on clearSession
   const seenCardTimesRef = useRef<Map<string, number>>(new Map());
+  // Last frame's top-match card id — a card must match twice in a row before
+  // it's added. Filters transient phantoms during physical card transitions.
+  const pendingMatchRef = useRef<string | null>(null);
 
   const totalValue = sessionCards.reduce((sum, sc) => {
     if (!sc.price) return sum;
@@ -74,10 +82,7 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
       const allCandidates: CardOut[] = [];
       await api.scanStream(
         { image: imageBase64 }, // no boxes — backend YOLO auto-detects the card
-        [
-          { raw_text: "", language: "en", game },
-          { raw_text: "", language: "ja", game },
-        ],
+        [{ raw_text: "", language, game }], // language locks the CLIP search ("auto" = both)
         "combined",
         (result) => {
           result.candidates?.forEach((c) => {
@@ -86,14 +91,27 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
         },
       );
 
-      if (!isRunningRef.current || allCandidates.length === 0) return;
+      if (!isRunningRef.current || allCandidates.length === 0) {
+        pendingMatchRef.current = null;
+        return;
+      }
 
       const card = allCandidates[0];
+      const cardId = String(card.id);
+
+      // Confirmation gate: a card must be the top match on two consecutive scans
+      // before it's added. Dropping one card to reveal the next produces a
+      // different (or no) match each frame, so transient phantoms never confirm.
+      // A steady card matches consistently and confirms within ~1 extra cycle.
+      if (pendingMatchRef.current !== cardId) {
+        pendingMatchRef.current = cardId;
+        return;
+      }
 
       // Skip if we already added this card recently
-      const lastSeen = seenCardTimesRef.current.get(String(card.id));
+      const lastSeen = seenCardTimesRef.current.get(cardId);
       if (lastSeen && Date.now() - lastSeen < RESCAN_COOLDOWN_MS) return;
-      seenCardTimesRef.current.set(String(card.id), Date.now());
+      seenCardTimesRef.current.set(cardId, Date.now());
 
       const tempId = `live-${Date.now()}`;
       setSessionCards((prev) => [{
@@ -120,7 +138,7 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
       isScanningRef.current = false;
       setIsScanning(false);
     }
-  }, [game, scanType]);
+  }, [game, scanType, language]);
 
   const runOneScanRef = useRef(runOneScan);
   useEffect(() => { runOneScanRef.current = runOneScan; }, [runOneScan]);
@@ -147,6 +165,7 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
     isScanningRef.current = false;
     setIsRunning(false);
     setIsScanning(false);
+    pendingMatchRef.current = null;
     if (loopTimerRef.current) {
       clearTimeout(loopTimerRef.current);
       loopTimerRef.current = null;
@@ -156,6 +175,7 @@ export function useLiveScan({ game, scanType }: UseLiveScanOptions) {
   const clearSession = useCallback(() => {
     setSessionCards([]);
     seenCardTimesRef.current.clear();
+    pendingMatchRef.current = null;
   }, []);
 
   const removeCard = useCallback((tempId: string) => {

@@ -217,8 +217,14 @@ async def _image_search_one(
     image: "Image.Image | None",
     cache_seed: str | None,
     language: str = "en",
+    cross_lang: bool = True,
 ) -> tuple[list[CardOutLite], float, str]:
-    """Per-crop image search. Caches by cache_seed + language."""
+    """Per-crop image search. Caches by cache_seed + language.
+
+    `cross_lang`: when True, a below-threshold result also probes the other
+    language and may switch to it. Disable for a hard language lock (live scan
+    manual mode) or when the caller searches both languages itself.
+    """
     if image is None or cache_seed is None:
         return [], 0.0, "image:no_match"
 
@@ -248,7 +254,7 @@ async def _image_search_one(
     # was causing JP cards to be returned as the visually-similar EN print (e.g. Dewgong
     # JP photo with kana correctly detected: JP=0.477, EN=0.489 → wrongly returned EN).
     _FALLBACK_MARGIN = 0.05
-    if best_sim < _SIM_THRESHOLD:
+    if cross_lang and best_sim < _SIM_THRESHOLD:
         other = "en" if language == "ja" else "ja"
         other_candidates, other_sim, other_query = await _vector_search(embedding, query_phash, cache_seed, other)
         if other_sim > best_sim + _FALLBACK_MARGIN:
@@ -402,40 +408,46 @@ async def scan(req: ScanRequest):
             cache_seeds = [None] * len(boxes)
         num_items = len(boxes)
     elif req.image:
-        # Live-scan mode: auto-detect via YOLO, crop to largest card, single result.
-        # If no card is found (or detected box is too small), num_items=0 → empty stream.
-        # Never fall back to full-image CLIP — backgrounds cause false positives.
+        # Live-scan mode: auto-detect the largest card via YOLO, crop to it.
+        # Single-shot — always produces exactly one result item.
         from app.services.card_detector import detect_card_rectangles
-        _LIVE_MIN_AREA_FRAC = 0.05  # card must cover ≥5% of frame; filters background noise
         try:
             full_bytes = base64.b64decode(req.image)
             full_sha = hashlib.sha256(full_bytes).hexdigest()
             detected_boxes, img_w, img_h = await asyncio.to_thread(
-                detect_card_rectangles, req.image, 5,
+                detect_card_rectangles, req.image, 1,
             )
-            total_area = img_w * img_h
-            large_boxes = [
-                b for b in detected_boxes
-                if (b["width"] * b["height"]) / total_area >= _LIVE_MIN_AREA_FRAC
-            ]
-            if large_boxes:
-                full_img = Image.open(io.BytesIO(full_bytes))
-                full_img.load()
-                if full_img.mode != "RGB":
-                    full_img = full_img.convert("RGB")
-                b = max(large_boxes, key=lambda d: d["width"] * d["height"])
+            full_img = Image.open(io.BytesIO(full_bytes))
+            full_img.load()
+            if full_img.mode != "RGB":
+                full_img = full_img.convert("RGB")
+            if detected_boxes:
+                total_px = img_w * img_h
+                b = max(
+                    detected_boxes,
+                    key=lambda d: (d["width"] * d["height"] / total_px) * d.get("confidence", 1.0),
+                )
+                area_frac = (b["width"] * b["height"]) / total_px
+                logger.info(
+                    "live-scan: selected box area_frac=%.3f conf=%.3f from %d detection(s)",
+                    area_frac, b.get("confidence", 1.0), len(detected_boxes),
+                )
                 left = max(0, min(img_w, b["left"]))
                 top = max(0, min(img_h, b["top"]))
                 right = max(0, min(img_w, b["left"] + b["width"]))
                 bottom = max(0, min(img_h, b["top"] + b["height"]))
-                imgs.append(full_img.crop((left, top, right, bottom)))
+                crop_img = full_img.crop((left, top, right, bottom))
+                imgs.append(crop_img)
                 cache_seeds.append(f"{full_sha}:{left},{top},{right},{bottom}")
-                num_items = 1
             else:
-                num_items = 0  # no card in frame — skip this cycle
+                # No card detected — send full image; CLIP+OCR will handle it
+                imgs.append(full_img)
+                cache_seeds.append(full_sha)
         except Exception:
             logger.exception("live-scan auto-detect failed")
-            num_items = 0
+            imgs.append(None)
+            cache_seeds.append(None)
+        num_items = 1
     else:
         crops = (req.crops or [])[:20]
         for b64 in crops:
@@ -458,6 +470,10 @@ async def scan(req: ScanRequest):
 
     do_image = req.scan_mode in ("image", "combined")
     do_ocr = req.scan_mode in ("ocr", "combined")
+    # Live scan sends a single image with no boxes; search both languages in parallel
+    # to avoid defaulting JP cards to their EN counterpart (EN sim ≥ 0.65 prevents
+    # the single-language cross-language fallback from ever triggering).
+    is_live_scan = req.image is not None and req.boxes is None
 
     async def _empty_image(_i: int) -> tuple[list[CardOutLite], float, str]:
         return [], 0.0, "image:no_match"
@@ -467,19 +483,47 @@ async def scan(req: ScanRequest):
 
     async def per_crop(i: int) -> ScanResultItem:
         lang = hints[i].language if hints[i].language in VALID_LANGUAGES else "en"
-        image_task = _image_search_one(i, imgs[i], cache_seeds[i], lang) if do_image else _empty_image(i)
-        ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
-        # return_exceptions=True so a failure in one branch doesn't zero out the
-        # other — surface degraded mode via partial flag instead.
-        image_res, ocr_res = await asyncio.gather(image_task, ocr_task, return_exceptions=True)
-        image_failed = isinstance(image_res, BaseException)
-        ocr_failed = isinstance(ocr_res, BaseException)
-        if image_failed:
-            logger.exception("Image search failed for crop %d", i, exc_info=image_res)
-            image_res = ([], 0.0, "image:no_match")
-        if ocr_failed:
-            logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
-            ocr_res = ([], "")
+
+        if is_live_scan and do_image:
+            ocr_coro = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
+            if hints[i].language == "auto":
+                # Auto: search EN and JA simultaneously; winner is higher sim.
+                en_task = asyncio.create_task(_image_search_one(i, imgs[i], cache_seeds[i], "en", cross_lang=False))
+                ja_task = asyncio.create_task(_image_search_one(i, imgs[i], cache_seeds[i], "ja", cross_lang=False))
+                en_res, ja_res, ocr_res = await asyncio.gather(en_task, ja_task, ocr_coro, return_exceptions=True)
+                image_failed = isinstance(en_res, BaseException) and isinstance(ja_res, BaseException)
+                en_c, en_s, en_q = en_res if not isinstance(en_res, BaseException) else ([], 0.0, "image:no_match")
+                ja_c, ja_s, ja_q = ja_res if not isinstance(ja_res, BaseException) else ([], 0.0, "image:no_match")
+                if ja_s > en_s:
+                    logger.info("live-scan lang(auto): ja=%.3f > en=%.3f — using ja", ja_s, en_s)
+                    image_res = (ja_c, ja_s, ja_q)
+                else:
+                    image_res = (en_c, en_s, en_q)
+            else:
+                # Manual lock: search only the chosen language, no cross-lang fallback.
+                img_task = asyncio.create_task(_image_search_one(i, imgs[i], cache_seeds[i], lang, cross_lang=False))
+                img_res, ocr_res = await asyncio.gather(img_task, ocr_coro, return_exceptions=True)
+                image_failed = isinstance(img_res, BaseException)
+                image_res = img_res if not image_failed else ([], 0.0, "image:no_match")
+
+            ocr_failed = isinstance(ocr_res, BaseException)
+            if ocr_failed:
+                logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
+                ocr_res = ([], "")
+        else:
+            image_task = _image_search_one(i, imgs[i], cache_seeds[i], lang) if do_image else _empty_image(i)
+            ocr_task = _ocr_search_one(hints[i]) if do_ocr else _empty_ocr(hints[i])
+            # return_exceptions=True so a failure in one branch doesn't zero out the
+            # other — surface degraded mode via partial flag instead.
+            image_res, ocr_res = await asyncio.gather(image_task, ocr_task, return_exceptions=True)
+            image_failed = isinstance(image_res, BaseException)
+            ocr_failed = isinstance(ocr_res, BaseException)
+            if image_failed:
+                logger.exception("Image search failed for crop %d", i, exc_info=image_res)
+                image_res = ([], 0.0, "image:no_match")
+            if ocr_failed:
+                logger.exception("OCR search failed for crop %d", i, exc_info=ocr_res)
+                ocr_res = ([], "")
 
         # Re-rank image candidates by card number extracted from the bottom-strip OCR.
         # Handles same-art cards from different sets (e.g. Doduo #84/165 Pokémon 151

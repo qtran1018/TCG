@@ -15,6 +15,7 @@ import { useCurrencyStore } from "@/store/currencyStore";
 import { fmtPrice } from "@/utils/currency";
 import { useColors } from "@/hooks/useColors";
 import { COLORS } from "@/constants";
+import type { Language } from "@/constants";
 
 const VIEWFINDER_H = Dimensions.get("window").height * 0.38;
 
@@ -26,10 +27,12 @@ export default function LiveScanScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
 
+  const [liveLang, setLiveLang] = useState<Language>("en");
+
   const {
     cameraRef, sessionCards, isRunning, isScanning, totalValue,
     startDetection, stopDetection, clearSession, removeCard, swapCard,
-  } = useLiveScan({ game, scanType });
+  } = useLiveScan({ game, scanType, language: liveLang });
 
   const [swapTarget, setSwapTarget] = useState<LiveSessionCard | null>(null);
 
@@ -43,9 +46,21 @@ export default function LiveScanScreen() {
     stopDetection();
     const cards = sessionCards.filter((sc) => sc.card !== null);
     if (cards.length === 0) return;
+
+    // Dedup by card.id, keeping the first occurrence (sessionCards is newest-first,
+    // so first = most recently scanned or swapped by the user).
+    const seen = new Set<number>();
+    const deduped = cards.filter((sc) => {
+      if (seen.has(sc.card!.id)) return false;
+      seen.add(sc.card!.id);
+      return true;
+    });
+    const duplicatesRemoved = cards.length - deduped.length;
+
     const { setBatchPriceCards } = useScanStore.getState();
     setBatchPriceCards(
-      cards.map((sc) => ({ card: sc.card!, jaCardNumber: undefined })),
+      deduped.map((sc) => ({ card: sc.card!, jaCardNumber: undefined })),
+      duplicatesRemoved,
     );
     router.push("/batch-prices");
   }, [sessionCards, stopDetection, router]);
@@ -93,6 +108,22 @@ export default function LiveScanScreen() {
         {isRunning && isScanning && (
           <View style={[StyleSheet.absoluteFill, styles.scanningBorder]} pointerEvents="none" />
         )}
+
+        {/* Language lock toggle */}
+        <View style={styles.langToggle}>
+          {(["en", "ja"] as const).map((lng) => (
+            <TouchableOpacity
+              key={lng}
+              style={[styles.langOption, liveLang === lng && styles.langOptionActive]}
+              onPress={() => setLiveLang(lng)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.langOptionText, liveLang === lng && styles.langOptionTextActive]}>
+                {lng === "en" ? "🇺🇸 EN" : "🇯🇵 JP"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         {!isRunning ? (
           <TouchableOpacity style={styles.startBtn} onPress={startDetection} activeOpacity={0.85}>
@@ -321,6 +352,26 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "rgba(108,99,255,0.7)",
   },
+  langToggle: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 16,
+    padding: 3,
+    gap: 2,
+  },
+  langOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 13,
+  },
+  langOptionActive: {
+    backgroundColor: "rgba(108,99,255,0.9)",
+  },
+  langOptionText: { color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: "600" },
+  langOptionTextActive: { color: "#fff", fontWeight: "700" },
 
   startBtn: {
     position: "absolute",

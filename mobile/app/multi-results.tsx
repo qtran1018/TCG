@@ -247,6 +247,7 @@ export default function MultiResultsScreen() {
       <FlatList
         data={cards}
         keyExtractor={(item) => String(item.regionIndex)}
+        style={styles.flatList}
         contentContainerStyle={styles.list}
         renderItem={renderItem}
         extraData={flatListExtraData}
@@ -422,6 +423,7 @@ const styles = StyleSheet.create({
   selectAllText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
   getPricesBtn: { backgroundColor: COLORS.accent, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
   getPricesBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  flatList: { flex: 1 },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
   timingBanner: {
     marginHorizontal: 16,
