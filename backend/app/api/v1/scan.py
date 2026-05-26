@@ -402,37 +402,40 @@ async def scan(req: ScanRequest):
             cache_seeds = [None] * len(boxes)
         num_items = len(boxes)
     elif req.image:
-        # Live-scan mode: auto-detect the largest card via YOLO, crop to it.
-        # Single-shot — always produces exactly one result item.
+        # Live-scan mode: auto-detect via YOLO, crop to largest card, single result.
+        # If no card is found (or detected box is too small), num_items=0 → empty stream.
+        # Never fall back to full-image CLIP — backgrounds cause false positives.
         from app.services.card_detector import detect_card_rectangles
+        _LIVE_MIN_AREA_FRAC = 0.05  # card must cover ≥5% of frame; filters background noise
         try:
             full_bytes = base64.b64decode(req.image)
             full_sha = hashlib.sha256(full_bytes).hexdigest()
             detected_boxes, img_w, img_h = await asyncio.to_thread(
-                detect_card_rectangles, req.image, 1,
+                detect_card_rectangles, req.image, 5,
             )
-            full_img = Image.open(io.BytesIO(full_bytes))
-            full_img.load()
-            if full_img.mode != "RGB":
-                full_img = full_img.convert("RGB")
-            if detected_boxes:
-                b = max(detected_boxes, key=lambda d: d["width"] * d["height"])
+            total_area = img_w * img_h
+            large_boxes = [
+                b for b in detected_boxes
+                if (b["width"] * b["height"]) / total_area >= _LIVE_MIN_AREA_FRAC
+            ]
+            if large_boxes:
+                full_img = Image.open(io.BytesIO(full_bytes))
+                full_img.load()
+                if full_img.mode != "RGB":
+                    full_img = full_img.convert("RGB")
+                b = max(large_boxes, key=lambda d: d["width"] * d["height"])
                 left = max(0, min(img_w, b["left"]))
                 top = max(0, min(img_h, b["top"]))
                 right = max(0, min(img_w, b["left"] + b["width"]))
                 bottom = max(0, min(img_h, b["top"] + b["height"]))
-                crop_img = full_img.crop((left, top, right, bottom))
-                imgs.append(crop_img)
+                imgs.append(full_img.crop((left, top, right, bottom)))
                 cache_seeds.append(f"{full_sha}:{left},{top},{right},{bottom}")
+                num_items = 1
             else:
-                # No card detected — send full image; CLIP+OCR will handle it
-                imgs.append(full_img)
-                cache_seeds.append(full_sha)
+                num_items = 0  # no card in frame — skip this cycle
         except Exception:
             logger.exception("live-scan auto-detect failed")
-            imgs.append(None)
-            cache_seeds.append(None)
-        num_items = 1
+            num_items = 0
     else:
         crops = (req.crops or [])[:20]
         for b64 in crops:
