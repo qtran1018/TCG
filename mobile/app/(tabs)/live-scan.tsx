@@ -1,14 +1,13 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Image, ActivityIndicator, LayoutChangeEvent,
+  Image, ActivityIndicator, Dimensions,
+  Modal, ScrollView, Pressable,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { LiveBoundingBox } from "@/components/Scanner/LiveBoundingBox";
-import { StabilityRing } from "@/components/Scanner/StabilityRing";
 import { useLiveScan } from "@/hooks/useLiveScan";
 import type { LiveSessionCard } from "@/hooks/useLiveScan";
 import { useScanStore } from "@/store/scanStore";
@@ -17,7 +16,7 @@ import { fmtPrice } from "@/utils/currency";
 import { useColors } from "@/hooks/useColors";
 import { COLORS } from "@/constants";
 
-const VIEWFINDER_RATIO = 0.58; // fraction of screen height for the camera
+const VIEWFINDER_H = Dimensions.get("window").height * 0.38;
 
 export default function LiveScanScreen() {
   const router = useRouter();
@@ -28,18 +27,12 @@ export default function LiveScanScreen() {
   const device = useCameraDevice("back");
 
   const {
-    cameraRef, sessionCards, box, boxState, stabilityProgress, snapDims,
-    isRunning, isCapturing, totalValue, startDetection, stopDetection, clearSession,
+    cameraRef, sessionCards, isRunning, isScanning, totalValue,
+    startDetection, stopDetection, clearSession, removeCard, swapCard,
   } = useLiveScan({ game, scanType });
 
-  const viewfinderDims = useRef({ width: 1, height: 1 });
+  const [swapTarget, setSwapTarget] = useState<LiveSessionCard | null>(null);
 
-  const onViewfinderLayout = useCallback((e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    viewfinderDims.current = { width, height };
-  }, []);
-
-  // Stop detection when leaving the screen (never auto-start)
   useFocusEffect(
     useCallback(() => {
       return () => stopDetection();
@@ -50,8 +43,6 @@ export default function LiveScanScreen() {
     stopDetection();
     const cards = sessionCards.filter((sc) => sc.card !== null);
     if (cards.length === 0) return;
-
-    // Navigate to batch-prices with session cards
     const { setBatchPriceCards } = useScanStore.getState();
     setBatchPriceCards(
       cards.map((sc) => ({ card: sc.card!, jaCardNumber: undefined })),
@@ -85,12 +76,11 @@ export default function LiveScanScreen() {
   }
 
   const readyCount = sessionCards.filter((sc) => sc.card !== null).length;
-  const loadingCount = sessionCards.filter((sc) => sc.scanning).length;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["bottom"]}>
       {/* Camera viewfinder */}
-      <View style={styles.viewfinder} onLayout={onViewfinderLayout}>
+      <View style={styles.viewfinder}>
         <Camera
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
@@ -99,18 +89,11 @@ export default function LiveScanScreen() {
           photo={true}
         />
 
-        <LiveBoundingBox
-          box={box}
-          state={boxState}
-          viewWidth={viewfinderDims.current.width}
-          viewHeight={viewfinderDims.current.height}
-          imageWidth={snapDims.width}
-          imageHeight={snapDims.height}
-        />
+        {/* Scanning pulse border */}
+        {isRunning && isScanning && (
+          <View style={[StyleSheet.absoluteFill, styles.scanningBorder]} pointerEvents="none" />
+        )}
 
-        <StabilityRing progress={stabilityProgress} visible={box !== null && !isCapturing} />
-
-        {/* Start / Stop overlay */}
         {!isRunning ? (
           <TouchableOpacity style={styles.startBtn} onPress={startDetection} activeOpacity={0.85}>
             <Ionicons name="radio-outline" size={28} color="#fff" />
@@ -118,23 +101,19 @@ export default function LiveScanScreen() {
           </TouchableOpacity>
         ) : (
           <>
-            {/* Status badge */}
             <View style={styles.statusBadge}>
-              {isCapturing ? (
+              {isScanning ? (
                 <>
                   <ActivityIndicator size="small" color="#fff" />
                   <Text style={styles.statusText}>Scanning...</Text>
                 </>
-              ) : box ? (
+              ) : (
                 <>
                   <View style={styles.statusDot} />
-                  <Text style={styles.statusText}>Hold still...</Text>
+                  <Text style={styles.statusText}>Live</Text>
                 </>
-              ) : (
-                <Text style={styles.statusText}>Point at a card</Text>
               )}
             </View>
-            {/* Stop button */}
             <TouchableOpacity style={styles.stopBtn} onPress={stopDetection} activeOpacity={0.8}>
               <Ionicons name="stop-circle-outline" size={20} color="#fff" />
               <Text style={styles.stopBtnText}>Stop</Text>
@@ -148,7 +127,6 @@ export default function LiveScanScreen() {
         <View style={styles.sessionBarLeft}>
           <Text style={[styles.sessionCount, { color: C.text }]}>
             {readyCount} card{readyCount !== 1 ? "s" : ""}
-            {loadingCount > 0 ? ` · ${loadingCount} scanning` : ""}
           </Text>
           {readyCount > 0 && (
             <Text style={[styles.sessionTotal, { color: C.accent }]}>
@@ -166,10 +144,7 @@ export default function LiveScanScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[
-              styles.endBtn,
-              { backgroundColor: readyCount > 0 ? C.accent : C.border },
-            ]}
+            style={[styles.endBtn, { backgroundColor: readyCount > 0 ? C.accent : C.border }]}
             onPress={handleEndSession}
             disabled={readyCount === 0}
           >
@@ -187,7 +162,15 @@ export default function LiveScanScreen() {
         style={styles.list}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <SessionCardRow item={item} scanType={scanType} currency={currency} jpyRate={jpyRate} C={C} />
+          <SessionCardRow
+            item={item}
+            scanType={scanType}
+            currency={currency}
+            jpyRate={jpyRate}
+            C={C}
+            onRemove={() => removeCard(item.tempId)}
+            onSwap={() => setSwapTarget(item)}
+          />
         )}
         ListEmptyComponent={
           <View style={styles.emptyList}>
@@ -197,18 +180,73 @@ export default function LiveScanScreen() {
           </View>
         }
       />
+
+      {/* Swap modal */}
+      <Modal
+        visible={swapTarget !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSwapTarget(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSwapTarget(null)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: C.surface }]} onPress={() => {}}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: C.text }]}>Choose correct card</Text>
+              <TouchableOpacity onPress={() => setSwapTarget(null)}>
+                <Ionicons name="close" size={22} color={C.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalList}>
+              {swapTarget?.candidates.map((candidate) => (
+                <TouchableOpacity
+                  key={candidate.id}
+                  style={[
+                    styles.modalRow,
+                    { borderColor: C.border },
+                    swapTarget.card?.id === candidate.id && { borderColor: C.accent, backgroundColor: C.accent + "18" },
+                  ]}
+                  onPress={() => {
+                    swapCard(swapTarget.tempId, candidate);
+                    setSwapTarget(null);
+                  }}
+                >
+                  {candidate.image_url ? (
+                    <Image source={{ uri: candidate.image_url }} style={styles.modalCardImage} resizeMode="contain" />
+                  ) : (
+                    <View style={[styles.modalCardImage, { backgroundColor: C.border, borderRadius: 4 }]} />
+                  )}
+                  <View style={styles.modalCardInfo}>
+                    <Text style={[styles.modalCardName, { color: C.text }]} numberOfLines={1}>{candidate.name}</Text>
+                    {candidate.set_name && (
+                      <Text style={[styles.modalCardSub, { color: C.textMuted }]} numberOfLines={1}>{candidate.set_name}</Text>
+                    )}
+                    <Text style={[styles.modalCardNum, { color: C.accent }]}>
+                      {candidate.language === "ja" ? "🇯🇵" : "🇺🇸"} {candidate.card_number ?? ""}
+                    </Text>
+                  </View>
+                  {swapTarget.card?.id === candidate.id && (
+                    <Ionicons name="checkmark-circle" size={20} color={C.accent} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 function SessionCardRow({
-  item, scanType, currency, jpyRate, C,
+  item, scanType, currency, jpyRate, C, onRemove, onSwap,
 }: {
   item: LiveSessionCard;
   scanType: string;
   currency: "USD" | "JPY";
   jpyRate: number | null;
   C: ReturnType<typeof useColors>;
+  onRemove: () => void;
+  onSwap: () => void;
 }) {
   if (item.scanning) {
     return (
@@ -222,21 +260,9 @@ function SessionCardRow({
     );
   }
 
-  if (item.error || !item.card) {
-    return (
-      <View style={[styles.cardRow, { backgroundColor: C.surface, borderColor: C.border }]}>
-        <View style={[styles.cardImagePlaceholder, { backgroundColor: C.border }]}>
-          <Text style={{ color: C.textMuted, fontSize: 18 }}>?</Text>
-        </View>
-        <View style={styles.cardInfo}>
-          <Text style={[styles.cardName, { color: COLORS.error }]}>Could not identify</Text>
-          <Text style={[styles.cardSub, { color: C.textMuted }]}>Try scanning again</Text>
-        </View>
-      </View>
-    );
-  }
+  if (!item.card) return null;
 
-  const { card, price, priceLoading } = item;
+  const { card, price, priceLoading, candidates } = item;
   const priceValue = scanType === "psa" ? price?.price_graded_10 : price?.price_loose;
 
   return (
@@ -264,6 +290,16 @@ function SessionCardRow({
           )}
         </View>
       </View>
+      <View style={styles.cardActions}>
+        {candidates.length > 1 && (
+          <TouchableOpacity style={styles.cardActionBtn} onPress={onSwap}>
+            <Ionicons name="swap-horizontal-outline" size={16} color={C.accent} />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.cardActionBtn} onPress={onRemove}>
+          <Ionicons name="close" size={16} color={C.textMuted} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -277,9 +313,13 @@ const styles = StyleSheet.create({
 
   viewfinder: {
     width: "100%",
-    aspectRatio: 3 / 4,
+    height: VIEWFINDER_H,
     backgroundColor: "#000",
     overflow: "hidden",
+  },
+  scanningBorder: {
+    borderWidth: 3,
+    borderColor: "rgba(108,99,255,0.7)",
   },
 
   startBtn: {
@@ -382,4 +422,40 @@ const styles = StyleSheet.create({
   cardBottom: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
   cardNumber: { fontSize: 11, fontWeight: "600" },
   cardPrice: { fontSize: 14, fontWeight: "800" },
+  cardActions: { flexDirection: "column", gap: 6, alignItems: "center" },
+  cardActionBtn: { padding: 4 },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    maxHeight: "70%",
+    paddingBottom: 32,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  modalTitle: { fontSize: 16, fontWeight: "700" },
+  modalList: { paddingHorizontal: 16, gap: 10, paddingBottom: 8 },
+  modalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+  },
+  modalCardImage: { width: 44, height: 62 },
+  modalCardInfo: { flex: 1, gap: 2 },
+  modalCardName: { fontSize: 13, fontWeight: "700" },
+  modalCardSub: { fontSize: 11 },
+  modalCardNum: { fontSize: 11, fontWeight: "600" },
 });

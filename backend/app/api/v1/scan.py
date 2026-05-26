@@ -359,13 +359,15 @@ async def scan(req: ScanRequest):
     completion order (not crop order) so fast cards appear in the UI without
     waiting for slow ones.
     """
-    # Decide input mode: server-side crop (image+boxes) takes priority when present.
-    # `imgs` is now list[PIL.Image] — passed straight through to the embedder so we
-    # avoid the JPEG re-encode → JPEG re-decode round-trip that was happening before.
+    # Decide input mode:
+    #   (a) image + explicit boxes  — server-side crop to provided boxes (multi-scan)
+    #   (b) image + no boxes (None) — auto-detect via YOLO, crop to largest card (live scan)
+    #   (c) crops list              — legacy pre-cropped mode
+    # `imgs` is list[PIL.Image] passed to the embedder (no JPEG re-encode round-trip).
     # `cache_seeds` is a parallel list of deterministic cache key strings.
     imgs: list["Image.Image | None"] = []
     cache_seeds: list[str | None] = []
-    if req.image and req.boxes:
+    if req.image and req.boxes is not None:
         boxes = req.boxes[:20]
         try:
             full_bytes = base64.b64decode(req.image)
@@ -399,6 +401,38 @@ async def scan(req: ScanRequest):
             imgs = [None] * len(boxes)
             cache_seeds = [None] * len(boxes)
         num_items = len(boxes)
+    elif req.image:
+        # Live-scan mode: auto-detect the largest card via YOLO, crop to it.
+        # Single-shot — always produces exactly one result item.
+        from app.services.card_detector import detect_card_rectangles
+        try:
+            full_bytes = base64.b64decode(req.image)
+            full_sha = hashlib.sha256(full_bytes).hexdigest()
+            detected_boxes, img_w, img_h = await asyncio.to_thread(
+                detect_card_rectangles, req.image, 1,
+            )
+            full_img = Image.open(io.BytesIO(full_bytes))
+            full_img.load()
+            if full_img.mode != "RGB":
+                full_img = full_img.convert("RGB")
+            if detected_boxes:
+                b = max(detected_boxes, key=lambda d: d["width"] * d["height"])
+                left = max(0, min(img_w, b["left"]))
+                top = max(0, min(img_h, b["top"]))
+                right = max(0, min(img_w, b["left"] + b["width"]))
+                bottom = max(0, min(img_h, b["top"] + b["height"]))
+                crop_img = full_img.crop((left, top, right, bottom))
+                imgs.append(crop_img)
+                cache_seeds.append(f"{full_sha}:{left},{top},{right},{bottom}")
+            else:
+                # No card detected — send full image; CLIP+OCR will handle it
+                imgs.append(full_img)
+                cache_seeds.append(full_sha)
+        except Exception:
+            logger.exception("live-scan auto-detect failed")
+            imgs.append(None)
+            cache_seeds.append(None)
+        num_items = 1
     else:
         crops = (req.crops or [])[:20]
         for b64 in crops:

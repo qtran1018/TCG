@@ -564,3 +564,54 @@ pokemontcg.io images for McDonald's sets were low-quality or missing. TCGCollect
 `card/[id].tsx` uses `card.image_url_hi ?? card.image_url` for display. pokemontcg.io originally set both fields for McDonald's cards; `image_url_hi` pointed to `_hires.png` URLs which are broken/404 for all McDonald's sets. The first run of `update_mcd_images.py` only updated `image_url`, leaving the stale broken `image_url_hi` — so card detail showed no image while search results (using `image_url` directly) worked fine.
 
 Fix: `update_mcd_images.py` now sets `card.image_url_hi = image_url` alongside `card.image_url`. Skip condition updated to `card.image_url == image_url and card.image_url_hi == image_url`. McDonald's EN is the only card category where `image_url_hi` is set but broken — EN cards from pokemontcg.io have valid hi-res URLs; JP cards from TCGCollector leave `image_url_hi` null (falling back correctly to `image_url`).
+
+---
+
+### v30 — Live Scan rewrite: decktradr-style single-roundtrip architecture (2026-05-26)
+
+#### Problem
+
+Live scan v27 used a two-step loop: (1) detect card position via backend `/detect` (~200-400ms) → (2) `takePhoto` (~400ms) → resize to 1600px → `/scan` with the box (~700ms). Total latency per card: ~2-3 seconds, plus a 500ms stability hold before triggering. On-device YOLO was also broken in the loop context (JSI handle invalidation), meaning every detection cycle hit the backend.
+
+#### New architecture
+
+Single roundtrip per scan cycle, no stability gate:
+
+1. `takeSnapshot({ quality: 80 })` — ~50ms, non-blocking
+2. Resize to 640px — sufficient for CLIP (224×224 input) and OCR
+3. `POST /api/v1/scan` with `{ image: base64 }` and no `boxes` field — backend handles detection + recognition in one pass
+4. Backend auto-detect path (`elif req.image:` in `scan.py`): runs `detect_card_rectangles` via `asyncio.to_thread`, crops to the largest detected card, passes the tight crop to CLIP + OCR. Falls back to full image if YOLO finds nothing.
+5. Result streamed back; `candidates[0]` added to session list if not recently seen
+
+Cycle time: ~700-900ms (scan duration is the natural rate limiter; next scan starts immediately on completion).
+
+#### Backend change (`scan.py`)
+
+Added a third input mode to the scan endpoint's input dispatch:
+
+- `image + boxes is not None` → server-side crop to provided boxes (multi-scan, unchanged)
+- `image + boxes is None` (new) → auto-detect via YOLO, crop to largest card, single result item
+- `crops list` → legacy pre-cropped mode (unchanged)
+
+The `boxes` Pydantic field defaults to `None`; not including it in the JSON payload triggers the auto-detect path. This is a non-breaking change — existing multi-scan payloads always send explicit boxes.
+
+#### Deduplication
+
+Time-based per card ID: `seenCardTimesRef` (Map<string, number>) records when each card was last added. Cards are skipped if re-detected within 5 seconds (`RESCAN_COOLDOWN_MS = 5000`). This prevents the same card from flooding the session list while the camera is held still.
+
+**Swap dedup fix**: when `swapCard(tempId, newCard)` is called, `newCard.id` is immediately written to `seenCardTimesRef`. Without this, swapping card A → card B would cause the scan loop to re-add card B as a new entry on the next cycle (B's ID wasn't in the seen map yet).
+
+#### What was removed
+
+- `detectCardsWithYolo` call in the live scan loop (on-device YOLO unused for live scan)
+- Separate backend `/detect` roundtrip per cycle
+- `takePhoto` (replaced by `takeSnapshot`)
+- Stability gate (500ms hold, `stableStartRef`, `lastBoxCenterRef`, `STABLE_MS`)
+- `LiveBoundingBox` overlay and `StabilityRing` components from the viewfinder
+- `box`, `boxState`, `stabilityProgress`, `snapDims` state
+
+#### UI changes
+
+- Viewfinder shows a purple border pulse while a scan is in progress (`isScanning`)
+- Status badge: "Scanning..." with spinner (during scan) / pulsing green "Live" dot (between scans)
+- Per-card row: X delete button + swap button (when `candidates.length > 1`) → swap modal lists all candidates with current selection highlighted

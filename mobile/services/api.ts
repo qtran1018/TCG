@@ -305,7 +305,7 @@ export const api = {
   scanStream(
     payload:
       | { crops: string[]; image?: undefined; boxes?: undefined }
-      | { image: string; boxes: { left: number; top: number; width: number; height: number }[]; crops?: undefined },
+      | { image: string; boxes?: { left: number; top: number; width: number; height: number }[]; crops?: undefined },
     ocrHints: ScanOcrHint[],
     scanMode: string,
     onResult: (item: ScanStreamResult) => void,

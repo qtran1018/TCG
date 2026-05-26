@@ -8,27 +8,16 @@ For full version history and technical decisions, see [docs/ARCHITECTURE_LOG.md]
 
 ## Open Tasks
 
-### Priority 1 — Live Scan mode (in progress)
+### Priority 1 — Live Scan mode ✓ Done (v30)
 
-Screen and core hook are built (v27). Remaining blocker: card detection never fires, so bounding box overlay and auto-trigger are non-functional.
+Fully functional. Decktradr-style single-roundtrip architecture: continuous `takeSnapshot` → backend auto-detects + recognizes in one `/scan` call → result appears in ~700-900ms. No stability gate. Deduplication by card ID (5s cooldown). See v30 in Architecture Log for full details.
 
-#### What's done
+#### What's shipped
 
-- `mobile/app/(tabs)/live-scan.tsx` — viewfinder, Start/Stop buttons, session list, running total, Done → batch-prices
-- `mobile/hooks/useLiveScan.ts` — recursive setTimeout loop, stability tracker (800ms hold), `captureAndScan` via `api.scanStream`, background price fetch per card
-- `mobile/components/Scanner/LiveBoundingBox.tsx` — animated corner-bracket overlay
-- `mobile/components/Scanner/StabilityRing.tsx` — animated stability progress bar
-- Tab bar updated: Multi Scan | Live Scan (Saved/History hidden but routable)
-
-#### Remaining blocker — YOLO always returns null in loop context
-
-`detectCardsWithYolo` throws `"Value is undefined, expected an Object"` on `model.run([input])` for both NNAPI and CPU fallback when called in a tight async loop. The same model works fine in multi scan (one-shot). Suspected JSI/GC handle invalidation unique to high-frequency calling. See v27 in Architecture Log for full details.
-
-**Fix:** In `runOneCycle` (`mobile/hooks/useLiveScan.ts`), when `detectCardsWithYolo` returns null fall back to `api.detectCards(base64Snapshot, sw, sh)` — the existing backend `/detect` endpoint (~200–400ms, reliable). Box coordinates feed into the same stability tracker unchanged.
-
-**Files to change:**
-- `mobile/hooks/useLiveScan.ts` — `runOneCycle`: if YOLO returns null, base64-encode snapshot → `api.detectCards()` → extract primary box
-- `mobile/services/api.ts` — confirm `detectCards(base64, w, h)` signature (already exists)
+- `mobile/app/(tabs)/live-scan.tsx` — viewfinder, Start/Stop, session list, running total, Done → batch-prices, swap modal, per-card delete
+- `mobile/hooks/useLiveScan.ts` — sequential scan loop, single-roundtrip `/scan`, time-based dedup, `removeCard`/`swapCard` actions
+- `backend/app/api/v1/scan.py` — `elif req.image:` auto-detect branch: YOLO finds largest card, crops it, runs CLIP+OCR in one pass
+- Tab bar: Multi Scan | Live Scan | Search
 
 ---
 
@@ -239,6 +228,15 @@ Camera capture (`quality: 1, skipProcessing: true`) → JPEG resize to 2400px + 
 - Latency benchmark (Samsung S22+, 12 cards): **3.12s first card** (v22)
 - **Do not `Promise.all([ML Kit OCR, NNAPI YOLO])`** — native bridge resource conflict; sequential only
 
+### Scan Pipeline (live scan, single-card continuous)
+
+`takeSnapshot({ quality: 80 })` → resize to 640px → `POST /api/v1/scan` with `{ image, no boxes }` → backend YOLO auto-detects largest card, crops it, runs CLIP+OCR in one pass → result streamed back → deduplicated by card ID (5s cooldown per card) → added to session list with background price fetch.
+
+- Cycle time: ~700-900ms (natural pacing — next scan starts immediately after previous completes)
+- No stability gate, no on-device YOLO, no separate detect roundtrip
+- Swap dedup: `swapCard` records the new card ID in `seenCardTimesRef` to prevent immediate re-add
+- Files: `mobile/hooks/useLiveScan.ts`, `backend/app/api/v1/scan.py` (`elif req.image:` branch)
+
 ### Card Detection — YOLO
 
 **Backend YOLO v2** (`backend/models/card_detector.pt`): mAP50=0.993, mAP50-95=0.964; 2,823 train images (real + synthetic); fine-tuned from v1 checkpoint on RTX 3080.
@@ -309,7 +307,7 @@ docker restart tcg_backend
 ## Known Issues
 
 - Image AI mode similarity scores for some cards (e.g. Lotad) are around 0.43 — below `_SIM_FLOOR = 0.50`. Combined/OCR mode reliably identifies these cards.
-- **Live Scan YOLO detection broken**: `detectCardsWithYolo` always returns null in the continuous loop context. Fix in progress (see Priority 1 in Open Tasks). Multi scan (one-shot) is unaffected.
+- **Live Scan**: fully functional as of v30. On-device YOLO is unused in live scan — backend handles detect+recognize in a single roundtrip.
 - **Variant sales filtering — needs review**: Normal variant excludes sales whose title matches `pok[eé][\s-]?ball` or `master[\s-]?ball`; Poké Ball / Master Ball variants show all sales unfiltered (PriceCharting already scopes them). Needs real-device testing across several cards to confirm: (1) Normal no longer shows variant sales, (2) Poké Ball / Master Ball pages show expected sales, (3) no edge-case titles are missed or over-excluded. File: `mobile/components/Card/PriceDisplay.tsx` (`filterSales`).
 
 ---
