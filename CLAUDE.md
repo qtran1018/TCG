@@ -158,26 +158,28 @@ python scripts/merge_clip_pairs.py \
 
 Run `expo upgrade` to handle the coordinated Expo + React Native bump.
 
-| Package | Installed | Latest | Notes |
+Safe minor/patch upgrades performed 2026-05-26: `axios` 1.7.0 → 1.16.1, `react-native-nitro-modules` 0.35.6 → 0.35.7. `npm audit fix` also cleaned up `brace-expansion` in Expo tooling (16 → 13 moderate advisories; remaining 13 are all in Expo internals and require expo upgrade).
+
+| Package | Installed | Latest | Status |
 |---|---|---|---|
-| `expo` | 54.0.x | 56.0.4 | Use `expo upgrade` — do not upgrade manually |
-| `expo-router` | 6.0.x | 56.2.6 | Comes with expo upgrade |
-| `react-native` | 0.81.5 | 0.85.3 | Comes with expo upgrade |
-| `react` | 19.1.0 | 19.2.6 | Minor |
-| `react-native-vision-camera` | 4.7.3 | 5.0.10 | Locked to v4 (v5 dropped Expo config plugin); check if v5 adds it back before upgrading |
-| `react-native-reanimated` | 4.1.1 | 4.3.1 | Minor |
-| `react-native-gesture-handler` | 2.28.0 | 2.31.2 | Minor |
-| `react-native-screens` | 4.16.0 | 4.25.2 | Minor |
-| `react-native-safe-area-context` | 5.6.0 | 5.8.0 | Minor |
-| `react-native-fast-tflite` | 2.0.0 | 3.0.1 | Major — check changelog, may affect on-device YOLO |
-| `react-native-worklets` | 0.5.1 | 0.8.3 | Minor |
-| `zustand` | 4.5.0 | 5.0.13 | Major — store API changed |
-| `axios` | 1.7.0 | 1.16.1 | Minor |
-| `react-native-svg` | 15.12.1 | 15.15.5 | Patch |
-| `@react-native-async-storage/async-storage` | 2.2.0 | 3.1.0 | Major |
-| `@react-native-ml-kit/text-recognition` | 1.0.0 | 2.0.0 | Major — likely breaking OCR API changes |
-| `react-native-nitro-modules` | 0.35.6 | 0.35.7 | Patch |
-| `typescript` | 5.4.0 | 6.0.3 | Major |
+| `expo` | 54.0.x | 56.0.4 | Pending — use `expo upgrade`, not manual |
+| `expo-router` | 6.0.x | 56.2.6 | Pending — comes with expo upgrade |
+| `react-native` | 0.81.5 | 0.85.3 | Pending — comes with expo upgrade |
+| `react` | 19.1.0 | 19.2.6 | Pending — comes with expo upgrade (Expo pins to 19.1.0) |
+| `react-native-vision-camera` | 4.7.3 | 5.0.10 | **Locked to v4** — v5 dropped Expo config plugin |
+| `react-native-reanimated` | 4.1.1 | 4.3.1 | **Expo-pinned** — `expo install --check` confirmed 4.1.x correct for SDK 54 |
+| `react-native-gesture-handler` | 2.28.0 | 2.31.2 | **Expo-pinned** — same as above |
+| `react-native-screens` | 4.16.0 | 4.25.2 | **Expo-pinned** — same as above |
+| `react-native-safe-area-context` | 5.6.0 | 5.8.0 | **Expo-pinned** — same as above |
+| `react-native-fast-tflite` | 2.0.0 | 3.0.1 | **Locked to v2** — v3 silently rejects onnx2tf op set, breaks on-device YOLO |
+| `react-native-worklets` | 0.5.1 | 0.9.1 | **Expo-pinned** — tied to vision-camera v4 ecosystem |
+| `zustand` | 4.5.0 | 5.0.13 | **Skip** — v5 store API breaking changes |
+| `axios` | ~~1.7.0~~ **1.16.1** | 1.16.1 | ✅ **Upgraded** — pure JS, no native deps |
+| `react-native-svg` | 15.12.1 | 15.15.5 | **Expo-pinned** — `expo install` confirmed 15.12.1 correct for SDK 54 |
+| `@react-native-async-storage/async-storage` | 2.2.0 | 3.1.0 | **Skip** — major, API changes in v3 |
+| `@react-native-ml-kit/text-recognition` | 1.0.0 | 2.0.0 | **Skip** — major, breaking OCR API changes |
+| `react-native-nitro-modules` | ~~0.35.6~~ **0.35.7** | 0.35.7 | ✅ **Upgraded** — patch |
+| `typescript` | 5.4.0 | 6.0.3 | **Skip** — major; may introduce type errors in existing code |
 
 ---
 
@@ -190,6 +192,31 @@ Run `expo upgrade` to handle the coordinated Expo + React Native bump.
 | Holofoil image AI unreliable | Reflective surfaces produce visual appearances impossible to synthesize. Use OCR or Combined mode. |
 | Items with digits in name (Pokégear 3.0) | Digit gate in `_find_trainer_name` rejects them. Low priority — rare edge case. |
 | Badge boxes too tall on Android (multi-results) | Android `includeFontPadding: true` default. Workaround `includeFontPadding: false` applied but may not fully resolve on all devices. |
+
+---
+
+### Future — Portfolio / Free Deployment (CPU-only mode)
+
+For demo/portfolio purposes, CLIP and YOLO inference can run on CPU — no GPU required. Latency increases from ~3s to ~5–8s, acceptable for low traffic.
+
+**Code change required (`backend/app/services/card_embedder.py`):**
+- Set `device = "cpu"` instead of auto-detecting CUDA
+- Remove `fp16` cast — fine-tuned weights load fine on CPU
+
+**Free stack:**
+
+| Component | Host | Notes |
+|---|---|---|
+| FastAPI backend (CPU CLIP + YOLO) | Railway or Render free tier | ~512MB RAM limit; watch model load size |
+| PostgreSQL + pgvector | Neon (serverless Postgres) | Free tier: 0.5GB storage |
+| Redis (price cache) | Upstash (serverless Redis) | Free tier: 10k commands/day |
+| Mobile app | Expo Go / TestFlight | No change needed |
+
+**Caveats:**
+- Render free tier spins down after 15min inactivity — first request cold-starts (~30s)
+- Railway free tier has a monthly usage cap (~$5 credit/month)
+- Neon free tier may need pgvector extension enabled manually
+- CLIP model (`clip_finetuned.pt`) + YOLO (`card_detector.pt`) must be bundled or fetched at startup; check RAM limits
 
 ---
 
