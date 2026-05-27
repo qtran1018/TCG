@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
   TouchableOpacity, Alert, KeyboardAvoidingView, Platform,
@@ -32,6 +33,14 @@ export default function ScanScreen() {
   const { scan: multiScan, isProcessing: isMultiProcessing, progress: multiProgress } = useMultiCardScan();
 
   const isLoading = isSearching || isMultiProcessing;
+
+  const [isFocused, setIsFocused] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, []),
+  );
 
   const gameLabel = game === "pokemon" ? "Pokémon" : "One Piece";
   const gameColor = game === "pokemon" ? C.pokemon : C.onepiece;
@@ -68,7 +77,7 @@ export default function ScanScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
       {mode === "multi-camera" ? (
         <View style={styles.cameraContainer}>
-          <CameraScanner onCapture={handleMultiCapture} isProcessing={isLoading} />
+          <CameraScanner onCapture={handleMultiCapture} isProcessing={isLoading} isActive={isFocused} />
           <TouchableOpacity style={styles.backBtn} onPress={() => setMode("settings")}>
             <Text style={styles.backBtnText}>✕  Close Camera</Text>
           </TouchableOpacity>

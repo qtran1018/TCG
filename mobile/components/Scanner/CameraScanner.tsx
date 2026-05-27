@@ -7,9 +7,10 @@ import { COLORS } from "@/constants";
 interface Props {
   onCapture: (uri: string) => void;
   isProcessing: boolean;
+  isActive?: boolean;
 }
 
-export function CameraScanner({ onCapture, isProcessing }: Props) {
+export function CameraScanner({ onCapture, isProcessing, isActive = true }: Props) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
   const cameraRef = useRef<Camera>(null);
@@ -46,7 +47,7 @@ export function CameraScanner({ onCapture, isProcessing }: Props) {
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
-        isActive={true}
+        isActive={isActive}
         photo={true}
       />
       <View style={styles.footer}>

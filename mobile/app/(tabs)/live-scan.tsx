@@ -35,10 +35,15 @@ export default function LiveScanScreen() {
   } = useLiveScan({ game, scanType, language: liveLang });
 
   const [swapTarget, setSwapTarget] = useState<LiveSessionCard | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      return () => stopDetection();
+      setIsFocused(true);
+      return () => {
+        setIsFocused(false);
+        stopDetection();
+      };
     }, [stopDetection]),
   );
 
@@ -100,8 +105,7 @@ export default function LiveScanScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           device={device}
-          isActive={true}
-          photo={true}
+          isActive={isFocused}
         />
 
         {/* Scanning pulse border */}
