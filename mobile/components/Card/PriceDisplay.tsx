@@ -147,7 +147,7 @@ export function PriceDisplay({ price, scanType, variant = "normal" }: Props) {
                 </View>
                 <View style={styles.salePriceWrap}>
                   <Text style={styles.salePrice}>{fmtPrice(sale.price, currency, jpyRate)}</Text>
-                  {sale.url && (
+                  {sale.url && (sale.url.startsWith("https://") || sale.url.startsWith("http://")) && (
                     <TouchableOpacity onPress={() => Linking.openURL(sale.url!).catch(() => {})}>
                       <Text style={styles.saleLink}>{saleLinkLabel(sale.url)}</Text>
                     </TouchableOpacity>

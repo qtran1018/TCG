@@ -9,7 +9,7 @@ import imagehash
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import Float, cast, select, text
 
 from app.constants import VALID_GAMES, VALID_LANGUAGES
@@ -61,6 +61,13 @@ class ScanRequest(BaseModel):
     boxes: list[Box] | None = None
     ocr_hints: list[OcrHint]   # parallel to crops/boxes; padded with defaults if shorter
     scan_mode: str = "combined"  # "ocr" | "image" | "combined"
+
+    @field_validator("image")
+    @classmethod
+    def validate_image_size(cls, v):
+        if v and len(v) > 8_000_000:
+            raise ValueError("image too large (max 6MB)")
+        return v
 
 
 class ScanResultItem(BaseModel):

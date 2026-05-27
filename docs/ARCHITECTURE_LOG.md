@@ -670,3 +670,38 @@ Live scan sessions can accumulate the same card twice (e.g. user holds the same 
 All 17 API endpoints and features verified healthy post-deployment: currency rates, card search (EN/JA/kana/set-hint/exclusion/card-number filter), card detail + price, PSA grade price, variant pricing, Redis cache hit (~10ms), streaming batch prices, history pagination, `/detect`, `/scan` with `lang=en/ja/auto`, PSA cert error handling.
 
 **Known remaining limitation**: static-background false positives (e.g. a blue desk matching water energy when no card is held) are reduced by the confirmation gate (a consistent background match could still confirm after two frames) but not fully eliminated. If this resurfaces after the gate is deployed, the fix is raising `_SIM_FLOOR` for the live scan path (e.g. 0.60) or requiring the full-frame fallback to be gated on YOLO detection confidence.
+
+---
+
+### v32 — Optimization audit + YOLO activeModel fix (2026-05-26)
+
+#### Backend hardening (optimization audit)
+
+- **`main.py`**: added `MaxBodySizeMiddleware` (20MB payload cap, returns 413); startup now fatal-crashes on DB init or model preload failure (`logger.critical` + raise); Redis startup failure is warn-only (cache degrades gracefully); `/health` endpoint checks Redis ping, `SELECT 1` DB probe, and CLIP model load state — returns 503 if any check fails.
+- **`config.py`**: added `db_pool_size` (10) and `db_max_overflow` (20) settings; `model_validator` warns when `SECRET_KEY` is the default placeholder, raises when it's set but < 16 chars.
+- **`database.py`**: pool now uses `settings.db_pool_size`, `settings.db_max_overflow`, and `pool_recycle=3600`.
+- **`schemas/card.py`**: `DetectRequest.image_base64` max-length 8MB; `max_cards` bounded 1–50.
+- **`api/v1/scan.py`**: `field_validator` on `ScanRequest.image` rejects payloads > 8MB before they reach the handler.
+- **`api/v1/detect.py`**: exception handler no longer leaks internal details — logs the full exception, returns generic 500 message.
+- **`services/cache.py`**: `get()`, `mget()`, `set()` wrapped in try/except — Redis failure logs a warning and returns None/no-op instead of raising, allowing the request to proceed uncached.
+- **`services/card_matcher.py`**: search result cache key now uses `hashlib.md5(query)` to prevent cache key length issues with long queries.
+- **`api/v1/cards.py`**: replaced `datetime.utcnow()` with `datetime.now(timezone.utc)` throughout; `batch_prices_stream` closes the DB session before streaming to release pool slot during long scrape chains.
+
+#### Mobile cleanup (optimization audit)
+
+- **`services/api.ts`**: removed debug `console.log` spam from `streamPrices` (flush, onprogress, onload); kept `console.warn` for JSON parse failures only.
+- **`app/(tabs)/lookup.tsx`**: added `searchError` state with inline error banner — search failures no longer fail silently.
+- **`app/batch-prices.tsx`**: `mountedRef` guard prevents state updates after unmount; URL scheme validated before `Linking.openURL`.
+- **`app/collection/[id].tsx`**: added `getItemLayout` to grid FlatList for consistent cell sizing.
+- **`components/Card/PriceDisplay.tsx`**: URL scheme check before `Linking.openURL` on sale links.
+- **`constants/index.ts`**: `API_BASE_URL` respects `EXPO_PUBLIC_API_URL` env var with fallback.
+- **`hooks/useLiveScan.ts`**: silent catch replaced with `console.warn` for scan cycle errors.
+- **`app/card/[id].tsx`**: URL scheme validated before `Linking.openURL` on PriceCharting link.
+
+#### Multi-scan save flow fix
+
+`multi-results.tsx` bookmark tap previously directly mutated `savedCardsStore`, bypassing the `SaveToCollectionSheet` flow. The sheet's `useEffect` (on open) handles three steps atomically: `ensureDefault(game)`, `saveCard(cardData)`, `addCard(collectionId, cardId)`. Direct mutation only called `saveCard` — skipping default-collection creation and collection membership. Fixed by replacing the direct toggle with `setSaveSheetCard(card)` → conditional `<SaveToCollectionSheet>` render. Japanese cards now correctly save to the JP game's default collection.
+
+#### YOLO `activeModel` bug fix
+
+In `yoloDetector.ts`, after the CPU delegate fallback path executes, output shape detection was reading `model.outputs[0]?.shape` — where `model` is the local variable pointing to the original NNAPI model that failed, not the CPU model that produced the output. Fixed by tracking `activeModel` through all three paths (initial NNAPI, retry NNAPI, CPU fallback) and using `activeModel.outputs[0]?.shape` for layout detection. Incorrect shape detection (`[1,5,8400]` vs `[1,8400,5]`) on CPU-fallback scans caused wrong bounding box coordinates or zero detections even when the CPU model ran successfully.

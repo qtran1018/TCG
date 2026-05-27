@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc, func, or_
@@ -159,7 +159,7 @@ async def get_card(
     if price_dict:
         price_out = PriceOut(
             **price_dict,
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     return CardWithPrice(card=CardOut.model_validate(card), price=price_out)
@@ -200,7 +200,7 @@ async def batch_prices(req: BatchPricesRequest, db: AsyncSession = Depends(get_d
                 error=type(e).__name__,
             )
         price_out = (
-            PriceOut(**price_dict, fetched_at=datetime.utcnow()) if price_dict else None
+            PriceOut(**price_dict, fetched_at=datetime.now(timezone.utc)) if price_dict else None
         )
         return BatchPricesItem(
             card_id=card_id,
@@ -230,6 +230,7 @@ async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depend
 
     result = await db.execute(select(Card).where(Card.id.in_(card_ids)))
     cards_by_id: dict[int, Card] = {c.id: c for c in result.scalars().all()}
+    await db.close()  # release pool slot before streaming; generate() uses its own sessions
 
     async def fetch_one(card_id: int) -> BatchPricesItem:
         card = cards_by_id.get(card_id)
@@ -250,7 +251,7 @@ async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depend
                 error=type(e).__name__,
             )
         price_out = (
-            PriceOut(**price_dict, fetched_at=datetime.utcnow()) if price_dict else None
+            PriceOut(**price_dict, fetched_at=datetime.now(timezone.utc)) if price_dict else None
         )
         return BatchPricesItem(
             card_id=card_id,
@@ -289,7 +290,6 @@ async def batch_prices_stream(req: BatchPricesRequest, db: AsyncSession = Depend
             while next_emit in pending:
                 yield pending.pop(next_emit)
                 next_emit += 1
-        await db.commit()
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 

@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class CardBase(BaseModel):
@@ -114,8 +114,8 @@ class PSACertResult(BaseModel):
 
 
 class DetectRequest(BaseModel):
-    image_base64: str
-    max_cards: int = 20
+    image_base64: str = Field(..., max_length=8_000_000)
+    max_cards: int = Field(default=20, ge=1, le=50)
 
 
 class BoundingBox(BaseModel):

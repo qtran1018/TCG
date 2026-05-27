@@ -130,8 +130,8 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
         );
       });
 
-    } catch {
-      // skip silently
+    } catch (e) {
+      console.warn("[useLiveScan] scan cycle error:", e);
     } finally {
       if (snapshotUri) FileSystem.deleteAsync(snapshotUri, { idempotent: true }).catch(() => {});
       if (resizedUri) FileSystem.deleteAsync(resizedUri, { idempotent: true }).catch(() => {});

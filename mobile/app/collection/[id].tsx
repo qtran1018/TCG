@@ -227,6 +227,11 @@ export default function CollectionScreen() {
           numColumns={GRID_COLS}
           contentContainerStyle={styles.gridContent}
           columnWrapperStyle={{ gap: GRID_GAP, marginBottom: GRID_GAP }}
+          getItemLayout={(_, index) => ({
+            length: cellHeight + GRID_GAP,
+            offset: (cellHeight + GRID_GAP) * Math.floor(index / GRID_COLS),
+            index,
+          })}
           renderItem={({ item }) => (
             <GridCell
               card={item}

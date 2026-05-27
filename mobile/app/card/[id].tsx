@@ -232,7 +232,7 @@ export default function CardDetailScreen() {
         {pcUrl && (
           <TouchableOpacity
             style={styles.pcLink}
-            onPress={() => Linking.openURL(pcUrl)}
+            onPress={() => { if (pcUrl.startsWith("https://") || pcUrl.startsWith("http://")) Linking.openURL(pcUrl); }}
           >
             <Text style={styles.pcLinkText}>View on PriceCharting →</Text>
           </TouchableOpacity>

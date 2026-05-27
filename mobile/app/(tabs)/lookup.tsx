@@ -26,6 +26,7 @@ export default function LookupScreen() {
   const [results, setResults] = useState<CardOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const doSearch = useCallback(
@@ -33,14 +34,18 @@ export default function LookupScreen() {
       if (q.trim().length < 2) {
         setResults([]);
         setSearched(false);
+        setSearchError(null);
         return;
       }
       setLoading(true);
+      setSearchError(null);
       try {
         const data = await api.searchCards(q.trim(), lang, game);
         setResults(data);
         setSearched(true);
-      } catch {
+      } catch (e) {
+        console.warn("[lookup] search failed:", e);
+        setSearchError("Search failed — check your connection");
         setResults([]);
         setSearched(true);
       } finally {
@@ -108,6 +113,11 @@ export default function LookupScreen() {
         ))}
       </View>
 
+      {searchError && (
+        <Text style={[styles.errorBanner, { color: C.error, backgroundColor: "rgba(224,80,80,0.12)", borderColor: "rgba(224,80,80,0.3)" }]}>
+          {searchError}
+        </Text>
+      )}
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />
       ) : (
@@ -117,7 +127,7 @@ export default function LookupScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={results.length === 0 ? styles.emptyContainer : styles.list}
           ListEmptyComponent={
-            searched && query.trim().length >= 2 ? (
+            searched && query.trim().length >= 2 && !searchError ? (
               <Text style={[styles.emptyText, { color: C.textMuted }]}>No cards found</Text>
             ) : null
           }
@@ -186,6 +196,15 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 12, paddingBottom: 20 },
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
   emptyText: { fontSize: 15 },
+  errorBanner: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 13,
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",

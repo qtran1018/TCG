@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -296,7 +297,8 @@ class CardMatcherService:
         name_for_api = hints.get("probable_name")
         logger.info("OCR hints: %s | query: %s", hints, query)
 
-        cache_key = f"{game}:{language}:{query}"
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        cache_key = f"{game}:{language}:{query_hash}"
         cached = await search_cache.get(cache_key)
         if cached:
             logger.info("Cache hit for search: %s", cache_key)

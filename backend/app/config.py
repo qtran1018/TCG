@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import warnings
 from functools import lru_cache
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,6 +27,17 @@ class Settings(BaseSettings):
     scrape_cache_ttl_metadata: int = 604800    # 7d
 
     cors_origins: str = "http://localhost:8081,exp://localhost:8081"
+
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+
+    @model_validator(mode="after")
+    def validate_secret_key(self):
+        if self.secret_key == "change-me":
+            warnings.warn("SECRET_KEY is using default placeholder — set it in .env")
+        elif len(self.secret_key) < 16:
+            raise ValueError("SECRET_KEY must be at least 16 characters")
+        return self
 
     @property
     def database_url(self) -> str:

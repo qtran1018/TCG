@@ -108,6 +108,8 @@ export async function detectCardsWithYolo(
     // v2 API: pass TypedArray[] directly (not [arrayBuffer]).
     // v3 had auto-unwrap of ArrayBuffer; v2 doesn't and throws "no ArrayBuffer attached".
     let outputs: ArrayBufferView[];
+    // Track which model instance actually produced the output for correct shape detection.
+    let activeModel = model;
     try {
       outputs = await model.run([input]);
     } catch (runErr) {
@@ -121,6 +123,7 @@ export async function detectCardsWithYolo(
       if (!fresh) return null;
       try {
         outputs = await fresh.run([input]);
+        activeModel = fresh;
       } catch (retryErr) {
         // NNAPI fully invalidated — force CPU delegate as last resort
         console.warn('[YOLO] retry failed, forcing CPU delegate:', retryErr);
@@ -131,6 +134,7 @@ export async function detectCardsWithYolo(
           const cpu = await loadTensorflowModel({ url: _modelUri }, 'default');
           _model = cpu;
           outputs = await cpu.run([input]);
+          activeModel = cpu;
         } catch {
           return null;
         }
@@ -140,7 +144,7 @@ export async function detectCardsWithYolo(
 
     // Ultralytics TFLite exports in either [1,5,8400] or [1,8400,5] layout.
     // Detect layout from the output tensor shape.
-    const outShape = model.outputs[0]?.shape ?? [];
+    const outShape = activeModel.outputs[0]?.shape ?? [];
     const transposed = outShape.length >= 3 && outShape[1] === ANCHORS; // [1,8400,5]
 
     // Diagnostic: log output shape and max confidence to verify layout and model output.

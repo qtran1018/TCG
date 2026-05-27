@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, Image,
   ActivityIndicator, TouchableOpacity, Linking, Pressable,
@@ -24,6 +24,7 @@ const keyExtractor = (item: CardPriceEntry) => String(item.card.id);
 
 
 const openUrl = (url: string) => {
+  if (!url.startsWith("https://") && !url.startsWith("http://")) return;
   Linking.openURL(url).catch((e) => console.warn("[batch-prices] openURL failed:", url, e));
 };
 
@@ -37,6 +38,9 @@ export default function BatchPricesScreen() {
       card, jaCardNumber, data: null, loading: true, error: false,
     })),
   );
+
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => {
     if (batchPriceCards.length === 0) return;
@@ -53,11 +57,9 @@ export default function BatchPricesScreen() {
       scanType,
       Object.keys(jaCardNumbers).length > 0 ? jaCardNumbers : undefined,
       (item) => {
-        console.log(`[batch-prices] onResult card_id=${item.card_id} error=${item.error} has_price=${!!item.price}`);
-        setEntries((prev) => {
-          const entryIds = prev.map((e) => e.card.id);
-          console.log(`[batch-prices] entries=${JSON.stringify(entryIds)} matching=${entryIds.includes(item.card_id)}`);
-          return prev.map((entry) => {
+        if (!mountedRef.current) return;
+        setEntries((prev) =>
+          prev.map((entry) => {
             if (entry.card.id !== item.card_id) return entry;
             if (item.error) return { ...entry, loading: false, error: true };
             return {
@@ -65,15 +67,17 @@ export default function BatchPricesScreen() {
               data: { card: item.card ?? entry.card, price: item.price },
               loading: false,
             };
-          });
-        });
+          }),
+        );
       },
       controller.signal,
     ).catch((e) => {
       console.warn("[batch-prices] stream failed:", e);
-      setEntries((prev) =>
-        prev.map((entry) => entry.loading ? { ...entry, loading: false, error: true } : entry),
-      );
+      if (mountedRef.current) {
+        setEntries((prev) =>
+          prev.map((entry) => entry.loading ? { ...entry, loading: false, error: true } : entry),
+        );
+      }
     });
 
     return () => controller.abort();

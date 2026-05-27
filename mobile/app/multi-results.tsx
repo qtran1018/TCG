@@ -9,7 +9,9 @@ import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import { useScanStore } from "@/store/scanStore";
 import { useSavedCardsStore } from "@/store/savedCardsStore";
+import { SaveToCollectionSheet } from "@/components/UI/SaveToCollectionSheet";
 import { COLORS } from "@/constants";
+import type { Game } from "@/constants";
 import type { CardOut } from "@/services/api";
 import type { BatchPriceCard, DetectedCard } from "@/types/scan";
 
@@ -28,28 +30,14 @@ export default function MultiResultsScreen() {
     game,
   } = useScanStore();
 
-  const { cards: savedCards, save: saveCard, remove: removeCard } = useSavedCardsStore();
+  const { cards: savedCards } = useSavedCardsStore();
   const savedIds = useMemo(() => new Set(savedCards.map((c) => c.id)), [savedCards]);
 
-  const handleToggleSave = useCallback(
-    (card: CardOut) => {
-      if (savedIds.has(card.id)) {
-        removeCard(card.id);
-      } else {
-        saveCard({
-          id: card.id,
-          name: card.name,
-          set_name: card.set_name ?? "",
-          card_number: card.card_number ?? "",
-          image_url: card.image_url ?? null,
-          language: card.language,
-          game,
-          savedAt: new Date().toISOString(),
-        });
-      }
-    },
-    [savedIds, saveCard, removeCard, game],
-  );
+  const [saveSheetCard, setSaveSheetCard] = useState<CardOut | null>(null);
+
+  const handleOpenSaveSheet = useCallback((card: CardOut) => {
+    setSaveSheetCard(card);
+  }, []);
 
   const cards = multiScanResult?.cards ?? [];
 
@@ -150,11 +138,11 @@ export default function MultiResultsScreen() {
           onToggle={toggleCheck}
           onView={handleViewCard}
           onSwap={handleOpenSwap}
-          onToggleSave={handleToggleSave}
+          onSave={handleOpenSaveSheet}
         />
       );
     },
-    [checkedIndices, savedIds, getSelected, toggleCheck, handleViewCard, handleOpenSwap, handleToggleSave],
+    [checkedIndices, savedIds, getSelected, toggleCheck, handleViewCard, handleOpenSwap, handleOpenSaveSheet],
   );
 
   // Loading state — navigated here before scan completed, no cards yet
@@ -302,6 +290,25 @@ export default function MultiResultsScreen() {
           </View>
         </View>
       </Modal>
+
+      {saveSheetCard && (
+        <SaveToCollectionSheet
+          isOpen={!!saveSheetCard}
+          cardId={saveSheetCard.id}
+          cardData={{
+            id: saveSheetCard.id,
+            name: saveSheetCard.name,
+            set_name: saveSheetCard.set_name ?? "",
+            card_number: saveSheetCard.card_number ?? "",
+            image_url: saveSheetCard.image_url ?? null,
+            language: saveSheetCard.language,
+            game: (saveSheetCard.game ?? game) as Game,
+            savedAt: new Date().toISOString(),
+          }}
+          game={(saveSheetCard.game ?? game) as Game}
+          onClose={() => setSaveSheetCard(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -315,11 +322,11 @@ interface ResultRowProps {
   onToggle: (regionIndex: number) => void;
   onView: (card: CardOut, dc: DetectedCard) => void;
   onSwap: (dc: DetectedCard) => void;
-  onToggleSave: (card: CardOut) => void;
+  onSave: (card: CardOut) => void;
 }
 
 const ResultRow = React.memo(function ResultRow({
-  dc, index, isChecked, isSaved, selected, onToggle, onView, onSwap, onToggleSave,
+  dc, index, isChecked, isSaved, selected, onToggle, onView, onSwap, onSave,
 }: ResultRowProps) {
   const displayCardNumber = selected?.card_number;
   const hasAlternates = dc.searchResult.candidates.length > 1;
@@ -351,7 +358,7 @@ const ResultRow = React.memo(function ResultRow({
         <Text style={styles.queryUsed} numberOfLines={1}>🔍 {dc.searchResult.query_used}</Text>
         {selected && (
           <TouchableOpacity
-            onPress={(e) => { e.stopPropagation?.(); onToggleSave(selected); }}
+            onPress={(e) => { e.stopPropagation?.(); onSave(selected); }}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             style={styles.bookmarkBtn}
           >

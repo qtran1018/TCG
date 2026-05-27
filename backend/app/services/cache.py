@@ -35,17 +35,25 @@ class CacheService:
         return f"{self.prefix}:" + ":".join(parts)
 
     async def get(self, *key_parts: str) -> Any | None:
-        r = await get_redis()
-        raw = await r.get(self._key(*key_parts))
-        return self._decode(raw, key_parts)
+        try:
+            r = await get_redis()
+            raw = await r.get(self._key(*key_parts))
+            return self._decode(raw, key_parts)
+        except Exception:
+            logger.warning("Cache get failed for %s", key_parts, exc_info=True)
+            return None
 
     async def mget(self, key_parts_list: list[tuple[str, ...]]) -> list[Any | None]:
         """Batch fetch — one Redis round-trip instead of N. Order is preserved."""
         if not key_parts_list:
             return []
-        r = await get_redis()
-        raws = await r.mget([self._key(*parts) for parts in key_parts_list])
-        return [self._decode(raw, parts) for raw, parts in zip(raws, key_parts_list)]
+        try:
+            r = await get_redis()
+            raws = await r.mget([self._key(*parts) for parts in key_parts_list])
+            return [self._decode(raw, parts) for raw, parts in zip(raws, key_parts_list)]
+        except Exception:
+            logger.warning("Cache mget failed", exc_info=True)
+            return [None] * len(key_parts_list)
 
     def _decode(self, raw, key_parts: tuple[str, ...]) -> Any | None:
         if raw is None:
@@ -63,13 +71,16 @@ class CacheService:
             return raw
 
     async def set(self, *key_parts_and_value, ttl: int, value: Any) -> None:
-        r = await get_redis()
-        key = self._key(*key_parts_and_value)
-        payload = json.dumps(value)
-        if len(payload) > _COMPRESS_THRESHOLD_BYTES:
-            compressed = gzip.compress(payload.encode("utf-8"))
-            payload = _COMPRESS_PREFIX + base64.b64encode(compressed).decode("ascii")
-        await r.set(key, payload, ex=ttl)
+        try:
+            r = await get_redis()
+            key = self._key(*key_parts_and_value)
+            payload = json.dumps(value)
+            if len(payload) > _COMPRESS_THRESHOLD_BYTES:
+                compressed = gzip.compress(payload.encode("utf-8"))
+                payload = _COMPRESS_PREFIX + base64.b64encode(compressed).decode("ascii")
+            await r.set(key, payload, ex=ttl)
+        except Exception:
+            logger.warning("Cache set failed", exc_info=True)
 
     async def delete(self, *key_parts: str) -> None:
         r = await get_redis()

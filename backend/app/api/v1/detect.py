@@ -17,8 +17,9 @@ async def detect_cards(req: DetectRequest):
         boxes, img_w, img_h = await asyncio.to_thread(
             detect_card_rectangles, req.image_base64, req.max_cards,
         )
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Detection failed: {e}")
+    except Exception:
+        logger.exception("detect_cards failed")
+        raise HTTPException(status_code=500, detail="Detection failed")
     return DetectResult(
         boxes=[BoundingBox(**b) for b in boxes],
         image_width=img_w,
