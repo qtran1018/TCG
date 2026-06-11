@@ -53,7 +53,7 @@ def _load_model():
         import open_clip
 
         logger.info("Loading CLIP ViT-B/32 on %s (half=%s)...", _device, _USE_HALF)
-        model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
+        model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32-quickgelu", pretrained="openai")
 
         if _FINETUNED_WEIGHTS.exists():
             logger.info("Loading fine-tuned visual encoder from %s", _FINETUNED_WEIGHTS)

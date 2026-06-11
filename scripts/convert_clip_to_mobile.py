@@ -61,7 +61,7 @@ _INPUT_SIZE = 224
 def load_visual_encoder():
     """Load only the fine-tuned visual encoder tower from clip_finetuned.pt."""
     import open_clip
-    model, _, _ = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
+    model, _, _ = open_clip.create_model_and_transforms("ViT-B-32-quickgelu", pretrained="openai")
 
     if _FINETUNED_WEIGHTS.exists():
         logger.info("Loading fine-tuned weights from %s", _FINETUNED_WEIGHTS)

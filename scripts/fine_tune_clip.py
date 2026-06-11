@@ -450,7 +450,7 @@ def train(
     logger.info("Device: %s", device)
 
     logger.info("Loading CLIP ViT-B/32...")
-    model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="openai")
+    model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32-quickgelu", pretrained="openai")
     model = model.to(device)
 
     if resume_from and resume_from.exists():

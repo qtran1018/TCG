@@ -28,6 +28,9 @@ conversion must be done with the container's open_clip version.
 
 Container: `tcg_backend` (Python 3.12, from `docker-compose.yml`)
 
+All scripts now use `"ViT-B-32-quickgelu"` explicitly — this is version-independent
+and removes the open_clip version constraint described above.
+
 ### One-time container setup (already done; skip if container was rebuilt)
 
 ```bash
