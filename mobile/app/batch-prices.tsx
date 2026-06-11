@@ -1,16 +1,20 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, Image,
   ActivityIndicator, TouchableOpacity, Linking, Pressable,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { api, CardOut, CardWithPrice } from "@/services/api";
 import { useScanStore } from "@/store/scanStore";
 import { useCurrencyStore } from "@/store/currencyStore";
+import { BatchSaveSheet } from "@/components/UI/BatchSaveSheet";
 import { COLORS } from "@/constants";
+import type { Game } from "@/constants";
 import { saleLinkLabel } from "@/utils/saleLink";
 import { fmtPrice } from "@/utils/currency";
+import type { SavedCard } from "@/store/savedCardsStore";
 
 interface CardPriceEntry {
   card: CardOut;
@@ -30,9 +34,25 @@ const openUrl = (url: string) => {
 
 export default function BatchPricesScreen() {
   const router = useRouter();
-  const { batchPriceCards, scanType, liveSessionDuplicatesRemoved } = useScanStore();
+  const { batchPriceCards, scanType, game, liveSessionDuplicatesRemoved } = useScanStore();
   const { currency, jpyRate, fetching: rateFetching, setCurrency } = useCurrencyStore();
   const [dupBannerVisible, setDupBannerVisible] = useState(liveSessionDuplicatesRemoved > 0);
+  const [showBatchSave, setShowBatchSave] = useState(false);
+
+  const batchSaveCards = useMemo<SavedCard[]>(
+    () =>
+      batchPriceCards.map(({ card }) => ({
+        id: card.id,
+        name: card.name,
+        set_name: card.set_name ?? "",
+        card_number: card.card_number ?? "",
+        image_url: card.image_url ?? null,
+        language: card.language,
+        game: (card.game ?? game) as Game,
+        savedAt: new Date().toISOString(),
+      })),
+    [batchPriceCards, game],
+  );
   const [entries, setEntries] = useState<CardPriceEntry[]>(
     batchPriceCards.map(({ card, jaCardNumber }) => ({
       card, jaCardNumber, data: null, loading: true, error: false,
@@ -127,6 +147,14 @@ export default function BatchPricesScreen() {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Batch Prices</Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={() => setShowBatchSave(true)}
+              style={styles.saveAllBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="bookmark-outline" size={20} color={COLORS.text} />
+            </TouchableOpacity>
           <View style={styles.toggle}>
             <TouchableOpacity
               style={[styles.toggleBtn, currency === "USD" && styles.toggleBtnActive]}
@@ -144,6 +172,7 @@ export default function BatchPricesScreen() {
                 <Text style={[styles.toggleText, currency === "JPY" && styles.toggleTextActive]}>JPY</Text>
               )}
             </TouchableOpacity>
+          </View>
           </View>
         </View>
         <Text style={styles.subtitle}>
@@ -167,6 +196,13 @@ export default function BatchPricesScreen() {
         contentContainerStyle={styles.list}
         renderItem={renderItem}
         extraData={scanType}
+      />
+
+      <BatchSaveSheet
+        isOpen={showBatchSave}
+        cards={batchSaveCards}
+        game={(game ?? "pokemon") as Game}
+        onClose={() => setShowBatchSave(false)}
       />
     </SafeAreaView>
   );
@@ -256,6 +292,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 4 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  saveAllBtn: { padding: 2 },
   title: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: COLORS.textMuted, fontSize: 13 },
   dupBanner: {

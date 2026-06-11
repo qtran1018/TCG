@@ -82,9 +82,9 @@ export function GameDrawer({ isOpen, onClose }: Props) {
             </TouchableOpacity>
           </View>
 
-          {/* Game selector */}
+          {/* Game selector — One Piece hidden until multi-TCG support is implemented */}
           <Text style={[styles.sectionLabel, { color: C.textMuted }]}>Game</Text>
-          {GAMES.map((g) => {
+          {GAMES.filter((g) => g.key !== "onepiece").map((g) => {
             const isActive = game === g.key;
             const accentColor = g.key === "pokemon" ? C.pokemon : C.onepiece;
             return (

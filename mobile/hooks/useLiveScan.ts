@@ -10,6 +10,8 @@ import {
   embedCardOnDevice,
   CLIP_MODEL_VERSION,
 } from "@/utils/clipEmbedder";
+import { vectorSearch, vectorSearchAuto } from "@/utils/vectorSearch";
+import { queryCardsByIds } from "@/utils/cardsDb";
 import { detectCardsWithYolo } from "@/utils/yoloDetector";
 
 // "auto" searches both languages and picks the higher CLIP similarity (less
@@ -116,31 +118,44 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
           const embedResult = await embedCardOnDevice(cardUri, cardW, cardH);
 
           if (embedResult && isRunningRef.current) {
-            const embedding = Array.from(embedResult.embedding);
             try {
-              await api.scanVector(
-                embedding,
-                language,
-                "combined",
-                ocrHint,
-                CLIP_MODEL_VERSION,
-                null,
-                (result) => {
-                  result.candidates?.forEach((c) => {
-                    if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
-                  });
-                },
-              );
-              hybridSucceeded = true;
-            } catch (e: unknown) {
-              const err = e as Error & { code?: string };
-              if (err.code === 'MODEL_VERSION_MISMATCH') {
-                // Server index was rebuilt — this device needs a new model/index.
-                // Fall through to image upload; don't mark hybrid as broken.
-                console.warn('[useLiveScan] model version mismatch — falling back to image upload');
+              let searchResults;
+              let detectedLang: 'en' | 'ja' = language === 'auto' ? 'en' : language as 'en' | 'ja';
+              if (language === 'auto') {
+                const auto = await vectorSearchAuto(embedResult.embedding);
+                searchResults = auto.results;
+                detectedLang = auto.language;
+                console.log(`[useLiveScan] ondevice auto-lang=${auto.language} top-sim=${auto.results[0]?.sim.toFixed(3) ?? 'none'}`);
               } else {
-                console.warn('[useLiveScan] vector scan failed — falling back:', e);
+                searchResults = await vectorSearch(embedResult.embedding, language as 'en' | 'ja');
+                console.log(`[useLiveScan] ondevice lang=${language} top-sim=${searchResults[0]?.sim.toFixed(3) ?? 'none'}`);
               }
+              const candidates = await queryCardsByIds(searchResults);
+              if (candidates.length > 0) {
+                candidates.forEach(c => {
+                  if (!allCandidates.find(x => x.id === c.id)) allCandidates.push(c);
+                });
+                hybridSucceeded = true;
+              } else {
+                // Score below floor (quantization drift) — fall back to server vector call
+                console.log('[useLiveScan] on-device miss — server fallback');
+                await api.scanVector(
+                  Array.from(embedResult.embedding),
+                  detectedLang,
+                  'combined',
+                  ocrHint,
+                  CLIP_MODEL_VERSION,
+                  null,
+                  (result) => {
+                    result.candidates?.forEach(c => {
+                      if (!allCandidates.find(x => x.id === c.id)) allCandidates.push(c);
+                    });
+                  },
+                );
+                hybridSucceeded = true;
+              }
+            } catch (e) {
+              console.warn('[useLiveScan] on-device search failed — falling back:', e);
             }
           }
         } catch (e) {

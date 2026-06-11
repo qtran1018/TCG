@@ -10,10 +10,12 @@ import * as FileSystem from "expo-file-system/legacy";
 import { useScanStore } from "@/store/scanStore";
 import { useSavedCardsStore } from "@/store/savedCardsStore";
 import { SaveToCollectionSheet } from "@/components/UI/SaveToCollectionSheet";
+import { BatchSaveSheet } from "@/components/UI/BatchSaveSheet";
 import { COLORS } from "@/constants";
 import type { Game } from "@/constants";
 import type { CardOut } from "@/services/api";
 import type { BatchPriceCard, DetectedCard } from "@/types/scan";
+import type { SavedCard } from "@/store/savedCardsStore";
 
 const CHECKMARK = "✓";
 
@@ -34,6 +36,8 @@ export default function MultiResultsScreen() {
   const savedIds = useMemo(() => new Set(savedCards.map((c) => c.id)), [savedCards]);
 
   const [saveSheetCard, setSaveSheetCard] = useState<CardOut | null>(null);
+  const [batchSaveCards, setBatchSaveCards] = useState<SavedCard[]>([]);
+  const [showBatchSave, setShowBatchSave] = useState(false);
 
   const handleOpenSaveSheet = useCallback((card: CardOut) => {
     setSaveSheetCard(card);
@@ -104,6 +108,28 @@ export default function MultiResultsScreen() {
     setBatchPriceCards(batch);
     router.push({ pathname: "/batch-prices" });
   }, [cards, checkedIndices, getSelected, setBatchPriceCards, router]);
+
+  const handleBatchSave = useCallback(() => {
+    const batch: SavedCard[] = cards
+      .filter((dc) => checkedIndices.has(dc.regionIndex))
+      .flatMap((dc) => {
+        const card = getSelected(dc);
+        if (!card) return [];
+        return [{
+          id: card.id,
+          name: card.name,
+          set_name: card.set_name ?? "",
+          card_number: card.card_number ?? "",
+          image_url: card.image_url ?? null,
+          language: card.language,
+          game: (card.game ?? game) as Game,
+          savedAt: new Date().toISOString(),
+        }];
+      });
+    if (batch.length === 0) return;
+    setBatchSaveCards(batch);
+    setShowBatchSave(true);
+  }, [cards, checkedIndices, getSelected, game]);
 
   const handleOpenSwap = useCallback((dc: DetectedCard) => setSwapTarget(dc), []);
 
@@ -208,11 +234,17 @@ export default function MultiResultsScreen() {
               </Text>
             </TouchableOpacity>
             {checkedIndices.size > 0 && (
-              <TouchableOpacity style={styles.getPricesBtn} onPress={handleGetPrices}>
-                <Text style={styles.getPricesBtnText}>
-                  Get Prices ({checkedIndices.size})
-                </Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity style={styles.getPricesBtn} onPress={handleGetPrices}>
+                  <Text style={styles.getPricesBtnText}>
+                    Prices ({checkedIndices.size})
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleBatchSave}>
+                  <Ionicons name="bookmark-outline" size={13} color="#fff" />
+                  <Text style={styles.saveBtnText}>Save ({checkedIndices.size})</Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         )}
@@ -309,6 +341,13 @@ export default function MultiResultsScreen() {
           onClose={() => setSaveSheetCard(null)}
         />
       )}
+
+      <BatchSaveSheet
+        isOpen={showBatchSave}
+        cards={batchSaveCards}
+        game={game as Game}
+        onClose={() => setShowBatchSave(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -430,6 +469,11 @@ const styles = StyleSheet.create({
   selectAllText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
   getPricesBtn: { backgroundColor: COLORS.accent, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
   getPricesBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  saveBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: COLORS.success, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+  },
+  saveBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   flatList: { flex: 1 },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
   timingBanner: {

@@ -35,8 +35,9 @@ def _get_yolo_model():
         return None
     try:
         from ultralytics import YOLO
+        from app.services.model_versions import get as _mv
         _yolo_model = YOLO(str(_MODEL_PATH))
-        logger.info("Loaded YOLO model from %s", _MODEL_PATH)
+        logger.info("Loaded YOLO model v%s from %s", _mv("yolo_server"), _MODEL_PATH)
     except Exception:
         logger.exception("Failed to load YOLO model")
         _yolo_model = None

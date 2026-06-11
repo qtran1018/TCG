@@ -69,7 +69,8 @@ def _load_model():
         model.eval()
         _preprocess = preprocess
         _model = model
-        logger.info("CLIP ViT-B/32 ready (512-dim features, device=%s, half=%s)", _device, _USE_HALF)
+        from app.services.model_versions import get as _mv
+        logger.info("CLIP ViT-B/32 ready (v%s, device=%s, half=%s)", _mv("clip_server"), _device, _USE_HALF)
 
 
 def embed_image(image_bytes: bytes) -> np.ndarray:

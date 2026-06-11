@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.database import create_tables, AsyncSessionLocal
 from app.api.v1 import router as v1_router
 from app.scrapers.base import close_client
-from app.services import card_detector, card_embedder, matcher
+from app.services import card_detector, card_embedder, matcher, model_versions
 from app.services.cache import get_redis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -89,6 +89,7 @@ async def health():
         checks["db"] = "ok"
     except Exception:
         checks["db"] = "down"
-    checks["models"] = "ok" if card_embedder._model is not None else "not_loaded"
-    ok = all(v == "ok" for v in checks.values())
+    checks["clip_loaded"] = "ok" if card_embedder._model is not None else "not_loaded"
+    checks["model_versions"] = model_versions.summary()
+    ok = checks["redis"] == "ok" and checks["db"] == "ok"
     return JSONResponse(checks, status_code=200 if ok else 503)
