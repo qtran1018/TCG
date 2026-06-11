@@ -272,3 +272,36 @@ Stream prices back as NDJSON (cache hits first)
         ↓
 [Mobile] Display prices with trend charts
 ```
+
+---
+
+## OCR Name Extraction Reference (`card_matcher.py`)
+
+### How `_find_pokemon_name` works
+
+1. Find the HP line (`HP_RE`) as an anchor — name must be at or before it
+2. If HP found: search lines `0..hp_idx` (cap 6). If HP absent: search all lines
+3. For each candidate line:
+   - Strip inline HP value (`"Lotad HP 40"` → `"Lotad"`)
+   - Strip leading non-name prefixes (`"BASIC Lotad"` → `"Lotad"`)
+   - Reject: < 3 chars, > 3 words, contains digit, contains `.,!?;:()/\'`, starts lowercase, all-caps (len > 3), any word in non-name list
+   - **When no HP anchor**: reject if next line matches `_ATTACK_BODY_RE`
+   - **Final gate**: reject if candidate doesn't contain a known Pokémon base name (`_contains_pokemon_name`)
+
+### Non-name prefix list (`_POKEMON_NON_NAME_RE`)
+
+Covers: BASIC and OCR misreads (`.{0,2}asic` pattern), Stage 1/2, Mega, Weakness, Resistance, Retreat, Damage, Ability, Trainer, Item, Stadium, Supporter, Energy types, Pokémon, Nintendo, Game Freak, Creatures, Illus., No., Copyright, Overrun, Aurora, Beam, HP
+
+Note: VMAX/VSTAR/VUNION intentionally **not** in this list — valid name suffixes. Standalone "VMAX" is rejected by the all-caps rule.
+
+### Search strategy (`_search_db`)
+
+1. Name + card number (preferred)
+2. Number only (only when name is also present, as fallback)
+3. Name only
+
+Number-only search without a name is disabled — too many false matches across sets.
+
+### Card format support
+
+Base, Holo, Full Art, Alolan/Galarian/Hisuian/Paldean, EX/ex/GX/V/VMAX/VSTAR/VUNION, Tag Team (`Pikachu & Zekrom-GX`), owner-prefix (Misty's, Sabrina's)
