@@ -27,7 +27,7 @@ from fastapi import APIRouter, HTTPException
 router = APIRouter(prefix="/assets", tags=["assets"])
 logger = logging.getLogger(__name__)
 
-_MANIFEST_PATH = Path(__file__).parent.parent.parent / "app" / "data" / "asset_manifest.json"
+_MANIFEST_PATH = Path(__file__).parent.parent.parent / "data" / "asset_manifest.json"
 _ASSET_BASE_URL = os.getenv("ASSET_BASE_URL", "").rstrip("/")
 
 

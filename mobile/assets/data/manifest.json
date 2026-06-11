@@ -1,0 +1,25 @@
+{
+  "model_version": "1",
+  "files": {
+    "index_en.bin": {
+      "sha256": "bfe107517b5f1be2acc2ed9302811194af3bff825375acca4222631e051482ba",
+      "size": 10416508
+    },
+    "index_ja.bin": {
+      "sha256": "19c255c2affb4ee390ee0713df6e5042dc80aa453d30d09bfbc27acd02de29d9",
+      "size": 14063596
+    },
+    "card_ids_en.bin": {
+      "sha256": "154130ff9a4beacd7a0b8dcf566888806d9d2830fc04dc5188d4b24439c9b164",
+      "size": 80748
+    },
+    "card_ids_ja.bin": {
+      "sha256": "54d85d5e5bd28a402bd9d1399303029267db1dc1d0cf37b3832346ecac2d1ef4",
+      "size": 109020
+    },
+    "cards.db": {
+      "sha256": "634af260b19c0fcf71e85c92c05e068b28dd21e46d10c7995a33ec8f9e7113bb",
+      "size": 12480512
+    }
+  }
+}
