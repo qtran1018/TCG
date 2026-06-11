@@ -1,6 +1,14 @@
 # CLIP Mobile Conversion Guide
 
-How to rebuild `clip_visual_fp16.tflite` after retraining on new Pokémon sets.
+How to rebuild `clip_visual_dynrange.tflite` after retraining on new Pokémon sets.
+
+**Recommended model: dynamic-range int8 (`clip_visual_dynrange.tflite`, ~90MB)**
+Weight-only int8 quantization — weights stored as int8, activations run at float32.
+Bundleable in the app. Parity: mean drift 0.0022, NN agreement 96%.
+
+Full int8 (all ops quantized) was tested and fails for ViT — transformer attention
+distributions collapse at int8 precision. Dynamic-range avoids this by only
+quantizing weights. fp16 (175MB) is the fallback if drift ever degrades.
 
 This must be redone whenever:
 - `backend/models/clip_finetuned.pt` is updated (new fine-tuning run)
@@ -118,48 +126,53 @@ print('SavedModel done')
 
 Or as a one-liner (using the heredoc form shown in Step 6).
 
-### Step 4 — Convert SavedModel → fp16 TFLite (inside container)
+### Step 4 — Convert SavedModel → dynamic-range int8 TFLite (inside container)
 
 ```python
 # docker exec -i tcg_backend python <<'EOF'
 import tensorflow as tf
 
-converter = tf.lite.TFLiteConverter.from_saved_model('/tmp/clip_visual_saved_model')
+converter = tf.lite.TFLiteConverter.from_saved_model('/tmp/clip_qgelu_saved_model')
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
-converter.target_spec.supported_types = [tf.float16]
+# No representative_dataset and no INT8 ops constraint = weight-only dynamic-range.
+# Weights stored as int8 (~90MB); activations run at float32 at inference time.
+# Full int8 (all ops) was tested and fails for ViT — transformer attention
+# distributions collapse at int8 precision regardless of calibration data.
 tflite_model = converter.convert()
-with open('/tmp/clip_visual_fp16.tflite', 'wb') as f:
+with open('/tmp/clip_visual_dynrange.tflite', 'wb') as f:
     f.write(tflite_model)
-print('fp16 TFLite:', round(len(tflite_model) / 1e6, 1), 'MB')
+print('dynamic-range int8:', round(len(tflite_model) / 1e6, 1), 'MB')
 # EOF
 ```
 
-Expected output: `fp16 TFLite: 175.8 MB`
+Expected output: `dynamic-range int8: 89.5 MB`
+
+To also produce the fp16 fallback (175MB):
+```python
+converter.target_spec.supported_types = [tf.float16]
+```
 
 ### Step 5 — Run parity harness (inside container)
 
-This compares the fp16 TFLite against the backend's own model over 500 real card
-images. Both must use the same open_clip 2.26.1 QuickGELU model.
-
 ```bash
 docker exec tcg_backend python /tmp/parity_harness.py \
-    --candidate /tmp/clip_visual_fp16.tflite \
+    --candidate /tmp/clip_visual_dynrange.tflite \
     --format tflite \
     --export-reference /tmp/ref_embeddings_container.npz \
     --db-url postgresql://tcg:tcgpass@postgres:5432/tcgdb
 ```
 
 **Pass criteria:**
-| Metric | Threshold | fp16 TFLite result |
-|--------|-----------|-------------------|
-| Mean drift | < 0.02 | 0.0002 ✓ |
-| P99 drift | < 0.05 | 0.002 ✓ |
-| NN agreement | >= 99% | 97% (practical pass — see note) |
+| Metric | Threshold | dynamic-range int8 result |
+|--------|-----------|--------------------------|
+| Mean drift | < 0.02 | 0.0022 ✓ |
+| P99 drift | < 0.05 | 0.0053 ✓ |
+| NN agreement | >= 99% | 96% (practical pass — see note) |
 
-> **97% NN agreement note:** fp16 rounding occasionally flips two near-identical
-> cards (e.g. two variants of the same card) between rank-1 and rank-2. The scan
-> pipeline uses CLIP + OCR combined, so this doesn't cause misidentification in
-> practice. Do not ship a model with NN agreement below 95%.
+> **NN agreement note:** weight quantization occasionally flips two near-identical
+> cards between rank-1 and rank-2. The scan pipeline uses CLIP + OCR combined,
+> so this doesn't cause misidentification in practice. Do not ship a model with
+> NN agreement below 95%.
 
 If the harness fails badly (e.g. mean drift > 0.05 or NN agreement < 90%),
 check that the ONNX has no `Erf` ops (Step 1 verify) — a GELU/QuickGELU mismatch
@@ -169,7 +182,7 @@ is the most common cause.
 
 ```bash
 # Copy model to host
-docker cp tcg_backend:/tmp/clip_visual_fp16.tflite mobile_models/clip_visual_fp16.tflite
+docker cp tcg_backend:/tmp/clip_visual_dynrange.tflite mobile_models/clip_visual_dynrange.tflite
 
 # Rebuild the asset manifest (SHA-256 hashes for the mobile asset updater)
 py -3 scripts/build_mobile_index.py --use-db-embeddings
@@ -199,12 +212,15 @@ Expected size: ~90MB. Expected NN agreement: unknown, needs testing.
 
 ---
 
-## Why not bundle the model in the app?
+## Bundling vs. downloading
 
-At 175MB fp16, the model exceeds the iOS App Store cellular download warning
-(200MB total) and the Google Play compressed APK guidance (150MB). It is downloaded
-on first launch by `mobile/hooks/useAssetUpdater.ts` and cached to device storage.
-Until the download completes, the app falls back to server-side CLIP embedding.
+At 90MB (dynamic-range int8), the model is bundleable. Combined with ~5MB YOLO,
+~25MB index files, and ~5MB cards.db, total ML assets are ~125MB — under the
+iOS 200MB cellular warning and the Android 150MB compressed APK guidance.
+
+The fp16 model (175MB) is too large to bundle and must be downloaded on first
+launch by `mobile/hooks/useAssetUpdater.ts`, falling back to server-side CLIP
+until the download completes.
 
 ---
 
@@ -214,7 +230,8 @@ Until the download completes, the app falls back to server-side CLIP embedding.
 |------|---------|
 | `backend/models/clip_finetuned.pt` | Fine-tuned visual encoder weights (source of truth) |
 | `mobile_models/clip_visual.onnx` | Intermediate fp32 ONNX (352MB, local export) |
-| `mobile_models/clip_visual_fp16.tflite` | Final mobile model (175MB, deploy this) |
+| `mobile_models/clip_visual_dynrange.tflite` | Final mobile model (90MB, deploy this) |
+| `mobile_models/clip_visual_fp16.tflite` | fp16 fallback (175MB, better drift) |
 | `mobile_models/ref_embeddings_container.npz` | Parity reference embeddings (500 cards, QuickGELU) |
 | `scripts/convert_clip_to_mobile.py` | ONNX export script |
 | `scripts/parity_harness.py` | Parity test script |
