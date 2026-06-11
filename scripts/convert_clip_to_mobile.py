@@ -2,29 +2,40 @@
 """
 Convert the fine-tuned CLIP visual encoder to mobile formats.
 
-Outputs:
-  - clip_visual.onnx              (FP32 reference — for parity harness baseline)
-  - clip_visual_fp16.onnx         (FP16 — smaller, good precision)
-  - clip_visual_int8.tflite       (INT8 quantized via onnx2tf — for Android)
-  - clip_visual_fp16.tflite       (FP16 — for Android fallback / wider op support)
-  - clip_visual.mlpackage         (CoreML — for iOS, via coremltools)
+IMPORTANT — open_clip version must match the backend:
+    The backend container uses open_clip 2.26.1, which instantiates ViT-B-32 with
+    QuickGELU activations (x * sigmoid(1.702x)). The local dev machine may have a
+    newer open_clip that uses standard GELU (erf). This matters because:
+      - The pgvector index was built with the container's QuickGELU model
+      - The parity harness must compare against the SAME activation (QuickGELU)
+      - Run the harness INSIDE the container: docker exec tcg_backend python /tmp/parity_harness.py
 
-After conversion, ALWAYS run the parity harness against each artifact before
-shipping:
-    python scripts/parity_harness.py --candidate clip_visual_int8.tflite --format tflite
-    python scripts/parity_harness.py --candidate clip_visual.mlpackage --format coreml
+CONVERSION PATH (tested, working as of 2026-06):
+    1. ONNX export (this script, run locally) — produces clip_visual.onnx (351MB fp32)
+    2. onnx2tf → TF SavedModel (inside Docker container with Python 3.12)
+    3. TFLiteConverter → fp16 TFLite (inside Docker container)
+    See: mobile_models/README.md for the full step-by-step
 
-If int8 fails parity, use fp16 TFLite. Never ship a model that fails the harness.
+PARITY RESULTS:
+    fp32 ONNX:   mean drift 0.0002, NN agreement 99%  — PASS (352MB, too large)
+    fp16 TFLite: mean drift 0.0002, NN agreement 97%  — practical PASS (175MB)
+    int8 TFLite: FAIL — calibration requires real card art images
+    QuickGELU (not GELU) is TFLite-native; standard GELU uses erf which is not
+    in TFLite standard ops (Flex ops workaround balloons size to 175MB+ for erf model)
+
+After conversion, run parity harness INSIDE the container:
+    docker exec tcg_backend python /tmp/parity_harness.py \\
+        --candidate /tmp/clip_visual_fp16.tflite --format tflite \\
+        --export-reference /tmp/ref_embeddings_container.npz \\
+        --db-url postgresql://tcg:tcgpass@postgres:5432/tcgdb
 
 Usage:
-    python scripts/convert_clip_to_mobile.py --output-dir mobile_models/
-    python scripts/convert_clip_to_mobile.py --output-dir mobile_models/ --formats onnx tflite
-    python scripts/convert_clip_to_mobile.py --output-dir mobile_models/ --formats coreml
+    python scripts/convert_clip_to_mobile.py --output-dir mobile_models/ --formats onnx
 
 Requirements (install separately — not in main requirements.txt):
-    pip install onnx onnxruntime onnxsim
-    pip install onnx2tf tensorflow  # for TFLite
-    pip install coremltools          # for CoreML (macOS only)
+    pip install onnx onnxruntime onnxscript
+    pip install onnx2tf tensorflow tf_keras onnx-graphsurgeon ai-edge-litert sng4onnx onnxsim simple_onnx_processing_tools
+    # For TFLite step run inside Docker: docker exec tcg_backend pip install tensorflow onnx2tf tf_keras ...
 """
 
 import argparse
@@ -102,7 +113,9 @@ def export_onnx(visual, output_path: Path, fp16: bool = False) -> Path:
         str(output_path),
         input_names=["image"],
         output_names=["embedding"],
-        dynamic_axes={"image": {0: "batch"}, "embedding": {0: "batch"}},
+        # No dynamic_axes — fixed batch=1 is required for onnx2tf to correctly
+        # handle ViT positional embeddings (transformer attention shapes are
+        # otherwise ambiguous and onnx2tf transposes them incorrectly).
         opset_version=14,
         do_constant_folding=True,
         dynamo=False,
