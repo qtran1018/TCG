@@ -92,16 +92,28 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
 
       if (useHybrid) {
         try {
-          // YOLO detect to get the card crop (reuse on-device YOLO, already live)
+          // YOLO detect, then crop to the card bounds before embedding.
+          // embedCardOnDevice applies the art crop (y=12%-52%) relative to whatever
+          // image it receives — passing the full frame causes it to crop the wrong region.
           const yoloResult = await detectCardsWithYolo(resizedUri, resized.width ?? SCAN_SIZE, resized.height ?? SCAN_SIZE);
-          const cardUri = resizedUri; // use full resized frame if no detection
+          let cardUri = resizedUri;
+          let cardW = resized.width ?? SCAN_SIZE;
+          let cardH = resized.height ?? SCAN_SIZE;
+
+          if (yoloResult && yoloResult.boxes.length > 0) {
+            const box = yoloResult.boxes[0]; // sorted by confidence
+            const cropped = await ImageManipulator.manipulateAsync(
+              resizedUri,
+              [{ crop: { originX: box.left, originY: box.top, width: box.width, height: box.height } }],
+              { format: ImageManipulator.SaveFormat.JPEG, compress: 0.92 },
+            );
+            cardUri = cropped.uri;
+            cardW = box.width;
+            cardH = box.height;
+          }
 
           // Embed with on-device CLIP
-          const embedResult = await embedCardOnDevice(
-            cardUri,
-            resized.width ?? SCAN_SIZE,
-            resized.height ?? SCAN_SIZE,
-          );
+          const embedResult = await embedCardOnDevice(cardUri, cardW, cardH);
 
           if (embedResult && isRunningRef.current) {
             const embedding = Array.from(embedResult.embedding);
