@@ -347,9 +347,11 @@ def _build_result(
             partial_reason=partial_reason,
         )
     if scan_mode == "image":
+        non_mcd = [c for c in image_candidates if not (c.set_code or "").startswith("mcd")]
+        mcd     = [c for c in image_candidates if     (c.set_code or "").startswith("mcd")]
         return ScanResultItem(
             crop_index=idx,
-            candidates=image_candidates,
+            candidates=non_mcd + mcd,
             query_used=image_query,
             match_source="image" if image_sim >= _SIM_THRESHOLD else ("image:low" if image_candidates else "none"),
             partial=partial,
