@@ -65,8 +65,19 @@ def embed_reference(image_bytes_list: list[bytes]) -> np.ndarray:
     This is the ground truth — the pipeline that generated the shipped index.
     Must match _crop_art + _preprocess + encode_image + L2-normalize exactly.
     """
-    from app.services.card_embedder import embed_batch
-    vecs = embed_batch(image_bytes_list)
+    import importlib.util
+    # Load card_embedder directly — avoids app/services/__init__.py which
+    # pulls in the full FastAPI/Redis/Pydantic stack (not needed here).
+    for base in [Path(__file__).parent.parent / "backend", Path("/app")]:
+        candidate = base / "app" / "services" / "card_embedder.py"
+        if candidate.exists():
+            spec = importlib.util.spec_from_file_location("card_embedder", candidate)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            break
+    else:
+        raise ImportError("card_embedder.py not found")
+    vecs = mod.embed_batch(image_bytes_list)
     return np.stack(vecs)  # (N, 512) float32
 
 
@@ -86,14 +97,21 @@ def _clip_preprocess_numpy(crop_pil) -> np.ndarray:
     """Replicate open_clip ViT-B/32 preprocessing as numpy for candidate runners.
 
     Steps (must match open_clip's transform exactly):
-      1. Resize shorter side to 224 (bicubic)
+      1. Resize shorter side to 224 (bicubic), preserving aspect ratio
       2. Center-crop to 224×224
       3. Normalize: mean=[0.48145466, 0.4578275, 0.40821073]
                     std= [0.26862954, 0.26130258, 0.27577711]
     Output: float32 NCHW (1, 3, 224, 224)
     """
     from PIL import Image
-    img = crop_pil.resize((224, 224), Image.BICUBIC)
+    w, h = crop_pil.size
+    scale = 224 / min(w, h)
+    new_w, new_h = max(224, round(w * scale)), max(224, round(h * scale))
+    img = crop_pil.resize((new_w, new_h), Image.BICUBIC)
+    # Center crop to 224×224
+    left = (new_w - 224) // 2
+    top  = (new_h - 224) // 2
+    img = img.crop((left, top, left + 224, top + 224))
     arr = np.array(img, dtype=np.float32) / 255.0  # HWC [0,1]
     mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
     std  = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32)
@@ -162,28 +180,34 @@ def embed_coreml(image_bytes_list: list[bytes], model_path: str) -> np.ndarray:
 # Image fetch from DB
 # ---------------------------------------------------------------------------
 
-async def fetch_sample_images(db_url: str, n: int) -> list[tuple[int, bytes]]:
-    """Fetch N card images (mix of EN and JP) from the DB for parity testing.
+async def fetch_sample_images(db_url: str, n: int, card_ids: list[int] | None = None) -> list[tuple[int, bytes]]:
+    """Fetch card images from the DB for parity testing.
 
-    Prefers cards with image_url set; downloads the image. Uses a stratified
-    sample: half EN, half JP (or all available if fewer than n/2 exist).
+    If card_ids is given, fetches those specific cards (for --load-reference reuse).
+    Otherwise fetches a stratified random sample: half EN, half JP.
     """
     import aiohttp
     conn = await asyncpg.connect(db_url)
     try:
-        half = n // 2
-        rows = await conn.fetch(
-            """
-            (SELECT id, image_url FROM cards
-             WHERE image_url IS NOT NULL AND embedding IS NOT NULL AND language='en'
-             ORDER BY random() LIMIT $1)
-            UNION ALL
-            (SELECT id, image_url FROM cards
-             WHERE image_url IS NOT NULL AND embedding IS NOT NULL AND language='ja'
-             ORDER BY random() LIMIT $1)
-            """,
-            half,
-        )
+        if card_ids:
+            rows = await conn.fetch(
+                "SELECT id, image_url FROM cards WHERE id = ANY($1) AND image_url IS NOT NULL",
+                card_ids,
+            )
+        else:
+            half = n // 2
+            rows = await conn.fetch(
+                """
+                (SELECT id, image_url FROM cards
+                 WHERE image_url IS NOT NULL AND embedding IS NOT NULL AND language='en'
+                 ORDER BY random() LIMIT $1)
+                UNION ALL
+                (SELECT id, image_url FROM cards
+                 WHERE image_url IS NOT NULL AND embedding IS NOT NULL AND language='ja'
+                 ORDER BY random() LIMIT $1)
+                """,
+                half,
+            )
     finally:
         await conn.close()
 
@@ -304,14 +328,14 @@ async def main(args):
             print(f"\nLoaded {len(ref_vecs)} reference embeddings from {args.load_reference}")
             return
 
-        # Re-fetch images for candidate embedding
-        logger.info("Re-fetching images for candidate embedding...")
-        pairs = await fetch_sample_images(db_url, len(card_ids))
+        # Re-fetch the same card IDs for candidate embedding
+        logger.info("Re-fetching %d specific card images for candidate embedding...", len(card_ids))
+        pairs = await fetch_sample_images(db_url, len(card_ids), card_ids=card_ids)
         image_bytes_map = {cid: img for cid, img in pairs}
-        # Keep only cards whose images we have, in same order as ref
-        keep_mask = [cid in image_bytes_map for cid in card_ids]
+        # Keep only cards whose images we successfully downloaded
+        keep_mask = np.array([cid in image_bytes_map for cid in card_ids])
         card_ids = [cid for cid, keep in zip(card_ids, keep_mask) if keep]
-        ref_vecs = ref_vecs[np.array(keep_mask)]
+        ref_vecs = ref_vecs[keep_mask]
         image_bytes_list = [image_bytes_map[cid] for cid in card_ids]
     else:
         # Fresh fetch

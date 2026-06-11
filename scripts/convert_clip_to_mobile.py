@@ -105,6 +105,7 @@ def export_onnx(visual, output_path: Path, fp16: bool = False) -> Path:
         dynamic_axes={"image": {0: "batch"}, "embedding": {0: "batch"}},
         opset_version=14,
         do_constant_folding=True,
+        dynamo=False,
     )
     logger.info("ONNX saved to %s", output_path)
 
@@ -249,12 +250,13 @@ def main():
                         help="Which formats to produce (default: onnx tflite)")
     parser.add_argument("--skip-int8", action="store_true",
                         help="Skip INT8 TFLite (produce fp16 only) — faster, avoids calibration issues")
-    parser.add_argument("--weights", type=Path, default=_FINETUNED_WEIGHTS,
+    parser.add_argument("--weights", type=Path, default=None,
                         help="Path to fine-tuned weights (default: backend/models/clip_finetuned.pt)")
     args = parser.parse_args()
 
     global _FINETUNED_WEIGHTS
-    _FINETUNED_WEIGHTS = args.weights
+    if args.weights is not None:
+        _FINETUNED_WEIGHTS = args.weights
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Output directory: %s", args.output_dir.resolve())
