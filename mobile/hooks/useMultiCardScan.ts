@@ -1,3 +1,9 @@
+// Phase 4a note: multi-scan uses the server image upload path unchanged.
+// The hybrid CLIP path (on-device embed → POST 512-d vector) is wired for live
+// scan only (useLiveScan.ts). Multi-scan Phase 4b: embed each crop on-device
+// and call api.scanVector per crop, bypassing server-side CLIP entirely.
+// Deferred because multi-scan already avoids server YOLO (sends explicit boxes),
+// so the GPU-offload gain per crop is CLIP-only. Live scan benefits more.
 import { useState, useCallback, useEffect, useRef } from "react";
 import TextRecognition, { TextRecognitionScript } from "@react-native-ml-kit/text-recognition";
 import * as ImageManipulator from "expo-image-manipulator";

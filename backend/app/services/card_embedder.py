@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -12,11 +13,23 @@ logger = logging.getLogger(__name__)
 
 _model = None
 _preprocess = None
-_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# OCI Ampere deployment: server no longer runs CLIP in the hot path — on-device
+# CLIP handles recognition; server is fallback-only for weak/non-NPU devices.
+# Force CPU mode when FORCE_CPU_EMBEDDER=1 (set in docker-compose for OCI).
+# Retain CUDA auto-detect for local GPU dev so existing workflow is unchanged.
+_FORCE_CPU = os.getenv("FORCE_CPU_EMBEDDER", "").strip() in ("1", "true", "yes")
+_device = torch.device("cpu") if _FORCE_CPU else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # fp16 on CUDA roughly halves VRAM and gives ~1.8× faster inference on
 # Ampere-class GPUs (RTX 30xx). CPU keeps fp32 — fp16 on CPU is slower.
 _USE_HALF = _device.type == "cuda"
 _load_lock = threading.Lock()
+
+# On OCI (CPU fallback-only), cap concurrent embeds so a burst of weak-device
+# fallbacks can't saturate all cores and starve co-hosted services.
+# CLIP_MAX_CONCURRENCY=0 means unlimited (default for GPU/local dev).
+_MAX_CONCURRENCY = int(os.getenv("CLIP_MAX_CONCURRENCY", "0") or 0)
+_concurrency_sem = threading.Semaphore(_MAX_CONCURRENCY) if _MAX_CONCURRENCY > 0 else None
 
 
 _FINETUNED_WEIGHTS = Path(__file__).parent.parent.parent / "models" / "clip_finetuned.pt"
@@ -107,12 +120,18 @@ def embed_batch(images: "list[Image.Image | bytes]") -> list[np.ndarray]:
     so the event loop isn't blocked during the forward pass.
     """
     _load_model()
-    tensors = [_preprocess(_crop_art(_to_pil(src))) for src in images]
-    batch = torch.stack(tensors).to(_device)
-    if _USE_HALF:
-        batch = batch.half()
-    with torch.inference_mode():
-        features = _model.encode_image(batch)
-        features = features / features.norm(dim=-1, keepdim=True)
-    # Cast back to fp32 — pgvector storage and downstream cosine math expect float32.
-    return [v.float().cpu().numpy() for v in features]
+    if _concurrency_sem is not None:
+        _concurrency_sem.acquire()
+    try:
+        tensors = [_preprocess(_crop_art(_to_pil(src))) for src in images]
+        batch = torch.stack(tensors).to(_device)
+        if _USE_HALF:
+            batch = batch.half()
+        with torch.inference_mode():
+            features = _model.encode_image(batch)
+            features = features / features.norm(dim=-1, keepdim=True)
+        # Cast back to fp32 — pgvector storage and downstream cosine math expect float32.
+        return [v.float().cpu().numpy() for v in features]
+    finally:
+        if _concurrency_sem is not None:
+            _concurrency_sem.release()

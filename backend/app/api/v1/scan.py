@@ -5,6 +5,8 @@ import io
 import logging
 import re
 
+import numpy as np
+
 import imagehash
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -356,6 +358,119 @@ def _build_result(
         partial=partial,
         partial_reason=partial_reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# Hybrid vector endpoint (Phase 4a — on-device CLIP migration)
+# ---------------------------------------------------------------------------
+
+class VectorScanRequest(BaseModel):
+    """Hybrid scan: phone computes the CLIP embedding, server does the pgvector search.
+
+    This removes GPU/CPU inference from the server entirely — the server only runs
+    a fast nearest-neighbor query against the existing pgvector index.
+
+    model_version: the CLIP_MODEL_VERSION from clipEmbedder.ts. Server rejects
+    requests from stale model versions to prevent parity bugs where the phone
+    embeds with a different model than the index was built against.
+    """
+    embedding: list[float]          # 512-dim L2-normalized vector from on-device CLIP
+    language: str = "en"            # "en" | "ja" | "auto"
+    ocr_hint: OcrHint | None = None
+    scan_mode: str = "combined"     # "ocr" | "image" | "combined"
+    model_version: str = "1"        # must match server-side current index version
+    phash: str | None = None        # optional perceptual hash for re-ranking
+
+    @field_validator("embedding")
+    @classmethod
+    def validate_embedding(cls, v):
+        if len(v) != 512:
+            raise ValueError(f"embedding must be 512-dim, got {len(v)}")
+        return v
+
+
+# Bump this when re-building the index from a new model.
+# Mismatched versions mean the phone and server use different embedding spaces.
+_CURRENT_INDEX_VERSION = "1"
+
+
+@router.post("/vector")
+async def scan_vector(req: VectorScanRequest):
+    """Hybrid scan endpoint for on-device CLIP (Phase 4a).
+
+    Phone sends a 512-dim vector instead of a full JPEG image. Server performs
+    pgvector nearest-neighbor search and optional OCR search, returns NDJSON
+    (single result item — always exactly one crop in this mode).
+
+    Version gate: rejects requests where model_version != _CURRENT_INDEX_VERSION
+    with a 409 so the client knows to fall back to the full image upload path.
+    """
+    from fastapi import HTTPException
+
+    if req.model_version != _CURRENT_INDEX_VERSION:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "model_version_mismatch",
+                "client_version": req.model_version,
+                "server_version": _CURRENT_INDEX_VERSION,
+                "message": "Client CLIP model is outdated. Fall back to image upload.",
+            },
+        )
+
+    embedding = np.array(req.embedding, dtype=np.float32)
+    # Re-normalize defensively in case of minor float drift from the phone
+    norm = np.linalg.norm(embedding)
+    if norm > 0:
+        embedding = embedding / norm
+
+    # Use embedding hash as cache seed (no image bytes available)
+    import hashlib as _hashlib
+    cache_seed = _hashlib.sha256(embedding.tobytes()).hexdigest()
+
+    do_image = req.scan_mode in ("image", "combined")
+    do_ocr   = req.scan_mode in ("ocr", "combined") and req.ocr_hint is not None
+
+    async def run_image():
+        if not do_image:
+            return [], 0.0, "image:no_match"
+        if req.language == "auto":
+            en_task = asyncio.create_task(_vector_search(embedding, req.phash, cache_seed, "en"))
+            ja_task = asyncio.create_task(_vector_search(embedding, req.phash, cache_seed, "ja"))
+            en_res, ja_res = await asyncio.gather(en_task, ja_task, return_exceptions=True)
+            en_c, en_s, en_q = en_res if not isinstance(en_res, BaseException) else ([], 0.0, "image:no_match")
+            ja_c, ja_s, ja_q = ja_res if not isinstance(ja_res, BaseException) else ([], 0.0, "image:no_match")
+            _FALLBACK_MARGIN = 0.05
+            if ja_s > en_s + _FALLBACK_MARGIN:
+                return ja_c, ja_s, ja_q
+            return en_c, en_s, en_q
+        else:
+            lang = req.language if req.language in VALID_LANGUAGES else "en"
+            return await _vector_search(embedding, req.phash, cache_seed, lang)
+
+    async def run_ocr():
+        if not do_ocr or req.ocr_hint is None:
+            return [], ""
+        return await _ocr_search_one(req.ocr_hint)
+
+    image_res, ocr_res = await asyncio.gather(run_image(), run_ocr(), return_exceptions=True)
+
+    image_failed = isinstance(image_res, BaseException)
+    ocr_failed   = isinstance(ocr_res, BaseException)
+    if image_failed:
+        logger.exception("vector search failed", exc_info=image_res)
+        image_res = ([], 0.0, "image:no_match")
+    if ocr_failed:
+        logger.exception("OCR search failed", exc_info=ocr_res)
+        ocr_res = ([], "")
+
+    result = _build_result(0, req.scan_mode, image_res, ocr_res,
+                           image_failed=image_failed, ocr_failed=ocr_failed)
+
+    async def generate():
+        yield result.model_dump_json() + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 # ---------------------------------------------------------------------------

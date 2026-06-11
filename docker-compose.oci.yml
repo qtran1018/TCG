@@ -1,0 +1,59 @@
+# OCI Ampere deployment overlay — no GPU, CPU-mode embedder, memory caps.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.oci.yml up -d
+#
+# What this overrides:
+#   - Removes nvidia GPU reservation (Ampere A1 has no discrete GPU)
+#   - Sets FORCE_CPU_EMBEDDER=1 so card_embedder.py runs on CPU/ARM
+#   - Caps CLIP concurrency (fallback-only traffic — protect travel apps)
+#   - Tightens Postgres/Redis memory so they coexist with travel apps
+#   - Removes --reload (prod mode)
+#   - Drops pgadmin (not needed in prod)
+#
+# CLIP on CPU (ARM NEON): ~1-3s per embed. Acceptable because:
+#   - On-device CLIP handles the happy path; server is fallback-only
+#   - Fallback volume is a minority (weak/non-NPU devices only)
+#   - Concurrency cap prevents a burst from starving co-hosted travel apps
+
+services:
+  postgres:
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c max_connections=50
+    # No port exposure on OCI — backend connects internally
+
+  redis:
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+
+  backend:
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+        # Remove GPU reservation — no Nvidia GPU on Ampere A1
+    environment:
+      # Force CPU mode — no CUDA on OCI Ampere
+      FORCE_CPU_EMBEDDER: "1"
+      # Cap concurrent CLIP embed threads so CPU fallback scans don't
+      # saturate all 4 Ampere cores and starve the travel apps.
+      # 2 concurrent fallback embeds = ~2-6s CPU burst, then idle.
+      CLIP_MAX_CONCURRENCY: "2"
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+      --no-access-log
+
+  # pgadmin excluded from OCI deployment
+  pgadmin:
+    profiles:
+      - dev

@@ -3,8 +3,14 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import { Camera } from "react-native-vision-camera";
 import { api } from "@/services/api";
-import type { CardOut, PriceOut } from "@/services/api";
+import type { CardOut, PriceOut, ScanOcrHint } from "@/services/api";
 import type { Game, Language, ScanType } from "@/constants";
+import {
+  clipMode,
+  embedCardOnDevice,
+  CLIP_MODEL_VERSION,
+} from "@/utils/clipEmbedder";
+import { detectCardsWithYolo } from "@/utils/yoloDetector";
 
 // "auto" searches both languages and picks the higher CLIP similarity (less
 // reliable for identical-art EN/JA prints); en/ja hard-lock the search.
@@ -73,23 +79,80 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
       );
       resizedUri = resized.uri;
 
-      const imageBase64 = await FileSystem.readAsStringAsync(resized.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
       if (!isRunningRef.current) return;
 
       const allCandidates: CardOut[] = [];
-      await api.scanStream(
-        { image: imageBase64 }, // no boxes — backend YOLO auto-detects the card
-        [{ raw_text: "", language, game }], // language locks the CLIP search ("auto" = both)
-        "combined",
-        (result) => {
-          result.candidates?.forEach((c) => {
-            if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
-          });
-        },
-      );
+      const ocrHint: ScanOcrHint = { raw_text: "", language, game };
+
+      // --- Hybrid CLIP path (Phase 4a) ---
+      // If this device supports on-device CLIP, embed locally and send only the
+      // 512-dim vector. Falls back to image upload on any failure.
+      const useHybrid = clipMode() === 'ondevice';
+      let hybridSucceeded = false;
+
+      if (useHybrid) {
+        try {
+          // YOLO detect to get the card crop (reuse on-device YOLO, already live)
+          const yoloResult = await detectCardsWithYolo(resizedUri, resized.width ?? SCAN_SIZE, resized.height ?? SCAN_SIZE);
+          const cardUri = resizedUri; // use full resized frame if no detection
+
+          // Embed with on-device CLIP
+          const embedResult = await embedCardOnDevice(
+            cardUri,
+            resized.width ?? SCAN_SIZE,
+            resized.height ?? SCAN_SIZE,
+          );
+
+          if (embedResult && isRunningRef.current) {
+            const embedding = Array.from(embedResult.embedding);
+            try {
+              await api.scanVector(
+                embedding,
+                language,
+                "combined",
+                ocrHint,
+                CLIP_MODEL_VERSION,
+                null,
+                (result) => {
+                  result.candidates?.forEach((c) => {
+                    if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
+                  });
+                },
+              );
+              hybridSucceeded = true;
+            } catch (e: unknown) {
+              const err = e as Error & { code?: string };
+              if (err.code === 'MODEL_VERSION_MISMATCH') {
+                // Server index was rebuilt — this device needs a new model/index.
+                // Fall through to image upload; don't mark hybrid as broken.
+                console.warn('[useLiveScan] model version mismatch — falling back to image upload');
+              } else {
+                console.warn('[useLiveScan] vector scan failed — falling back:', e);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[useLiveScan] hybrid embed path failed — falling back:', e);
+        }
+      }
+
+      // --- Server image-upload fallback ---
+      // Used when: on-device CLIP not available, hybrid failed, or version mismatch.
+      if (!hybridSucceeded && isRunningRef.current) {
+        const imageBase64 = await FileSystem.readAsStringAsync(resizedUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await api.scanStream(
+          { image: imageBase64 }, // no boxes — backend YOLO auto-detects
+          [ocrHint],
+          "combined",
+          (result) => {
+            result.candidates?.forEach((c) => {
+              if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
+            });
+          },
+        );
+      }
 
       if (!isRunningRef.current || allCandidates.length === 0) {
         pendingMatchRef.current = null;
