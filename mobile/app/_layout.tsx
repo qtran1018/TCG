@@ -1,10 +1,21 @@
+import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
 import { StyleSheet } from "react-native";
 import { COLORS } from "@/constants";
+import { probeClipCapability } from "@/utils/clipEmbedder";
+import { useAssetUpdater } from "@/hooks/useAssetUpdater";
 
 export default function RootLayout() {
+  useAssetUpdater();
+
+  useEffect(() => {
+    // Warm the capability probe so clipMode() is ready before the first scan.
+    // Runs once per install / per model version bump — result persisted in AsyncStorage.
+    probeClipCapability().catch(() => {});
+  }, []);
+
   return (
     <GestureHandlerRootView style={styles.root}>
       <StatusBar style="light" />

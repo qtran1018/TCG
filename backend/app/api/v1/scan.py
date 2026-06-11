@@ -143,6 +143,12 @@ def _rrf_merge(
         rest = [c for c in merged if not (c.card_number and _normalize_number(c.card_number) == ocr_num)]
         merged = matching + rest
 
+    # Deprioritize McDonald's promo sets — their art closely resembles main-set cards
+    # and they are far less commonly scanned. Consistent with card_matcher._dedupe_and_rank.
+    non_mcd = [c for c in merged if not (c.set_code or "").startswith("mcd")]
+    mcd     = [c for c in merged if     (c.set_code or "").startswith("mcd")]
+    merged  = non_mcd + mcd
+
     has_img = use_image and bool(image_candidates)
     has_ocr = bool(ocr_candidates)
     source = "both" if (has_img and has_ocr) else "image" if has_img else "ocr" if has_ocr else "none"
