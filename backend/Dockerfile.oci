@@ -1,16 +1,14 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 \
+    libgl1 libglib2.0-0 curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install CPU-only PyTorch before the rest of requirements so pip doesn't
-# pull in the CUDA wheels (~1.5GB) when open-clip-torch declares torch as a dep.
-RUN pip install --no-cache-dir \
-    --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch==2.4.1+cpu torchvision==0.19.1+cpu
+# On ARM64 (OCI Ampere A1), standard PyTorch wheels are CPU-only by default —
+# no +cpu suffix needed and the pytorch.org/whl/cpu index doesn't publish ARM builds.
+RUN pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

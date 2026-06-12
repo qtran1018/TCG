@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:8002:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +73,12 @@ services:
     environment:
       FORCE_CPU_EMBEDDER: "1"
       CLIP_MAX_CONCURRENCY: "2"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     command: >
       uvicorn app.main:app
         --host 0.0.0.0
