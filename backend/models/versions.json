@@ -1,0 +1,22 @@
+{
+  "clip_server": {
+    "version": "1",
+    "file": "clip_finetuned.pt",
+    "description": "CLIP ViT-B/32 fine-tuned visual encoder, epoch 7, loss 0.0077, 47442 cards"
+  },
+  "yolo_server": {
+    "version": "2",
+    "file": "card_detector.pt",
+    "description": "YOLO11n v2, mAP50=0.993 mAP50-95=0.964, 2823 train images (real + synthetic)"
+  },
+  "clip_mobile": {
+    "version": "1",
+    "file": "clip_visual.tflite",
+    "description": "CLIP ViT-B/32 dynamic-range int8 TFLite, same weights as clip_server v1. Must match CLIP_MODEL_VERSION in mobile/utils/clipEmbedder.ts"
+  },
+  "yolo_mobile": {
+    "version": "2",
+    "file": "card_detector.tflite",
+    "description": "YOLO11n float16 TFLite, same weights as yolo_server v2, exported via onnx2tf"
+  }
+}

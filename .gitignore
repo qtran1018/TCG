@@ -64,6 +64,11 @@ TCGScanner.html
 pokemon_jp_en_map.html
 cleanup-plan.md
 *.log
+*.dump
+
+# Local copies of mobile bundle assets / model experiments (not for git)
+mobile_assets/
+mobile_models/
 
 # IDE / personal settings
 .claude/

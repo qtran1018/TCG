@@ -126,9 +126,13 @@ _JP_PC_SET_SLUG: dict[str, str] = {
 
 # EN sets where pokemontcg.io set_name doesn't match PriceCharting's game slug.
 # PriceCharting drops "Collection" from McDonald's sets: "McDonald's Collection 2017" → "mcdonalds-2017".
+# pokemontcg.io stores the Base Set as "Base" but PriceCharting uses "base-set".
 _EN_PC_SET_SLUG: dict[str, str] = {
-    f"McDonald's Collection {y}": f"mcdonalds-{y}"
-    for y in ["2011", "2012", "2014", "2015", "2016", "2017", "2018", "2019", "2021", "2022"]
+    "Base": "base-set",
+    **{
+        f"McDonald's Collection {y}": f"mcdonalds-{y}"
+        for y in ["2011", "2012", "2014", "2015", "2016", "2017", "2018", "2019", "2021", "2022"]
+    },
 }
 
 

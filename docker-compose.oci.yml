@@ -1,0 +1,86 @@
+# Standalone production compose for OCI free tier (Ampere A1, no GPU).
+# Usage on server: docker compose -f docker-compose.oci.yml up -d --build
+#
+# Differences from local docker-compose.yml:
+#  - Dockerfile.oci: CPU-only PyTorch (~1.5GB smaller image, no CUDA wheels)
+#  - No NVIDIA GPU reservation
+#  - FORCE_CPU_EMBEDDER=1  — CLIP runs fp32 on CPU (fallback-only, ~1-3s/embed)
+#  - CLIP_MAX_CONCURRENCY=2 — caps concurrent inferences, protects co-hosted apps
+#  - Port 8000 bound to 127.0.0.1 only — nginx proxies externally
+#  - Postgres/Redis not exposed to host — internal network only
+#  - Postgres memory tuned for coexistence with travel apps
+#  - Redis capped at 256MB with LRU eviction (price cache, fully rebuildable)
+#  - No --reload; 2 workers for production throughput
+#  - No pgadmin
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tcg_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tcg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-tcgdb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=64MB
+        -c max_connections=50
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tcg}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tcg_redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    command: >
+      redis-server
+        --appendonly yes
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.oci
+    container_name: tcg_backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/models:/app/models:ro
+    environment:
+      FORCE_CPU_EMBEDDER: "1"
+      CLIP_MAX_CONCURRENCY: "2"
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --workers 2
+        --log-level info
+        --no-access-log
+
+volumes:
+  pgdata:
+  redisdata:

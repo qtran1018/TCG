@@ -1,8 +1,14 @@
+// Phase 5: fully on-device recognition — embed each crop with on-device CLIP,
+// search bundled index via vectorSearch (brute-force dot-product), look up card
+// metadata from cards.db (expo-sqlite). Server is fallback only.
 import { useState, useCallback, useEffect, useRef } from "react";
 import TextRecognition, { TextRecognitionScript } from "@react-native-ml-kit/text-recognition";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import { api } from "@/services/api";
+import { clipMode, embedCardOnDevice, CLIP_MODEL_VERSION } from "@/utils/clipEmbedder";
+import { vectorSearch } from "@/utils/vectorSearch";
+import { queryCardsByIds, searchCardsByName } from "@/utils/cardsDb";
 import { detectCardRegions, boxesToRegions } from "@/utils/detectCards";
 import { detectCardsWithYolo } from "@/utils/yoloDetector";
 import { assessCardConfidence } from "@/utils/cardConfidence";
@@ -362,55 +368,144 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
         // 6. Signal the store that streaming is starting
         setMultiScanLoading(true, regions.length);
 
-        // 7. Stream results from the combined /scan endpoint
+        // 7. Stream results — hybrid on-device CLIP path first, server fallback
         const seenIds = new Set<number>();
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
 
-        const streamOutcome = await api.scanStream({ image: fullImageB64, boxes }, ocrHints, scanMode, (item: ScanStreamResult) => {
+        // Shared result handler used by both on-device and server paths.
+        const handleResult = (item: ScanStreamResult, cropIndex: number) => {
           if (item.candidates.length === 0) return;
-
-          // Deduplicate by top candidate ID
           const topId = item.candidates[0].id;
           if (seenIds.has(topId)) return;
           seenIds.add(topId);
-
           if (enableTiming && t3 === 0) t3 = Date.now();
 
-          const hint = ocrHints[item.crop_index];
+          const hint = ocrHints[cropIndex];
           const rawText = hint?.raw_text ?? "";
-
-          // Extract kana name, card number, and set total for Japanese image lookup
           let kanaName: string | undefined;
           let setTotal: number | undefined;
           let cardNumber: string | undefined;
-          const cropLang = ocrHints[item.crop_index]?.language ?? "en";
+          const cropLang = hint?.language ?? "en";
           if (cropLang === "ja" && rawText) {
             const kanaMatch = rawText.match(/[゠-ヿー]+/g);
             if (kanaMatch) kanaName = kanaMatch.reduce((a, b) => (a.length >= b.length ? a : b), "");
             const numMatch = rawText.match(/(\d+)\/(\d+)/);
-            if (numMatch) {
-              cardNumber = numMatch[1];
-              setTotal = parseInt(numMatch[2], 10);
+            if (numMatch) { cardNumber = numMatch[1]; setTotal = parseInt(numMatch[2], 10); }
+          }
+          appendMultiScanCard({
+            regionIndex: cropData[cropIndex]?.regionIndex ?? cropIndex,
+            ocrText: rawText,
+            searchResult: { candidates: item.candidates, query_used: item.query_used },
+            matchSource: (item.match_source === "none" || !item.match_source) ? undefined : item.match_source,
+            kanaName, setTotal, cardNumber,
+          });
+        };
+
+        let hybridSucceeded = false;
+        if (clipMode() === 'ondevice') {
+          if (scanMode === 'ocr') {
+            // OCR-only: FTS5 name search, no image embedding
+            try {
+              const ocrTasks = ocrHints.map(async (hint, i) => {
+                if (!hint?.raw_text) return;
+                const lang = (hint.language ?? 'en') as 'en' | 'ja';
+                const candidates = await searchCardsByName(hint.raw_text, lang);
+                if (!candidates.length) return;
+                handleResult({ crop_index: i, candidates, query_used: 'ondevice:fts5', match_source: 'ocr' }, i);
+              });
+              await Promise.all(ocrTasks);
+              hybridSucceeded = true;
+              console.log('[MultiScan] on-device OCR path completed');
+            } catch (e) {
+              console.warn('[MultiScan] on-device OCR path failed — falling back:', e);
+            }
+          } else {
+            // image or combined: embed each crop sequentially, run vector searches in parallel
+            try {
+              const vectorTasks: Promise<void>[] = [];
+              for (let i = 0; i < cropData.length; i++) {
+                const { cropX, cropY, cropW, cropH } = cropData[i];
+                const cropManip = await ImageManipulator.manipulateAsync(
+                  resized.uri,
+                  [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
+                  { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 },
+                );
+                const embedResult = await embedCardOnDevice(cropManip.uri, cropW, cropH);
+                if (!embedResult) continue;
+
+                const capturedI = i;
+                const capturedHint = ocrHints[i];
+                const capturedEmbed = embedResult.embedding;
+
+                vectorTasks.push((async () => {
+                  try {
+                    const lang = (capturedHint?.language ?? 'en') as 'en' | 'ja';
+                    const searchResults = await vectorSearch(capturedEmbed, lang);
+                    const imageCards = await queryCardsByIds(searchResults);
+                    console.log(`[MultiScan] crop=${capturedI} lang=${lang} top-sim=${searchResults[0]?.sim.toFixed(3) ?? 'none'} results=${imageCards.length}`);
+
+                    let candidates = imageCards;
+                    if (scanMode === 'combined' && capturedHint?.raw_text) {
+                      const ocrCards = await searchCardsByName(capturedHint.raw_text, lang);
+                      if (ocrCards.length > 0) {
+                        // Cards appearing in both image and OCR results are promoted to front
+                        const imageIds = new Set(imageCards.map(c => c.id));
+                        const boostedIds = new Set(ocrCards.filter(c => imageIds.has(c.id)).map(c => c.id));
+                        const boosted   = imageCards.filter(c => boostedIds.has(c.id));
+                        const imgOnly   = imageCards.filter(c => !boostedIds.has(c.id));
+                        const ocrOnly   = ocrCards.filter(c => !imageIds.has(c.id));
+                        // McD penalty already in queryCardsByIds; apply to ocrOnly set too
+                        const ocrNonMcd = ocrOnly.filter(c => !(c.set_code ?? '').startsWith('mcd'));
+                        const ocrMcd    = ocrOnly.filter(c =>  (c.set_code ?? '').startsWith('mcd'));
+                        candidates = [...boosted, ...imgOnly, ...ocrNonMcd, ...ocrMcd].slice(0, 10);
+                      }
+                    }
+
+                    if (!candidates.length) {
+                      // Score below floor on-device (quantization drift) — retry this crop
+                      // via server. Costs one network call instead of silently dropping it.
+                      console.log(`[MultiScan] crop=${capturedI} on-device miss — server fallback`);
+                      await api.scanVector(
+                        Array.from(capturedEmbed),
+                        lang,
+                        scanMode,
+                        capturedHint ?? { raw_text: undefined, language: lang, game },
+                        CLIP_MODEL_VERSION,
+                        null,
+                        (item) => handleResult(item, capturedI),
+                      );
+                      return;
+                    }
+                    handleResult({
+                      crop_index: capturedI,
+                      candidates,
+                      query_used: `ondevice:${searchResults[0]?.sim.toFixed(2) ?? '0'}`,
+                      match_source: scanMode === 'combined' ? 'both' : 'image',
+                    }, capturedI);
+                  } catch (e) {
+                    console.warn('[MultiScan] on-device search failed for crop', capturedI, ':', e);
+                  }
+                })());
+              }
+              await Promise.all(vectorTasks);
+              hybridSucceeded = true;
+              console.log('[MultiScan] on-device path completed');
+            } catch (e) {
+              console.warn('[MultiScan] on-device path failed — falling back to server:', e);
             }
           }
+        }
 
-          const card: DetectedCard = {
-            regionIndex: cropData[item.crop_index]?.regionIndex ?? item.crop_index,
-            ocrText: rawText,
-            searchResult: {
-              candidates: item.candidates,
-              query_used: item.query_used,
-            },
-            matchSource: (item.match_source === "none" || !item.match_source) ? undefined : item.match_source,
-            kanaName,
-            setTotal,
-            cardNumber,
-          };
-
-          appendMultiScanCard(card);
-        }, controller.signal);
+        // Server fallback: used when not on-device capable, or hybrid failed.
+        const streamOutcome = hybridSucceeded ? null : await api.scanStream(
+          { image: fullImageB64, boxes },
+          ocrHints,
+          scanMode,
+          (item: ScanStreamResult) => handleResult(item, item.crop_index),
+          controller.signal,
+        );
 
         setMultiScanLoading(false);
 

@@ -3,8 +3,16 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import { Camera } from "react-native-vision-camera";
 import { api } from "@/services/api";
-import type { CardOut, PriceOut } from "@/services/api";
+import type { CardOut, PriceOut, ScanOcrHint } from "@/services/api";
 import type { Game, Language, ScanType } from "@/constants";
+import {
+  clipMode,
+  embedCardOnDevice,
+  CLIP_MODEL_VERSION,
+} from "@/utils/clipEmbedder";
+import { vectorSearch, vectorSearchAuto } from "@/utils/vectorSearch";
+import { queryCardsByIds } from "@/utils/cardsDb";
+import { detectCardsWithYolo } from "@/utils/yoloDetector";
 
 // "auto" searches both languages and picks the higher CLIP similarity (less
 // reliable for identical-art EN/JA prints); en/ja hard-lock the search.
@@ -73,23 +81,105 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
       );
       resizedUri = resized.uri;
 
-      const imageBase64 = await FileSystem.readAsStringAsync(resized.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
       if (!isRunningRef.current) return;
 
       const allCandidates: CardOut[] = [];
-      await api.scanStream(
-        { image: imageBase64 }, // no boxes — backend YOLO auto-detects the card
-        [{ raw_text: "", language, game }], // language locks the CLIP search ("auto" = both)
-        "combined",
-        (result) => {
-          result.candidates?.forEach((c) => {
-            if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
-          });
-        },
-      );
+      const ocrHint: ScanOcrHint = { raw_text: "", language, game };
+
+      // --- Hybrid CLIP path (Phase 4a) ---
+      // If this device supports on-device CLIP, embed locally and send only the
+      // 512-dim vector. Falls back to image upload on any failure.
+      const useHybrid = clipMode() === 'ondevice';
+      let hybridSucceeded = false;
+
+      if (useHybrid) {
+        try {
+          // YOLO detect, then crop to the card bounds before embedding.
+          // embedCardOnDevice applies the art crop (y=12%-52%) relative to whatever
+          // image it receives — passing the full frame causes it to crop the wrong region.
+          const yoloResult = await detectCardsWithYolo(resizedUri, resized.width ?? SCAN_SIZE, resized.height ?? SCAN_SIZE);
+          let cardUri = resizedUri;
+          let cardW = resized.width ?? SCAN_SIZE;
+          let cardH = resized.height ?? SCAN_SIZE;
+
+          if (yoloResult && yoloResult.boxes.length > 0) {
+            const box = yoloResult.boxes[0]; // sorted by confidence
+            const cropped = await ImageManipulator.manipulateAsync(
+              resizedUri,
+              [{ crop: { originX: box.left, originY: box.top, width: box.width, height: box.height } }],
+              { format: ImageManipulator.SaveFormat.JPEG, compress: 0.92 },
+            );
+            cardUri = cropped.uri;
+            cardW = box.width;
+            cardH = box.height;
+          }
+
+          // Embed with on-device CLIP
+          const embedResult = await embedCardOnDevice(cardUri, cardW, cardH);
+
+          if (embedResult && isRunningRef.current) {
+            try {
+              let searchResults;
+              let detectedLang: 'en' | 'ja' = language === 'auto' ? 'en' : language as 'en' | 'ja';
+              if (language === 'auto') {
+                const auto = await vectorSearchAuto(embedResult.embedding);
+                searchResults = auto.results;
+                detectedLang = auto.language;
+                console.log(`[useLiveScan] ondevice auto-lang=${auto.language} top-sim=${auto.results[0]?.sim.toFixed(3) ?? 'none'}`);
+              } else {
+                searchResults = await vectorSearch(embedResult.embedding, language as 'en' | 'ja');
+                console.log(`[useLiveScan] ondevice lang=${language} top-sim=${searchResults[0]?.sim.toFixed(3) ?? 'none'}`);
+              }
+              const candidates = await queryCardsByIds(searchResults);
+              if (candidates.length > 0) {
+                candidates.forEach(c => {
+                  if (!allCandidates.find(x => x.id === c.id)) allCandidates.push(c);
+                });
+                hybridSucceeded = true;
+              } else {
+                // Score below floor (quantization drift) — fall back to server vector call
+                console.log('[useLiveScan] on-device miss — server fallback');
+                await api.scanVector(
+                  Array.from(embedResult.embedding),
+                  detectedLang,
+                  'combined',
+                  ocrHint,
+                  CLIP_MODEL_VERSION,
+                  null,
+                  (result) => {
+                    result.candidates?.forEach(c => {
+                      if (!allCandidates.find(x => x.id === c.id)) allCandidates.push(c);
+                    });
+                  },
+                );
+                hybridSucceeded = true;
+              }
+            } catch (e) {
+              console.warn('[useLiveScan] on-device search failed — falling back:', e);
+            }
+          }
+        } catch (e) {
+          console.warn('[useLiveScan] hybrid embed path failed — falling back:', e);
+        }
+      }
+
+      // --- Server image-upload fallback ---
+      // Used when: on-device CLIP not available, hybrid failed, or version mismatch.
+      if (!hybridSucceeded && isRunningRef.current) {
+        const imageBase64 = await FileSystem.readAsStringAsync(resizedUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await api.scanStream(
+          { image: imageBase64 }, // no boxes — backend YOLO auto-detects
+          [ocrHint],
+          "combined",
+          (result) => {
+            result.candidates?.forEach((c) => {
+              if (!allCandidates.find((x) => x.id === c.id)) allCandidates.push(c);
+            });
+          },
+        );
+      }
 
       if (!isRunningRef.current || allCandidates.length === 0) {
         pendingMatchRef.current = null;

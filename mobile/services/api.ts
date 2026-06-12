@@ -360,4 +360,86 @@ export const api = {
       }));
     });
   },
+
+  /**
+   * Hybrid vector scan — Phase 4a of on-device CLIP migration.
+   *
+   * Phone computed the CLIP embedding; server does the pgvector search only.
+   * Strips the full JPEG round-trip — payload is ~1KB (512 floats) vs ~50KB image.
+   *
+   * Returns the same ScanStreamResult shape as scanStream (single crop_index=0).
+   *
+   * Throws with { code: 'MODEL_VERSION_MISMATCH' } when the server rejects the
+   * model version — caller should fall back to full image upload scanStream.
+   */
+  scanVector(
+    embedding: number[],         // 512-dim L2-normalized from clipEmbedder.ts
+    language: string,            // "en" | "ja" | "auto"
+    scanMode: string,
+    ocrHint: ScanOcrHint | null,
+    modelVersion: string,
+    phash: string | null,
+    onResult: (item: ScanStreamResult) => void,
+    signal?: AbortSignal,
+  ): Promise<{ aborted: boolean }> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE_URL}/scan/vector`);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.timeout = 30000;
+
+      if (signal) {
+        signal.addEventListener("abort", () => xhr.abort());
+      }
+
+      let processedLen = 0;
+      let lineBuffer = "";
+
+      const flush = (text: string) => {
+        const lines = text.split("\n");
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lineBuffer + lines[i];
+          lineBuffer = "";
+          if (!line.trim()) continue;
+          try { onResult(JSON.parse(line) as ScanStreamResult); } catch { /* ignore */ }
+        }
+        lineBuffer = lines[lines.length - 1];
+      };
+
+      xhr.onprogress = () => {
+        const chunk = xhr.responseText.slice(processedLen);
+        processedLen = xhr.responseText.length;
+        if (chunk) flush(chunk);
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 409) {
+          // Server rejected model version — caller falls back to image upload
+          const err = new Error("MODEL_VERSION_MISMATCH") as Error & { code: string };
+          err.code = "MODEL_VERSION_MISMATCH";
+          reject(err);
+          return;
+        }
+        const remaining = xhr.responseText.slice(processedLen);
+        if (remaining) flush(remaining);
+        if (lineBuffer.trim()) {
+          try { onResult(JSON.parse(lineBuffer) as ScanStreamResult); } catch { /* ignore */ }
+        }
+        resolve({ aborted: false });
+      };
+
+      xhr.onerror   = () => reject(new Error("Vector scan request failed"));
+      xhr.ontimeout = () => reject(new Error("Vector scan timed out"));
+      xhr.onabort   = () => resolve({ aborted: true });
+
+      xhr.send(JSON.stringify({
+        embedding,
+        language,
+        scan_mode: scanMode,
+        ocr_hint: ocrHint,
+        model_version: modelVersion,
+        phash,
+      }));
+    });
+  },
 };
