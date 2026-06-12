@@ -17,7 +17,8 @@
  *
  * Thresholds mirror scan.py exactly:
  *   SIM_THRESHOLD = 0.65  (confident match)
- *   SIM_FLOOR     = 0.50  (minimum to return any result)
+ *   SIM_FLOOR     = 0.45  (minimum to return any result; 0.45 catches hard cards
+ *                          like Dewgong whose fp16 NNAPI sims cluster ~0.45-0.49)
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -28,7 +29,7 @@ const INDEX_MAGIC   = 0x49474354; // "TCGI" as little-endian uint32
 const INDEX_VERSION = 1;
 
 export const SIM_THRESHOLD = 0.65;
-export const SIM_FLOOR     = 0.50;
+export const SIM_FLOOR     = 0.45;
 export const TOP_K         = 10;
 
 // ---------------------------------------------------------------------------

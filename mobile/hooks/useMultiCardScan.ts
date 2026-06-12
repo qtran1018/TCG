@@ -430,7 +430,7 @@ export function useMultiCardScan(): UseMultiCardScanReturn {
                 const cropManip = await ImageManipulator.manipulateAsync(
                   resized.uri,
                   [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
-                  { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 },
+                  { format: ImageManipulator.SaveFormat.JPEG, compress: 0.95 },
                 );
                 const embedResult = await embedCardOnDevice(cropManip.uri, cropW, cropH);
                 if (!embedResult) continue;

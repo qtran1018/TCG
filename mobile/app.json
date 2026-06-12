@@ -43,7 +43,7 @@
         "react-native-fast-tflite",
         {
           "enableCoreMLDelegate": true,
-          "enableAndroidGpuDelegate": false
+          "enableAndroidGpuLibraries": true
         }
       ],
       "expo-sqlite",

@@ -37,15 +37,18 @@ const CLIP_MODE_KEY = 'tcg:clipMode'; // 'ondevice' | 'server'
 const CLIP_MODE_VERSION_KEY = 'tcg:clipModeVersion'; // bump to re-probe on app update
 
 // Bump this when a new model is shipped so devices re-run the capability probe.
+// fp16 TFLite uses the same weights as int8 — embedding space is unchanged,
+// so version stays '1' (compatible with server's pgvector index).
 export const CLIP_MODEL_VERSION = '1';
 
 let _model: TfliteModel | null = null;
 let _modelPromise: Promise<TfliteModel | null> | null = null;
 let _modelUri: string | null = null;
 let _cachedClipMode: 'ondevice' | 'server' | null = null;
+let _activeDelegate: string | null = null;
 
-const DELEGATE_PREFERENCE: Array<'core-ml' | 'nnapi' | 'default'> =
-  Platform.OS === 'ios' ? ['core-ml', 'default'] : ['nnapi', 'default'];
+const DELEGATE_PREFERENCE: Array<'core-ml' | 'android-gpu' | 'nnapi' | 'default'> =
+  Platform.OS === 'ios' ? ['core-ml', 'default'] : ['android-gpu', 'nnapi', 'default'];
 
 // ---------------------------------------------------------------------------
 // Model loading
@@ -71,9 +74,11 @@ async function getModel(): Promise<TfliteModel | null> {
 
     for (const delegate of DELEGATE_PREFERENCE) {
       try {
+        const t0 = Date.now();
         const m = await loadTensorflowModel({ url: localUri }, delegate);
-        console.log(`[CLIP] model loaded with delegate=${delegate}`);
+        console.log(`[CLIP] model loaded with delegate=${delegate} in ${Date.now() - t0}ms`);
         _model = m;
+        _activeDelegate = delegate;
         return m;
       } catch (e) {
         console.warn(`[CLIP] delegate=${delegate} failed:`, e);
@@ -124,13 +129,15 @@ export async function probeClipCapability(): Promise<'ondevice' | 'server'> {
   try {
     await model.run([dummyInput]);
     const elapsed = Date.now() - t0;
-    console.log(`[CLIP] probe embed took ${elapsed}ms`);
+    console.log(`[CLIP] probe embed took ${elapsed}ms on delegate=${_activeDelegate ?? 'unknown'}`);
 
-    // Check which delegate actually ran — if it fell through to CPU and is slow, go server
+    // If we fell all the way to CPU ('default') and it's slow, route to server.
     const isCpuFallback = elapsed > CPU_LATENCY_BUDGET_MS;
     const mode: 'ondevice' | 'server' = isCpuFallback ? 'server' : 'ondevice';
     if (isCpuFallback) {
-      console.log(`[CLIP] CPU fallback detected (${elapsed}ms > ${CPU_LATENCY_BUDGET_MS}ms budget) — server mode`);
+      console.log(`[CLIP] slow CPU fallback (${elapsed}ms > ${CPU_LATENCY_BUDGET_MS}ms) — server mode`);
+    } else {
+      console.log(`[CLIP] on-device mode confirmed (${elapsed}ms, delegate=${_activeDelegate ?? 'unknown'})`);
     }
     await _persistMode(mode);
     return mode;
@@ -251,8 +258,10 @@ export async function embedCardOnDevice(
 
     // 3. Run model
     let outputs: ArrayBufferView[];
+    const _t0 = Date.now();
     try {
       outputs = await model.run([input]);
+      console.log(`[CLIP] embed ${Date.now() - _t0}ms delegate=${_activeDelegate ?? 'unknown'}`);
     } catch (runErr) {
       // Stale handle recovery — same pattern as yoloDetector.ts
       console.warn('[CLIP] run failed, resetting and retrying:', runErr);
@@ -295,6 +304,24 @@ export async function embedCardOnDevice(
   } catch (e) {
     console.error('[CLIP] embedCardOnDevice failed:', e);
     return null;
+  }
+}
+
+/**
+ * Fire a dummy inference to re-warm NNAPI's DSP context.
+ * NNAPI releases its compiled DSP cache after idle periods; calling this at
+ * session start prevents the first real embed from paying an ~800ms cold-start
+ * penalty. Safe to fire-and-forget — errors are swallowed.
+ */
+export async function warmUpClip(): Promise<void> {
+  const model = await getModel();
+  if (!model) return;
+  try {
+    const dummy = new Float32Array(CLIP_SIZE * CLIP_SIZE * 3);
+    await model.run([dummy]);
+    console.log('[CLIP] NNAPI warmed up');
+  } catch {
+    // Ignore — warmup failures are non-fatal
   }
 }
 

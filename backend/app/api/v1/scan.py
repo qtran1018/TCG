@@ -25,7 +25,8 @@ from app.services.card_embedder import compute_phash, embed_batch
 router = APIRouter(prefix="/scan", tags=["scan"])
 logger = logging.getLogger(__name__)
 _SIM_THRESHOLD = 0.65
-_SIM_FLOOR = 0.50   # below this, don't show image results at all
+_SIM_FLOOR = 0.45   # below this, don't show image results at all
+                    # 0.45 catches hard cards (e.g. Dewgong) whose fp32 sims cluster 0.40-0.49
 _PHASH_STRONG = 20
 _IMAGE_MIN_SIM_WITH_OCR = 0.83
 _RRF_K = 60

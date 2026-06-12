@@ -8,6 +8,7 @@ import type { Game, Language, ScanType } from "@/constants";
 import {
   clipMode,
   embedCardOnDevice,
+  warmUpClip,
   CLIP_MODEL_VERSION,
 } from "@/utils/clipEmbedder";
 import { vectorSearch, vectorSearchAuto } from "@/utils/vectorSearch";
@@ -17,6 +18,10 @@ import { detectCardsWithYolo } from "@/utils/yoloDetector";
 // "auto" searches both languages and picks the higher CLIP similarity (less
 // reliable for identical-art EN/JA prints); en/ja hard-lock the search.
 export type LiveScanLang = Language | "auto";
+
+// Matches at or above this sim skip the 2-frame confirmation gate —
+// at 0.70+ the match is confident enough that phantom risk is negligible.
+const HIGH_CONF_SIM = 0.70;
 
 export interface LiveSessionCard {
   tempId: string;
@@ -33,8 +38,11 @@ interface UseLiveScanOptions {
   language: LiveScanLang;
 }
 
-// Resize snapshot before upload — 640px is plenty for CLIP (224px input) + OCR
-const SCAN_SIZE = 640;
+// Snapshot working resolution. On-device embedding means we no longer upload the
+// JPEG (only a 512-dim vector), so the old 640px upload-size cap is obsolete.
+// 1280px gives CLIP a much sharper art crop — the 640px crop upscaled to CLIP's
+// 224px input was soft, pushing live-scan sims down to ~0.51-0.54 (near the floor).
+const SCAN_SIZE = 1280;
 // Suppress duplicate adds for the same card within this window
 const RESCAN_COOLDOWN_MS = 30000;
 
@@ -74,10 +82,13 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
       const snapshot = await cameraRef.current.takeSnapshot({ quality: 80 });
       snapshotUri = "file://" + snapshot.path;
 
+      // 0.92 (was 0.85): this base JPEG feeds the on-device CLIP crop and the
+      // server fallback upload. Fewer artifacts here = cleaner embeddings and a
+      // better fallback image, and it preserves the detail the 1280px bump adds.
       const resized = await ImageManipulator.manipulateAsync(
         snapshotUri,
         [{ resize: { width: SCAN_SIZE } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+        { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG },
       );
       resizedUri = resized.uri;
 
@@ -85,6 +96,7 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
 
       const allCandidates: CardOut[] = [];
       const ocrHint: ScanOcrHint = { raw_text: "", language, game };
+      let topSim = 0; // best sim seen this frame — used by adaptive gate
 
       // --- Hybrid CLIP path (Phase 4a) ---
       // If this device supports on-device CLIP, embed locally and send only the
@@ -97,21 +109,39 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
           // YOLO detect, then crop to the card bounds before embedding.
           // embedCardOnDevice applies the art crop (y=12%-52%) relative to whatever
           // image it receives — passing the full frame causes it to crop the wrong region.
-          const yoloResult = await detectCardsWithYolo(resizedUri, resized.width ?? SCAN_SIZE, resized.height ?? SCAN_SIZE);
+          const imgW = resized.width ?? SCAN_SIZE;
+          const imgH = resized.height ?? SCAN_SIZE;
+          const yoloResult = await detectCardsWithYolo(resizedUri, imgW, imgH);
           let cardUri = resizedUri;
-          let cardW = resized.width ?? SCAN_SIZE;
-          let cardH = resized.height ?? SCAN_SIZE;
+          let cardW = imgW;
+          let cardH = imgH;
 
           if (yoloResult && yoloResult.boxes.length > 0) {
             const box = yoloResult.boxes[0]; // sorted by confidence
-            const cropped = await ImageManipulator.manipulateAsync(
-              resizedUri,
-              [{ crop: { originX: box.left, originY: box.top, width: box.width, height: box.height } }],
-              { format: ImageManipulator.SaveFormat.JPEG, compress: 0.92 },
-            );
-            cardUri = cropped.uri;
-            cardW = box.width;
-            cardH = box.height;
+            // Clamp the crop to image bounds. YOLO boxes can extend past the right/
+            // bottom edge (left+width > imgW), which makes ImageManipulator reject
+            // with "Context.renderAsync has been rejected" — that previously bubbled
+            // up and forced a full-image upload. Clamp keeps the crop on-device.
+            const left = Math.max(0, Math.min(box.left, imgW - 1));
+            const top = Math.max(0, Math.min(box.top, imgH - 1));
+            const width = Math.max(1, Math.min(box.width, imgW - left));
+            const height = Math.max(1, Math.min(box.height, imgH - top));
+            try {
+              const cropped = await ImageManipulator.manipulateAsync(
+                resizedUri,
+                [{ crop: { originX: left, originY: top, width, height } }],
+                { format: ImageManipulator.SaveFormat.JPEG, compress: 0.92 },
+              );
+              cardUri = cropped.uri;
+              cardW = width;
+              cardH = height;
+            } catch (cropErr) {
+              // Transient crop failure — skip this frame instead of uploading the
+              // full image. The continuous loop retries on the next snapshot.
+              console.warn('[useLiveScan] YOLO crop failed, skipping frame:', cropErr);
+              pendingMatchRef.current = null;
+              return;
+            }
           }
 
           // Embed with on-device CLIP
@@ -125,10 +155,12 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
                 const auto = await vectorSearchAuto(embedResult.embedding);
                 searchResults = auto.results;
                 detectedLang = auto.language;
-                console.log(`[useLiveScan] ondevice auto-lang=${auto.language} top-sim=${auto.results[0]?.sim.toFixed(3) ?? 'none'}`);
+                topSim = auto.results[0]?.sim ?? 0;
+                console.log(`[useLiveScan] ondevice auto-lang=${auto.language} top-sim=${topSim.toFixed(3)}`);
               } else {
                 searchResults = await vectorSearch(embedResult.embedding, language as 'en' | 'ja');
-                console.log(`[useLiveScan] ondevice lang=${language} top-sim=${searchResults[0]?.sim.toFixed(3) ?? 'none'}`);
+                topSim = searchResults[0]?.sim ?? 0;
+                console.log(`[useLiveScan] ondevice lang=${language} top-sim=${topSim > 0 ? topSim.toFixed(3) : 'none'}`);
               }
               const candidates = await queryCardsByIds(searchResults);
               if (candidates.length > 0) {
@@ -189,13 +221,19 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
       const card = allCandidates[0];
       const cardId = String(card.id);
 
-      // Confirmation gate: a card must be the top match on two consecutive scans
-      // before it's added. Dropping one card to reveal the next produces a
-      // different (or no) match each frame, so transient phantoms never confirm.
-      // A steady card matches consistently and confirms within ~1 extra cycle.
+      // Confirmation gate: a card must match on two consecutive frames before
+      // being added, filtering transient phantoms during card transitions.
+      // Exception: skip the gate for high-confidence matches (topSim >= HIGH_CONF_SIM)
+      // where phantom risk is negligible — saves one full scan cycle (~600ms).
+      const isHighConf = topSim >= HIGH_CONF_SIM;
       if (pendingMatchRef.current !== cardId) {
-        pendingMatchRef.current = cardId;
-        return;
+        if (isHighConf) {
+          console.log(`[useLiveScan] high-conf match sim=${topSim.toFixed(3)} — skipping gate`);
+          // fall through to add immediately
+        } else {
+          pendingMatchRef.current = cardId;
+          return;
+        }
       }
 
       // Skip if we already added this card recently
@@ -247,6 +285,10 @@ export function useLiveScan({ game, scanType, language }: UseLiveScanOptions) {
     if (isRunningRef.current) return;
     isRunningRef.current = true;
     setIsRunning(true);
+    // Re-warm NNAPI's DSP context before the first real scan. NNAPI releases its
+    // compiled DSP cache after idle periods; without this the first embed costs
+    // ~800ms instead of ~250ms. Runs concurrently — loop starts immediately.
+    warmUpClip();
     scheduleLoop();
   }, [scheduleLoop]);
 
