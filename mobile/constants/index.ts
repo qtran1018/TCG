@@ -1,5 +1,5 @@
-// Set EXPO_PUBLIC_API_URL in .env.local to override (e.g. http://10.0.2.2:8000/api/v1 for Android emulator)
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://192.168.1.2:8000/api/v1";
+// Set EXPO_PUBLIC_API_URL in .env.local to override (e.g. http://192.168.1.2:8000/api/v1 for local dev)
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://tcg-api.quangntran.com/api/v1";
 
 export const GAMES = [
   { key: "pokemon", label: "Pokémon" },
