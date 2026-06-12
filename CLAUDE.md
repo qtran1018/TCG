@@ -98,23 +98,34 @@ Instagram-style save flow. Tapping ★ on any card opens a bottom sheet instead 
 
 ---
 
-### Priority 3 — On-device CLIP recognition (scalability)
+### Priority 3 — On-device CLIP recognition ✓ Done (Phase 5)
 
-Move CLIP embedding off the server onto the phone so recognition cost scales with the install base instead of GPU capacity. **Higher priority than the price worker below** — server-side GPU inference is the harder capacity ceiling (~10–20 concurrent live scans on one RTX 3080), and on-device is the only clean fix.
+Fully shipped on `feature/ondevice-clip` branch (PR open, pending merge to master).
 
-**What moves vs. stays:**
-- On-device: YOLO (already done), CLIP embedding, OCR (already done)
-- Stays server-side: pricing (inherently networked), new-set ingestion / index builds
+**What's on-device:** YOLO detection, CLIP embedding (TFLite dynamic-range int8), brute-force vector search over bundled int8 index, SQLite card lookup. Zero network calls for recognition.
+**Stays server-side:** pricing (always networked), new-set ingestion / index builds.
 
-**The index is the easy part:** 47,442 × 512-dim. int8 scalar-quantized ≈ 24MB (vs 97MB fp32) — ships in the bundle. No ANN library needed; brute-force flat dot-product over 47k vectors is single-digit ms with SIMD (NEON/Accelerate). Keep the two per-language arrays, pick by language toggle.
+#### Architecture
 
-**The model is the hard part:** CLIP ViT-B/32 visual encoder ≈ 88M params → int8 ≈ 88MB (dominates app size). ViT → TFLite conversion is nastier than YOLO (LayerNorm/GELU/attention ops; NNAPI falls back to CPU on unsupported ops). iOS Core ML likely smoother than Android NNAPI. Must convert the fine-tuned `clip_finetuned.pt`, not stock CLIP.
+- `mobile/utils/vectorSearch.ts` — brute-force dot-product over `index_en.bin` / `index_ja.bin` (int8, ~24MB total); `SIM_FLOOR=0.50`
+- `mobile/utils/cardsDb.ts` — SQLite wrapper (`expo-sqlite`) over bundled `cards.db`; FTS5 name search for OCR mode; McDonald's penalty
+- `mobile/assets/data/` — `index_en.bin`, `index_ja.bin`, `card_ids_en.bin`, `card_ids_ja.bin`, `cards.db`, `manifest.json` (tracked via Git LFS)
+- `mobile/assets/models/clip_visual.tflite` — CLIP ViT-B/32 dynamic-range int8 (tracked via Git LFS)
+- `mobile/metro.config.js` — `assetExts` includes `'bin'` and `'db'`
+- Per-crop server fallback: when on-device returns 0 results (sim < SIM_FLOOR due to int8 quantization drift), sends 512-dim vector (not image) to `/scan/vector`
 
-**The trap — embedding parity:** the shipped index is computed server-side (fp16/CUDA); the phone computes queries with a converted/quantized model. If they drift, cosine sim silently degrades (no crash, just worse recognition). Mitigations: (a) byte-identical preprocessing (the `y=12%–52%` art crop, resize, normalization) on-device and in `build_embeddings.py`; (b) generate the shipped index with the *converted* model, not the original; (c) a parity harness — run both over a few hundred cards, assert sim drift < ~0.02.
+#### Model versioning
 
-**First step:** build the parity harness (reuses `build_embeddings.py`). It's the gate that tells you whether any on-device CLIP path is viable before investing in the conversion work.
+- `backend/models/versions.json` — source of truth for all 4 model versions (`clip_server`, `yolo_server`, `clip_mobile`, `yolo_mobile`)
+- `backend/app/services/model_versions.py` — `load()` / `get(key)` / `summary()` helpers
+- Versions logged at startup and exposed via `GET /health`
+- When retraining: bump version in `versions.json`; if `clip_mobile` changes also bump `CLIP_MODEL_VERSION` in `mobile/utils/clipEmbedder.ts`
 
-**Hybrid fallback (lower risk):** embed on-device, send the 512-dim vector (1KB, not a 640px JPEG) to the server, which keeps the pgvector search + pricing. Offloads the GPU cost (the real ceiling) while skipping on-device index distribution. Still needs embedding-parity mitigations (b)+(c).
+#### Batch save from scan results
+
+- `mobile/components/UI/BatchSaveSheet.tsx` — multi-card save sheet; saves all on open, toggles collection membership for all cards at once
+- `mobile/app/multi-results.tsx` — "Save (N)" button in batch row for checked cards
+- `mobile/app/batch-prices.tsx` — bookmark icon in header for all session cards
 
 ---
 
@@ -160,6 +171,33 @@ Net: a small working set means viewed cards refresh in hours (not the flat 24h),
 - `backend/` — FastAPI server (Python), scrapes PriceCharting and proxies pokemontcg.io
 - `mobile/` — Expo/React Native app (card scanning UI)
 - `docker-compose.yml` — Local dev environment (backend + postgres + redis + worker)
+- `docker-compose.oci.yml` — Production deployment (OCI Ampere A1, CPU-only, port 8002)
+- `backend/Dockerfile.oci` — CPU-only image (ARM64-compatible torch, no CUDA wheels)
+
+## Production Deployment (OCI)
+
+- **Server**: `ubuntu@158.101.110.211` (OCI free tier, Ampere A1, 4 OCPU, 24GB RAM, no GPU)
+- **Backend URL**: `https://tcg-api.quangntran.com` (nginx → `127.0.0.1:8002`)
+- **Code**: `~/TCG/` — git clone of this repo tracking `master`
+- **Models**: `~/TCG/backend/models/clip_finetuned.pt` + `card_detector.pt` (scp'd, not in git LFS pull path)
+- **Database**: `tcg_postgres` container, volume `pgdata`
+- **Nginx config**: `/etc/nginx/sites-available/tcg-api`
+- **CLIP mode**: CPU fp32 fallback only (`FORCE_CPU_EMBEDDER=1`, `CLIP_MAX_CONCURRENCY=2`) — on-device handles the hot path
+
+### Deploy updates
+```bash
+# On OCI after merging a PR:
+cd ~/TCG && git pull && docker restart tcg_backend
+
+# If requirements.txt or Dockerfile.oci changed:
+cd ~/TCG && git pull && docker compose -f docker-compose.oci.yml up -d --build backend
+```
+
+### Local dev override
+Create `mobile/.env.local` to point the app at your home machine instead of OCI:
+```bash
+EXPO_PUBLIC_API_URL=http://192.168.1.2:8000/api/v1
+```
 
 ## Data Sources
 
